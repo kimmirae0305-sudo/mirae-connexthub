@@ -1,0 +1,243 @@
+Great. Now please upgrade the UI into a fully functional MVP1 system for an Expert Network Service (ENS) called Mirae Connext.
+
+Below are the complete functional requirements.  
+Please build the backend, data models, API routes, state management, and fully connect all UI pages accordingly.
+
+===========================================================
+SYSTEM REQUIREMENTS FOR FULL ENS MVP1 IMPLEMENTATION
+===========================================================
+
+TECH STACK:
+- Frontend: React / TypeScript
+- Backend: Node.js + Express OR Next.js API routes
+- Database: In-memory JSON store for now (later can switch to PostgreSQL)
+- State: React Query or basic fetch + useState
+- Routing: React Router or Next.js pages
+- No authentication needed for now (add simple role flags)
+
+===========================================================
+1) DATA MODELS (Please create these in the backend)
+===========================================================
+
+User (Admin, PM, RA, Finance, Client, Expert)
+- id
+- fullName
+- role
+- email
+
+ProjectRequest
+- id
+- projectOverview
+- clientOrganization
+- clientPOCName
+- clientPOCEmail
+- vettingQuestions: [ { id, questionText } ]
+- status   // New, Sourcing, Pending Client Review, Client Selected, Scheduled, Completed, Cancelled
+- createdByPM
+- assignedRA
+- createdAt
+
+Expert
+- id
+- fullName
+- email
+- linkedInURL
+- country
+- timezone
+- whatsapp
+- shortBio
+- areasOfExpertise: []
+- currentCompany
+- title
+- hourlyRate
+- recruitedBy        // PM/RA name (auto-filled from link)
+- termsAccepted
+- lgpdAccepted
+- consultationHistory: []   // each item = call record
+- billingInfo
+
+ClientOrganization
+- id
+- name
+- industry
+- billingAddress
+- mainPM
+- totalCUUsed
+- projectHistory: [] // list of related ProjectRequests
+- pocs: []           // each POC has name, email, phone, jobTitle
+
+ProjectExpert (Assignment record)
+- id
+- projectId
+- expertId
+- status  // Invited, Accepted, Declined, Client Selected, Scheduled, Completed
+- vqAnswers: []   // expert’s answers on Accept
+- availabilityNote
+
+CallRecord
+- id
+- projectId
+- expertId
+- durationMinutes
+- status       // Pending, Scheduled, Completed, Cancelled
+- cuUsed
+
+===========================================================
+2) CORE FEATURES TO IMPLEMENT
+===========================================================
+
+(1) PROJECT REQUEST MANAGEMENT
+- PM manually creates new ProjectRequest
+- Assign PM as owner
+- Assign RA assisting (optional)
+- Include overview, client info, POC, and vetting questions
+- Status flow:
+  New → Sourcing → Pending Client Review → Client Selected → Scheduled → Completed / Cancelled
+
+(2) EXPERT SEARCH & ASSIGNMENT
+Frontend:
+- Add “Search Experts” button on Project Request page
+- Show expert list (existing experts)
+- Allow PM/RA to attach experts to the project (ProjectExpert record)
+
+Backend:
+- API to filter/search experts by keywords
+
+(3) EXPERT RECRUITMENT VIA LINK
+- When PM clicks “Generate Expert Invitation Link”, create a unique link like:
+/register-expert?projectId=123&recruitedBy=Mirae
+- Auto-fill “recruitedBy” on submission
+
+Expert Registration Form must include:
+- fullName
+- email
+- linkedInURL
+- country
+- timezone (dropdown)
+- whatsapp
+- shortBio
+- areasOfExpertise (multi-select)
+- currentCompany
+- title
+- hourlyRate
+- recruitedBy (hidden auto-filled)
+- termsAccepted (checkbox)
+- lgpdAccepted (checkbox)
+
+(4) EXPERT INVITATION & ACCEPT / DECLINE FLOW
+- On Project page, show list of assigned experts with checkboxes
+- Add “Send Invitation” button
+- Invitation page: Expert sees project overview + questions
+- Buttons: Accept / Decline
+- If Decline → update ProjectExpert status = Declined
+- If Accept → expert writes VQ answers → status = Accepted
+
+(5) CLIENT SHORTLIST SENDING
+- PM selects accepted experts
+- Click “Send Shortlist to Client”
+- Generate a formatted list including:
+  - Name
+  - Work history
+  - VQ answers
+  - Availability
+  - Timezone
+
+(6) CONSULTATION SCHEDULING & STATUS
+- When Client selects expert → update status = Client Selected
+- PM schedules meeting time manually (fields: date, startTime, endTime, Zoom link)
+- Update status = Scheduled
+- After meeting → status = Completed or Cancelled/No-show
+
+(7) CONSULTATION RECORDING (BASIC PLACEHOLDER)
+- Add field for uploaded recording URL (string only for now)
+
+(8) CU (CREDIT UNIT) CALCULATION LOGIC
+Implement the following:
+- 1 CU = 60 minutes
+- Charge in 0.25 CU increments
+- If call > 52 minutes → charge 1 CU minimum
+- CU = ROUND(durationMinutes / 60, 2)
+- Save CU in CallRecord + add to ProjectRequest
+
+Also create:
+- CU summary on Project page:
+  totalMinutes
+  totalCUUsed
+  CU remaining (later can add purchasedCU field)
+
+(9) EXPERT DETAIL PAGE
+Add full detail page with:
+- All contact info
+- Bio + work history
+- Recruited By (KPI)
+- Consultation history
+- Hourly rate
+- Billing info
+
+(10) CLIENT ORGANIZATION DETAIL PAGE
+Must include:
+- Organization info
+- Assigned MAIN PM
+- Total CU used
+- Full project history with CU per project
+- List of POCs
+  - Each POC has own detail and activity history
+
+===========================================================
+3) API IMPLEMENTATION
+===========================================================
+
+Please implement:
+- REST API routes for CRUD of:
+  ProjectRequests
+  Experts
+  VettingQuestions
+  ProjectExperts
+  CallRecords
+  ClientOrganizations
+
+- Endpoints for:
+  - Generating expert invitation link
+  - Accept / Decline expert
+  - Submit VQ answers
+  - Schedule consultation
+  - Complete consultation
+  - Record CU usage
+
+===========================================================
+4) CONNECT FRONTEND TO BACKEND
+===========================================================
+
+For each UI page, connect to the new backend APIs:
+- Fetch lists
+- Create/update/delete records
+- Update statuses
+- Show CU usage
+- Pull expert details
+- Pull project details
+- Pull client details
+
+===========================================================
+5) SEED DATA
+===========================================================
+Please insert realistic seed data for:
+- 3 experts
+- 2 clients
+- 3 POCs
+- 3 project requests
+- CU history
+- Expert assignments
+
+===========================================================
+6) FINAL OUTPUT
+===========================================================
+Once implemented:
+- Explain how to run frontend + backend locally
+- Describe folder structure
+- Summarize all API endpoints
+- Confirm that all UI pages are fully connected
+
+===========================================================
+
+Thank you. 
+Please begin implementing all of the above step-by-step.
