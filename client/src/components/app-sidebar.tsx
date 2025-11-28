@@ -6,6 +6,7 @@ import {
   FileQuestion,
   UserPlus,
   BarChart3,
+  TrendingUp,
 } from "lucide-react";
 import {
   Sidebar,
@@ -53,6 +54,11 @@ const managementItems = [
     title: "Usage Tracker",
     url: "/usage",
     icon: BarChart3,
+  },
+  {
+    title: "Analytics",
+    url: "/analytics",
+    icon: TrendingUp,
   },
 ];
 

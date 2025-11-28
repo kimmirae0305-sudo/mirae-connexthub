@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Search, Users, Mail, Phone, Briefcase, DollarSign } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Users, Mail, Phone, Briefcase, DollarSign, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +43,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { StatusBadge } from "@/components/status-badge";
@@ -85,6 +86,8 @@ const statuses = ["available", "busy", "inactive"];
 export default function Experts() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string[]>(["available", "busy", "inactive"]);
+  const [rateRange, setRateRange] = useState<[number, number]>([0, 500]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingExpert, setEditingExpert] = useState<Expert | null>(null);
   const [deletingExpert, setDeletingExpert] = useState<Expert | null>(null);
@@ -152,12 +155,34 @@ export default function Experts() {
     },
   });
 
-  const filteredExperts = experts?.filter(
-    (expert) =>
+  const filteredExperts = experts?.filter((expert) => {
+    // Search filter
+    const searchMatch =
       expert.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       expert.expertise.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      expert.industry.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+      expert.industry.toLowerCase().includes(searchQuery.toLowerCase());
+
+    // Status filter
+    const statusMatch = statusFilter.includes(expert.status);
+
+    // Rate range filter
+    const rate = Number(expert.hourlyRate);
+    const rateMatch = rate >= rateRange[0] && rate <= rateRange[1];
+
+    return searchMatch && statusMatch && rateMatch;
+  });
+
+  const hasActiveFilters =
+    statusFilter.length < statuses.length ||
+    rateRange[0] > 0 ||
+    rateRange[1] < 500 ||
+    searchQuery.length > 0;
+
+  const resetFilters = () => {
+    setSearchQuery("");
+    setStatusFilter(["available", "busy", "inactive"]);
+    setRateRange([0, 500]);
+  };
 
   const handleOpenDialog = (expert?: Expert) => {
     if (expert) {
@@ -223,15 +248,77 @@ export default function Experts() {
         </Button>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search by name, expertise, or industry..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-9 sm:max-w-md"
-          data-testid="input-search-experts"
-        />
+      <div className="space-y-4">
+        <div className="flex flex-col gap-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search by name, expertise, or industry..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 sm:max-w-md"
+              data-testid="input-search-experts"
+            />
+          </div>
+
+          <div className="flex flex-col gap-4 rounded-lg border border-border bg-card/50 p-4 sm:gap-6">
+            <div>
+              <h3 className="mb-3 text-sm font-medium text-foreground">Availability Status</h3>
+              <div className="flex flex-wrap gap-2">
+                {statuses.map((status) => (
+                  <Button
+                    key={status}
+                    variant={statusFilter.includes(status) ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      setStatusFilter((prev) =>
+                        prev.includes(status)
+                          ? prev.filter((s) => s !== status)
+                          : [...prev, status]
+                      );
+                    }}
+                    data-testid={`button-filter-status-${status}`}
+                  >
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-medium text-foreground">Hourly Rate Range</h3>
+                <span className="text-sm text-muted-foreground font-mono">
+                  ${rateRange[0]} - ${rateRange[1]}
+                </span>
+              </div>
+              <Slider
+                value={rateRange}
+                onValueChange={(value) =>
+                  setRateRange([value[0], value[1]])
+                }
+                min={0}
+                max={500}
+                step={10}
+                className="w-full"
+                data-testid="slider-rate-range"
+              />
+            </div>
+
+            {hasActiveFilters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetFilters}
+                className="w-full justify-center gap-2"
+                data-testid="button-reset-filters"
+              >
+                <X className="h-4 w-4" />
+                Reset Filters
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
 
       {isLoading ? (

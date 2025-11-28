@@ -12,6 +12,7 @@ import Experts from "@/pages/experts";
 import Vetting from "@/pages/vetting";
 import Assignments from "@/pages/assignments";
 import Usage from "@/pages/usage";
+import Analytics from "@/pages/analytics";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -23,6 +24,7 @@ function Router() {
       <Route path="/vetting" component={Vetting} />
       <Route path="/assignments" component={Assignments} />
       <Route path="/usage" component={Usage} />
+      <Route path="/analytics" component={Analytics} />
       <Route component={NotFound} />
     </Switch>
   );
