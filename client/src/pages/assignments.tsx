@@ -118,9 +118,11 @@ export default function Assignments() {
   });
 
   const createInviteLinkMutation = useMutation({
-    mutationFn: (data: { projectId?: number; recruitedBy: string }) =>
-      apiRequest("POST", "/api/invitation-links", data),
-    onSuccess: (data: ExpertInvitationLink) => {
+    mutationFn: async (data: { projectId?: number; recruitedBy: string }) => {
+      const res = await apiRequest("POST", "/api/invitation-links", data);
+      return res.json() as Promise<ExpertInvitationLink>;
+    },
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/invitation-links"] });
       const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
       setNewInviteLink(`${baseUrl}/register/${data.token}`);
