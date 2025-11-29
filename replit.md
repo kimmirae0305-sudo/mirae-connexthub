@@ -34,6 +34,8 @@ PostgreSQL (Neon serverless) is used as the database, managed with Drizzle ORM f
 - **In-Project Expert Registration**: RAs can register new experts directly from the RA Sourcing tab via the "Register Expert" modal with full profile form, multi-language support, and unique token generation.
 - **RA Scoped Views**: RAs have restricted views, seeing only projects and consultations they are assigned to, with limited UI actions and financial data visibility.
 - **Unique Invite Tokens & History**: Each invitation generates a new unique token for better tracking. A centralized `/invites` page allows Admin, PM, and RA roles to view and manage invitation links with filtering and statistics.
+- **RA Incentive Tracking**: Comprehensive RA recruitment incentive system tracking experts sourced by RAs. Includes `sourcedByRaId` and `sourcedAt` timestamps on experts, incentive calculation (R$250 per completed call within 60 days of recruitment), and dedicated RA Performance dashboard (`/ra-performance`) accessible to Admin, PM, and Finance roles.
+- **Recruiter Info Display**: Experts list shows "Recruited By" and "Recruited At" columns. Expert profile modal displays recruitment details section when applicable.
 
 ## External Dependencies
 
