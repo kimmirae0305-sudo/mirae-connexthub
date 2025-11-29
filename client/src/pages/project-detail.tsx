@@ -335,7 +335,7 @@ export default function ProjectDetail() {
 
   const attachExpertMutation = useMutation({
     mutationFn: async (expertId: number) => {
-      const res = await apiRequest("POST", `/api/projects/${projectId}/attach-experts`, {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/experts/bulk`, {
         expertIds: [expertId],
       });
       return res.json();
