@@ -297,24 +297,6 @@ export default function ProjectDetail() {
     },
   });
 
-  const generateRaInviteLinkMutation = useMutation({
-    mutationFn: async ({ raId }: { raId: number }) => {
-      const res = await apiRequest("POST", `/api/projects/${projectId}/ra-invite-link`, { raId });
-      return res.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
-      const fullUrl = `${window.location.origin}${data.inviteUrl}`;
-      navigator.clipboard.writeText(fullUrl);
-      setCopiedLink(data.inviteUrl);
-      toast({ title: "RA invite link copied to clipboard" });
-      setTimeout(() => setCopiedLink(null), 3000);
-    },
-    onError: () => {
-      toast({ title: "Failed to generate RA invite link", variant: "destructive" });
-    },
-  });
-
   const addActivityMutation = useMutation({
     mutationFn: async (description: string) => {
       const res = await apiRequest("POST", `/api/projects/${projectId}/activities`, {
@@ -1514,16 +1496,6 @@ export default function ProjectDetail() {
                           <p className="text-xs text-muted-foreground">{ra.email}</p>
                         </div>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => generateRaInviteLinkMutation.mutate({ raId: ra.id })}
-                        disabled={generateRaInviteLinkMutation.isPending}
-                        data-testid={`button-ra-invite-${ra.id}`}
-                      >
-                        <Link2 className="h-4 w-4 mr-2" />
-                        Copy Invite Link
-                      </Button>
                     </div>
                   ))}
                 </div>
