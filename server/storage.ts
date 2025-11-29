@@ -404,7 +404,7 @@ export class DatabaseStorage implements IStorage {
         or(
           ilike(experts.name, searchPattern),
           ilike(experts.expertise, searchPattern),
-          ilike(experts.areasOfExpertise, searchPattern),
+          sql`array_to_string(${experts.areasOfExpertise}, ',') ILIKE ${searchPattern}`,
           ilike(experts.industry, searchPattern),
           ilike(experts.company, searchPattern),
           ilike(experts.jobTitle, searchPattern),

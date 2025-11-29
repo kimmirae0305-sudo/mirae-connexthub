@@ -192,7 +192,7 @@ export default function ProjectDetail() {
       if (searchLanguage) params.append("language", searchLanguage);
       if (searchHasPriorProjects) params.append("hasPriorProjects", "true");
       if (searchMinAcceptanceRate) params.append("minAcceptanceRate", searchMinAcceptanceRate);
-      if (projectId) params.append("excludeProjectId", projectId);
+      if (projectId) params.append("excludeProjectId", String(projectId));
       const res = await fetch(`/api/experts/search?${params}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
