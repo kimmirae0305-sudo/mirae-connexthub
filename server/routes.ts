@@ -19,6 +19,7 @@ import {
   callRecords,
   experts,
   projects,
+  expertInvitationLinks,
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
@@ -913,6 +914,151 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error registering expert:", error);
       res.status(500).json({ error: "Failed to register expert" });
+    }
+  });
+
+  // PUBLIC: Fetch quick invite onboarding data by token
+  app.get("/api/quick-invite/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      if (!link || link.status !== "pending_onboarding" || !link.isActive) {
+        return res.status(404).json({ error: "Invalid or expired invite link" });
+      }
+
+      if (!link.projectId) {
+        return res.status(400).json({ error: "Project not found" });
+      }
+
+      const project = await storage.getProject(link.projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const vettingQuestions = await storage.getVettingQuestionsByProject(link.projectId);
+
+      res.json({
+        project: {
+          id: project.id,
+          name: project.name,
+          clientName: project.clientName,
+          industry: project.industry,
+          projectOverview: project.projectOverview,
+        },
+        vettingQuestions: vettingQuestions.map((q) => ({
+          id: q.id,
+          question: q.question,
+          isRequired: q.isRequired,
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching quick invite data:", error);
+      res.status(500).json({ error: "Failed to fetch invite data" });
+    }
+  });
+
+  // PUBLIC: Submit quick invite onboarding form
+  app.post("/api/quick-invite/:token/submit", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const { firstName, lastName, email, phone, sampleAnswers } = req.body;
+
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      if (!link || link.status !== "pending_onboarding" || !link.isActive) {
+        return res.status(404).json({ error: "Invalid or expired invite link" });
+      }
+
+      if (!link.projectId) {
+        return res.status(400).json({ error: "Project not found" });
+      }
+
+      // Check if expert with email already exists
+      let expert = await storage.getExpertByEmail(email);
+      
+      if (!expert) {
+        // Create new expert
+        const project = await storage.getProject(link.projectId);
+        expert = await storage.createExpert({
+          name: `${firstName} ${lastName}`.trim(),
+          email,
+          phone: phone || null,
+          expertise: "Professional",
+          industry: project?.industry || "General",
+          yearsOfExperience: 0,
+          hourlyRate: "0",
+          status: "available",
+          sourcedByRaId: link.raId || undefined,
+          sourcedAt: new Date(),
+        });
+      }
+
+      // Create or get project expert association with "interested" status
+      const existingProjectExperts = await db.select()
+        .from(projectExperts)
+        .where(
+          and(
+            eq(projectExperts.projectId, link.projectId!),
+            eq(projectExperts.expertId, expert.id)
+          )
+        )
+        .limit(1);
+      
+      let projectExpert = existingProjectExperts[0];
+
+      if (!projectExpert) {
+        projectExpert = await storage.createProjectExpert({
+          projectId: link.projectId,
+          expertId: expert.id,
+          status: "interested",
+          sourceType: "quick_invite",
+          sourcedByRaId: link.raId,
+          pipelineStatus: "interested",
+        });
+      } else {
+        // Update status to interested
+        await storage.updateProjectExpert(projectExpert.id, {
+          status: "interested",
+          pipelineStatus: "interested",
+        });
+      }
+
+      // Store sample answers if provided
+      if (sampleAnswers && Array.isArray(sampleAnswers)) {
+        for (const answer of sampleAnswers) {
+          if (answer.answer && answer.answer.trim()) {
+            // Store as vetting answer - you may need to extend the schema for this
+            await storage.createProjectActivity({
+              projectId: link.projectId,
+              expertId: expert.id,
+              activityType: "vq_answered",
+              description: `Expert provided answer to vetting question ${answer.questionId}`,
+            });
+          }
+        }
+      }
+
+      // Update invitation link status
+      await db.update(expertInvitationLinks)
+        .set({ status: "accepted" })
+        .where(eq(expertInvitationLinks.token, token));
+
+      // Log activity
+      await storage.createProjectActivity({
+        projectId: link.projectId,
+        expertId: expert.id,
+        activityType: "expert_onboarded",
+        description: `Expert ${expert.name} onboarded via quick invite link`,
+      });
+
+      res.json({
+        success: true,
+        expertId: expert.id,
+        message: "You have been successfully added to the project",
+      });
+    } catch (error) {
+      console.error("Error submitting quick invite:", error);
+      res.status(500).json({ error: "Failed to submit onboarding" });
     }
   });
 
