@@ -18,6 +18,7 @@ import Assignments from "@/pages/assignments";
 import Consultations from "@/pages/consultations";
 import Usage from "@/pages/usage";
 import Analytics from "@/pages/analytics";
+import Employees from "@/pages/employees";
 import ExpertRegister from "@/pages/expert-register";
 import ExpertInvite from "@/pages/expert-invite";
 import NotFound from "@/pages/not-found";
@@ -89,6 +90,9 @@ function Router() {
       </Route>
       <Route path="/analytics">
         <MainLayout><Analytics /></MainLayout>
+      </Route>
+      <Route path="/employees">
+        <MainLayout><Employees /></MainLayout>
       </Route>
       <Route>
         <MainLayout><NotFound /></MainLayout>
