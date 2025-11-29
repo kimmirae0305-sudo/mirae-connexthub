@@ -59,6 +59,10 @@ export interface TranslationStrings {
   biographyPlaceholder: string;
   biographyDescription: string;
   
+  workHistoryTitle: string;
+  workHistoryPlaceholder: string;
+  workHistoryDescription: string;
+  
   hourlyRateTitle: string;
   hourlyRate: string;
   hourlyRatePlaceholder: string;
@@ -151,6 +155,10 @@ export const translations: Record<Language, TranslationStrings> = {
     biographyPlaceholder: "Descreva sua experiência profissional, conquistas e áreas de especialização...",
     biographyDescription: "Uma breve descrição do seu perfil profissional.",
     
+    workHistoryTitle: "Histórico de Trabalho",
+    workHistoryPlaceholder: "Descreva seu histórico profissional, principais projetos, responsabilidades e conquistas...",
+    workHistoryDescription: "Um resumo detalhado do seu histórico de trabalho e experiências relevantes.",
+    
     hourlyRateTitle: "Taxa por Hora",
     hourlyRate: "Valor por Hora",
     hourlyRatePlaceholder: "Ex: 250",
@@ -241,6 +249,10 @@ export const translations: Record<Language, TranslationStrings> = {
     biographyPlaceholder: "Describa su experiencia profesional, logros y áreas de especialización...",
     biographyDescription: "Una breve descripción de su perfil profesional.",
     
+    workHistoryTitle: "Historial Laboral",
+    workHistoryPlaceholder: "Describa su historial laboral, proyectos principales, responsabilidades y logros...",
+    workHistoryDescription: "Un resumen detallado de su historial laboral y experiencias relevantes.",
+    
     hourlyRateTitle: "Tarifa por Hora",
     hourlyRate: "Valor por Hora",
     hourlyRatePlaceholder: "Ej: 250",
@@ -330,6 +342,10 @@ export const translations: Record<Language, TranslationStrings> = {
     biographyTitle: "Biography",
     biographyPlaceholder: "Describe your professional background, achievements, and areas of expertise...",
     biographyDescription: "A brief description of your professional profile.",
+    
+    workHistoryTitle: "Work History",
+    workHistoryPlaceholder: "Describe your work history, key projects, responsibilities, and achievements...",
+    workHistoryDescription: "A detailed summary of your work history and relevant experiences.",
     
     hourlyRateTitle: "Hourly Rate",
     hourlyRate: "Hourly Rate",

@@ -109,6 +109,7 @@ const createFormSchema = (t: typeof translations.en) =>
     timezone: z.string().min(1, t.required),
     experiences: z.array(experienceSchema).min(1, t.required),
     biography: z.string().min(50, t.required),
+    workHistory: z.string().min(50, t.required),
     hourlyRate: z.string().min(1, t.required),
     currency: z.string().min(1, t.required),
     termsAccepted: z.boolean().refine((v) => v === true, t.termsRequired),
@@ -173,6 +174,7 @@ export default function ExpertOnboarding({ projectId, inviteType, token }: Exper
         },
       ],
       biography: "",
+      workHistory: "",
       hourlyRate: "",
       currency: "USD",
       termsAccepted: false,
@@ -821,6 +823,35 @@ export default function ExpertOnboarding({ projectId, inviteType, token }: Exper
                         />
                       </FormControl>
                       <FormDescription>{t.biographyDescription}</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Briefcase className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-lg">{t.workHistoryTitle}</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <FormField
+                  control={form.control}
+                  name="workHistory"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Textarea
+                          placeholder={t.workHistoryPlaceholder}
+                          className="min-h-[150px] resize-none"
+                          {...field}
+                          data-testid="input-work-history"
+                        />
+                      </FormControl>
+                      <FormDescription>{t.workHistoryDescription}</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
