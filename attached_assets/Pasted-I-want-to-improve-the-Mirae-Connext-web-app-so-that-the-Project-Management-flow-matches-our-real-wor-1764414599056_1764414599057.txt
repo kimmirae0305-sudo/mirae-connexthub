@@ -1,0 +1,280 @@
+I want to improve the Mirae Connext web app so that the Project Management flow matches our real-world ENS workflow.
+
+Context:
+- The app already has:
+  - Authentication with roles (admin, pm, ra, finance)
+  - Modules: Dashboard, Projects, Experts, Insight Hub (Vetting Questions), Employees, CU/Usage, etc.
+- Please DO NOT change the auth system or the basic navigation structure.
+- Instead, focus on upgrading the Project Management layer to match this workflow:
+
+Real-world workflow:
+
+1) The client sends an expert request by email.
+2) I reply to confirm we received the request and will start sourcing.
+3) In Mirae Connext Hub, I create a new Project and:
+   - Search the internal expert database.
+   - Attach suitable existing experts to the project.
+   - Invite those experts to review the Project overview + Vetting Questions and confirm if they can participate (Accept/Decline) via a unique project invite link.
+4) At the same time, I assign one or more RAs to support the project with new expert sourcing.
+5) Each RA sources new experts externally and sends them their own project-specific RA invite link:
+   - Step 1: the expert fills out the onboarding form (profile, experience, contact, T&C, etc.).
+   - Step 2: the expert sees the Project overview + Vetting Questions and can Accept/Decline participation for that specific project.
+
+I want the app to support this end-to-end.
+
+--------------------------------------------------
+1) PROJECT MODEL ENHANCEMENTS
+--------------------------------------------------
+
+Please enhance the Project model and Project Detail page to support this:
+
+Project core fields (if not present yet, add them):
+- clientName
+- clientCompany (optional)
+- clientEmail (optional, for reference)
+- projectTitle
+- projectDescription / clientBrief
+- status (e.g. "New", "Sourcing", "Shortlisted", "Confirmed", "Completed")
+- pmId (assigned Project Manager)
+- assignedRaIds (array of RA user IDs)
+- createdAt, updatedAt
+
+Also add a text field for:
+- clientRequestNotes: free-text notes summarizing the original email request and constraints.
+
+These fields should be visible and editable in the Project Detail page for Admin/PM.
+
+--------------------------------------------------
+2) PROJECT DETAIL LAYOUT (NEW STRUCTURE)
+--------------------------------------------------
+
+Redesign the Project Detail page to follow this structure:
+
+Header:
+- Project title
+- Client name / company
+- Status badge
+- Assigned PM
+- Assigned RAs (list of names or tags)
+
+Tabs or sections (can be tabs or stacked sections):
+
+1) Overview
+   - Client brief (projectDescription / clientBrief)
+   - ClientRequestNotes
+   - Basic meta info (industry, region, due date if available)
+
+2) Existing Experts (internal DB experts)
+   - A table of experts attached from the existing database
+   - Columns:
+     - Expert Name
+     - Profile tags (industry, seniority, region)
+     - SourceType: "Internal DB"
+     - InvitationStatus: "Not invited / Invited / Opened / Accepted / Declined"
+     - LastUpdated
+   - Actions for each expert:
+     - “Open Profile”
+     - “Send Project Invite”
+     - “Copy Project Invite Link”
+
+3) RA Sourcing & New Experts
+   - Show assigned RAs for this project and their RA-specific invite links.
+   - Show a table of new experts who came through these RA invite links:
+     - Expert Name
+     - SourcedBy RA (name)
+     - SourceType: "RA External"
+     - InvitationStatus (same as above)
+     - Status: "Interested / Accepted / Declined"
+     - Actions: “Attach to Project (as shortlisted)”, “Open Profile”
+
+4) Activity / Notes (optional)
+   - Later we can log interactions, but this can be a simple placeholder for now.
+
+--------------------------------------------------
+3) EXISTING EXPERT INVITE LINKS (PROJECT PARTICIPATION)
+--------------------------------------------------
+
+For experts already in the internal database and attached to the project:
+
+- I need a project-specific invite link for each (project, expert) pair.
+
+Backend:
+- Create a table or mechanism like ProjectExpertLink:
+  - projectId
+  - expertId
+  - token
+  - inviteType: "existing"
+  - invitationStatus: "NotInvited", "Invited", "Opened", "Accepted", "Declined"
+  - lastUpdatedAt
+
+- Create an endpoint:
+  - POST /api/projects/:projectId/experts/:expertId/invite-link
+  - Behavior:
+    - If a token already exists for that (project, expert) and is active, return the existing link.
+    - If not, generate a new random token, store it, and return the invite URL.
+
+URL format (example):
+  /expert/project-invite/:token
+
+Public route /expert/project-invite/:token:
+- Validate token, load project and expert.
+- Show:
+  - Project overview
+  - Vetting Questions for this project
+- Allow the expert to:
+  - ✅ Accept
+  - ❌ Decline
+- After they click Accept or Decline:
+  - Update ProjectExpertLink.invitationStatus accordingly.
+  - Record accept/decline timestamp.
+
+On the Project Detail → Existing Experts table:
+- Show the invitationStatus and lastUpdatedAt using this data.
+
+Also add a “Send Project Invite” button that:
+- Option A: just copies the invite link so we can paste it in email/WhatsApp.
+- Option B: later we can integrate email sending, but for now copy/link is enough.
+
+--------------------------------------------------
+4) RA ASSIGNMENT TO PROJECTS
+--------------------------------------------------
+
+On the Project Detail page:
+
+- Add a section “Assigned RAs”.
+- Allow Admin/PM to select one or more RAs (from Employees with role = "ra") and assign them to the project.
+- Save assignedRaIds in the Project.
+
+UI:
+- A multi-select or checkboxes for RAs.
+- After selection, show them as tags or list items.
+
+This assignment is the basis for RA-specific invite links and RA workload.
+
+--------------------------------------------------
+5) RA-SPECIFIC PROJECT INVITE LINKS (NEW EXPERT SOURCING)
+--------------------------------------------------
+
+For each (project, RA) pair, we need a unique RA invite link that RA can send to new external experts.
+
+Data model:
+- A ProjectInvite table (or similar) with fields:
+  - id
+  - projectId
+  - raId (nullable)
+  - type: "ra" | "general"
+  - token
+  - isActive (boolean)
+  - createdAt, updatedAt
+
+Generation logic:
+- When a RA is assigned to a project OR when we click “Generate RA Invite Link”:
+  - Look up an active ProjectInvite with { projectId, raId, type="ra" }.
+  - If one exists, reuse it.
+  - If not, create a new token and ProjectInvite record.
+
+URL format example:
+  /invite/ra/:token
+
+On the Project Detail page under “RA Sourcing”:
+- For each assigned RA, show:
+  - RA name
+  - Their RA-specific project invite link
+  - A “Copy Link” button so the RA can share it with potential experts.
+
+--------------------------------------------------
+6) RA INVITE FLOW – 2-STEP ONBOARDING
+--------------------------------------------------
+
+For /invite/ra/:token route:
+
+1) Backend:
+   - Validate token and isActive.
+   - Fetch ProjectInvite, get projectId and raId.
+   - Load project data and vetting questions.
+
+2) Frontend:
+   Step 1 – Expert Onboarding Form:
+   - All existing onboarding fields (name, email, LinkedIn, experience, hourly rate, etc.).
+   - T&C + Privacy + anti-bypass + data retention clauses (already discussed).
+   - On submit:
+     - Create new Expert record.
+     - Mark expert.sourcedByRaId = raId.
+     - Create a link between expert and project (e.g. ExpertProject or ProjectExpertAssignment) with:
+       - projectId
+       - expertId
+       - sourceType: "RA"
+       - raId
+       - status: "Interested"
+   Step 2 – Project overview + VQs:
+   - Show the project title, overview, and vetting questions.
+   - Let the expert review and click:
+     - ✅ Accept
+     - ❌ Decline
+   - Save their decision and move their status:
+     - Accepted → status = "Accepted"
+     - Declined → status = "Declined"
+   - Save vetting question sample answers.
+
+On Project Detail → RA Sourcing table:
+- Show these experts with their status and which RA sourced them.
+
+--------------------------------------------------
+7) EXPERT STATUS & PIPELINE VIEW
+--------------------------------------------------
+
+For each expert attached or sourced to a project, maintain:
+
+- invitationStatus: "NotInvited", "Invited", "Opened", "Accepted", "Declined"
+- pipelineStatus: "Interested", "Shortlisted", "Accepted", "Declined", "Completed"
+- sourceType: "InternalDB" | "RA"
+- raId (if sourced by RA)
+
+On the Project Detail page:
+
+- Combine Existing Experts + RA Sourced Experts into a clear pipeline-like view.
+- Example columns for the unified table:
+  - Expert Name
+  - Source (DB / RA + RA name)
+  - InvitationStatus
+  - PipelineStatus
+  - Last activity
+  - Actions:
+    - Open profile
+    - Change pipeline status (e.g. move to Shortlisted/Confirmed)
+    - Attach to Call / Consultation (future step)
+
+This will make Project Management much more intuitive and closer to real ENS operations.
+
+--------------------------------------------------
+8) ROLE-BASED ACCESS
+--------------------------------------------------
+
+- Admin:
+  - Full access to all projects, assignments, and invite links.
+- PM:
+  - Full access to projects they own (pmId).
+  - Can assign RAs, generate expert invites, view all expert responses for their projects.
+- RA:
+  - Should be able to see:
+    - Projects they are assigned to.
+    - Their own RA invite link per project.
+    - Experts they sourced for those projects (read-only or limited actions).
+- Client / Finance:
+  - No change required at this stage.
+
+--------------------------------------------------
+9) DOCUMENTATION
+--------------------------------------------------
+
+After implementing, please:
+
+- Document:
+  - How project-expert links are stored and how invitationStatus/pipelineStatus are updated.
+  - How project+expert invite links and project+RA invite links are generated and reused.
+  - Where in the code the Project Detail layout is defined and how to adjust it later.
+- Confirm:
+  - That this new flow supports:
+    - Attaching existing experts and inviting them with Accept/Decline.
+    - Assigning RAs and giving them project-specific RA invite links.
+    - Sourcing new experts via RA links with proper tracking for RA and PM KPIs.
