@@ -1,0 +1,154 @@
+I want to extend the Employees module so that when I click on an employee’s name, I can see their personal information, individual KPIs, and the accounts (clients) they are responsible for.
+
+Please implement the following:
+
+-------------------------------------------------
+1) BACKEND – EMPLOYEE OVERVIEW ENDPOINT
+-------------------------------------------------
+
+Create a new endpoint:
+
+GET /api/employees/:id/overview
+
+Requirements:
+
+- Only users with role = "admin" (and optionally "finance") can access this endpoint.
+- Use the existing authentication middleware to enforce this.
+
+The endpoint should:
+
+1. Load the employee basic info:
+   - id
+   - fullName
+   - email
+   - role
+   - status
+   - createdAt / joinedAt (if available)
+
+2. Compute monthly KPIs for this employee (current month, timezone "America/Sao_Paulo"):
+
+   If role = "ra":
+   - Use the same RA incentive/KPI logic that we already implemented for "My CU Performance":
+     - totalCU = sum of cuUsed for completed calls this month that are credited to this RA.
+     - completedCalls = number of such calls.
+     - incentive = RA incentive for this month, including the R$2,500 cap and 60-day rule.
+
+   If role = "pm":
+   - Use the same PM KPI logic as the personal dashboard:
+     - totalCU = sum of cuUsed for completed calls where pmId = this employee id.
+     - completedCalls = number of such calls.
+     - incentive = totalCU * 70 (no cap).
+
+   If role = "admin" or "finance":
+   - totalCU and completedCalls should still be calculated for this user’s projects if applicable, but
+   - incentive should be 0 or omitted (no incentive calculation for admin/finance).
+
+3. Return the list of client accounts this employee is responsible for:
+
+   For a PM:
+   - Find all clients that have at least one project where this employee is the pmId.
+
+   For an RA:
+   - Find all clients that have at least one completed call using an expert sourced by this RA.
+
+   For each client, compute:
+
+   - clientId
+   - clientName
+   - totalCUThisMonth: sum of cuUsed for this employee’s calls with that client in the current month.
+   - completedCallsThisMonth: number of calls.
+   - revenueThisMonth: totalCUThisMonth * cuRatePerCU (using client/project contract rate, default 1150 USD per CU if nothing is specified).
+   - contractedCU (if a field exists on the client or contract model; e.g. monthlyCUQuota).
+   - usageRate: totalCUThisMonth / contractedCU (if contractedCU exists; otherwise null).
+   - lastActivityAt: timestamp of the latest completed call with this client.
+
+Response shape example:
+
+{
+  "employee": {
+    "id": "emp_123",
+    "fullName": "Sarah Chen",
+    "email": "pm@miraeconnext.com",
+    "role": "pm",
+    "status": "active",
+    "joinedAt": "2025-11-01T00:00:00Z"
+  },
+  "kpi": {
+    "period": {
+      "month": 11,
+      "year": 2025,
+      "timezone": "America/Sao_Paulo"
+    },
+    "totalCU": 12.5,
+    "completedCalls": 9,
+    "incentive": 875
+  },
+  "accounts": [
+    {
+      "clientId": "client_1",
+      "clientName": "Test Client A",
+      "totalCUThisMonth": 5.75,
+      "completedCallsThisMonth": 4,
+      "revenueThisMonthUSD": 6612.5,
+      "contractedCU": 10,
+      "usageRate": 0.575,
+      "lastActivityAt": "2025-11-10T15:00:00-03:00"
+    }
+  ]
+}
+
+Make sure all date filtering is based on Brazil time (America/Sao_Paulo).
+
+-------------------------------------------------
+2) FRONTEND – EMPLOYEE DETAIL VIEW
+-------------------------------------------------
+
+On the Employees page:
+
+- When the user clicks an employee’s name in the table, open an Employee Detail view.
+- You can implement this as either:
+  - a right-side drawer / slide-over panel, or
+  - a dedicated route such as /employees/:id.
+
+UI requirements:
+
+1. Header section:
+   - Show employee avatar/initials, full name, email, role badge, and status.
+   - Show a small subtitle like “Employee since [Joined Date]” if available.
+
+2. KPI section:
+   - Show cards similar to the dashboard:
+     - Total CU (this month)
+     - Completed Calls (this month)
+     - Incentive (this month, only for RA/PM; hide or show R$0 for admin/finance as agreed).
+   - Values should come from the "kpi" object returned by the API.
+
+3. Accounts table:
+   - Table listing all accounts from the "accounts" array.
+   - Columns:
+     - Client
+     - Total CU (this month)
+     - Completed Calls
+     - Revenue (this month)
+     - Usage Rate (e.g. "57.5%" if usageRate is not null)
+     - Last Activity
+
+4. Loading and error states:
+   - Show a loading state while fetching /api/employees/:id/overview.
+   - If there is an error, show a simple error message but keep the Employees page usable.
+
+-------------------------------------------------
+3) PERMISSIONS
+-------------------------------------------------
+
+- Only users with role = "admin" (and possibly "finance") should be able to open the Employee Detail view.
+- If a non-admin tries to access /employees or /employees/:id directly, redirect them back to the main dashboard.
+
+-------------------------------------------------
+4) DOCUMENTATION
+-------------------------------------------------
+
+After implementation, please:
+- Explain how the employee KPIs are calculated.
+- Explain how the list of accounts is determined for RAs vs PMs.
+- Clarify how usageRate is computed and where contractedCU is stored.
