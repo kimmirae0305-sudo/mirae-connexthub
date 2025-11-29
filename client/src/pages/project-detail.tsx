@@ -133,6 +133,11 @@ export default function ProjectDetail() {
   
   // Internal Experts angle filter state
   const [internalExpertsAngleFilter, setInternalExpertsAngleFilter] = useState<string>("all");
+  
+  // Bulk invite modal state
+  const [isBulkInviteModalOpen, setIsBulkInviteModalOpen] = useState(false);
+  const [selectedInternalExpertIds, setSelectedInternalExpertIds] = useState<Set<number>>(new Set());
+  const [bulkInviteAngleIds, setBulkInviteAngleIds] = useState<number[]>([]);
 
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
@@ -276,6 +281,23 @@ export default function ProjectDetail() {
     },
     onError: () => {
       toast({ title: "Failed to remove expert", variant: "destructive" });
+    },
+  });
+
+  const bulkInviteMutation = useMutation({
+    mutationFn: async (data: { projectExpertIds: number[]; angleIds: number[]; channel?: string }) => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/invitations/bulk-send`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      setSelectedInternalExpertIds(new Set());
+      setBulkInviteAngleIds([]);
+      setIsBulkInviteModalOpen(false);
+      toast({ title: "Invitations sent successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to send invitations", variant: "destructive" });
     },
   });
 
@@ -1266,13 +1288,29 @@ export default function ProjectDetail() {
                   description={internalExpertsAngleFilter !== "all" ? "Try selecting a different angle filter." : "Use the search above to add experts from your database."}
                 />
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Angles</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Invitation Status</TableHead>
+                <div className="space-y-3">
+                  {selectedInternalExpertIds.size > 0 && (
+                    <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                      <span className="text-sm">{selectedInternalExpertIds.size} expert(s) selected</span>
+                      <Button
+                        onClick={() => setIsBulkInviteModalOpen(true)}
+                        disabled={bulkInviteMutation.isPending}
+                        size="sm"
+                        data-testid="button-create-invitations"
+                      >
+                        <Send className="h-4 w-4 mr-2" />
+                        {bulkInviteMutation.isPending ? "Creating..." : "Create Invitations"}
+                      </Button>
+                    </div>
+                  )}
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12"></TableHead>
+                          <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
+                          <TableHead className="text-xs font-semibold uppercase">Angles</TableHead>
+                          <TableHead className="text-xs font-semibold uppercase">Invitation Status</TableHead>
                         <TableHead className="text-xs font-semibold uppercase">Pipeline</TableHead>
                         <TableHead className="text-xs font-semibold uppercase">VQ Answers</TableHead>
                         <TableHead className="text-xs font-semibold uppercase">Last Activity</TableHead>
@@ -1284,6 +1322,21 @@ export default function ProjectDetail() {
                         const angleNames = getAngleBadges(pe);
                         return (
                           <TableRow key={pe.id} data-testid={`row-internal-expert-${pe.id}`}>
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedInternalExpertIds.has(pe.id)}
+                                onCheckedChange={(checked) => {
+                                  const newSelected = new Set(selectedInternalExpertIds);
+                                  if (checked) {
+                                    newSelected.add(pe.id);
+                                  } else {
+                                    newSelected.delete(pe.id);
+                                  }
+                                  setSelectedInternalExpertIds(newSelected);
+                                }}
+                                data-testid={`checkbox-internal-expert-${pe.id}`}
+                              />
+                            </TableCell>
                             <TableCell>
                               <div>
                                 <p className="font-medium">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
@@ -1373,6 +1426,7 @@ export default function ProjectDetail() {
                       })}
                     </TableBody>
                   </Table>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -1820,6 +1874,75 @@ export default function ProjectDetail() {
               data-testid="button-save-vq"
             >
               {createVQMutation.isPending || updateVQMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Invite Modal */}
+      <Dialog open={isBulkInviteModalOpen} onOpenChange={setIsBulkInviteModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Create Invitations</DialogTitle>
+            <DialogDescription>
+              Select angles to assign to {selectedInternalExpertIds.size} expert(s) and send invitations
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Assign Angles</label>
+              <p className="text-xs text-muted-foreground mb-2">Select which angles these experts should be invited for</p>
+              <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                {projectDetail?.angles && projectDetail.angles.length > 0 ? (
+                  projectDetail.angles.map((angle) => (
+                    <div key={angle.id} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`angle-${angle.id}`}
+                        checked={bulkInviteAngleIds.includes(angle.id)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setBulkInviteAngleIds([...bulkInviteAngleIds, angle.id]);
+                          } else {
+                            setBulkInviteAngleIds(bulkInviteAngleIds.filter(id => id !== angle.id));
+                          }
+                        }}
+                        data-testid={`checkbox-angle-${angle.id}`}
+                      />
+                      <label htmlFor={`angle-${angle.id}`} className="text-sm cursor-pointer">
+                        {angle.title}
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-muted-foreground">No angles available</p>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsBulkInviteModalOpen(false)}
+              data-testid="button-cancel-bulk-invite"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                const peIds = Array.from(selectedInternalExpertIds);
+                bulkInviteMutation.mutate({
+                  projectExpertIds: peIds,
+                  angleIds: bulkInviteAngleIds,
+                  channel: "email",
+                });
+              }}
+              disabled={
+                selectedInternalExpertIds.size === 0 ||
+                bulkInviteMutation.isPending
+              }
+              data-testid="button-send-bulk-invites"
+            >
+              {bulkInviteMutation.isPending ? "Sending..." : "Send Invitations"}
             </Button>
           </DialogFooter>
         </DialogContent>

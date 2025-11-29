@@ -1253,6 +1253,45 @@ export async function registerRoutes(
     }
   });
 
+  // Send bulk invitations with angle selection
+  app.post("/api/projects/:projectId/invitations/bulk-send", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const { projectExpertIds, angleIds, channel } = req.body; // angleIds: array of angle IDs to assign
+      
+      if (!Array.isArray(projectExpertIds) || projectExpertIds.length === 0) {
+        return res.status(400).json({ error: "projectExpertIds must be a non-empty array" });
+      }
+      
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+      
+      // Update angleIds for each selected expert
+      for (const peId of projectExpertIds) {
+        await storage.updateProjectExpert(peId, {
+          angleIds: angleIds && angleIds.length > 0 ? angleIds : undefined,
+          invitationStatus: "invited",
+          invitedAt: new Date(),
+        });
+      }
+      
+      // Call the existing send invitations endpoint
+      const invitRes = await fetch(`http://localhost:5000/api/projects/${projectId}/invitations/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectExpertIds, channel }),
+      });
+      const invitData = await invitRes.json();
+      
+      res.json(invitData);
+    } catch (error) {
+      console.error("Bulk send invitations error:", error);
+      res.status(500).json({ error: "Failed to send bulk invitations" });
+    }
+  });
+
   // Send bulk invitations to experts
   app.post("/api/projects/:projectId/invitations/send", authMiddleware, async (req, res) => {
     try {
