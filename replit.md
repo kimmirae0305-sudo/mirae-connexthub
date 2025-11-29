@@ -110,6 +110,24 @@ Preferred communication style: Simple, everyday language.
   - **Helper Function**: `raHasProjectAccess()` checks both legacy single RA field and new array-based assignments
   - **Admin/PM Views**: Unchanged, continue to see all projects with full functionality
 
+- **Unique Invite Tokens Per Invitation**: Each invitation now generates a NEW unique token
+  - **Problem Solved**: Previously, the same token was reused for RA–Project pairs. Now each invite outreach has its own URL for tracking.
+  - **Schema Changes** (`expert_invitation_links`):
+    - Added `candidateName` (text) - Optional name of candidate invite was created for
+    - Added `candidateEmail` (text) - Optional email of candidate invite was created for  
+    - Added `status` (text, default 'pending') - Tracks invite status: pending, accepted, declined, expired
+  - **Backend Changes**:
+    - ✅ All invite generation endpoints now ALWAYS create a NEW unique token (no reuse)
+    - ✅ Updated routes: `/api/projects/:id/ra-invite-link`, `/api/projects/:projectId/experts/:expertId/invite-link`, `/api/project-experts/:id/invite`, bulk invite endpoints
+    - ✅ Added `GET /api/projects/:projectId/invites` - List all invites for a project
+    - ✅ Added `GET /api/ras/:raId/invites` - List all invites created by an RA
+    - ✅ Added `updateInvitationLinkStatus()` storage function
+  - **Tracking Benefits**:
+    - Each expert outreach has unique URL for attribution
+    - Can expire/revoke individual invites without affecting others
+    - Track which specific expert responded via which invite
+    - Support for RA sourcing 10-50+ candidates per project with individual tracking
+
 ### Core Features
 
 - **Force Password Change on First Login**: New users must change a temporary password. Implemented via a `mustChangePassword` flag in the user model, frontend redirection, and a dedicated `/api/auth/change-password` endpoint.

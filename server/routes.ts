@@ -730,11 +730,11 @@ export async function registerRoutes(
     }
   });
 
-  // Generate RA-specific invite link
+  // Generate RA-specific invite link (always creates a NEW unique token)
   app.post("/api/projects/:id/ra-invite-link", authMiddleware, async (req, res) => {
     try {
       const projectId = parseInt(req.params.id);
-      const { raId } = req.body;
+      const { raId, candidateName, candidateEmail } = req.body;
 
       if (!raId) {
         return res.status(400).json({ error: "raId is required" });
@@ -750,22 +750,20 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid RA" });
       }
 
-      // Check for existing active link
-      let link = await storage.getExpertInvitationLinkByProjectAndRa(projectId, raId);
-      
-      if (!link) {
-        // Generate new token
-        const token = crypto.randomBytes(32).toString("hex");
-        link = await storage.createExpertInvitationLink({
-          token,
-          projectId,
-          raId,
-          inviteType: "ra",
-          recruitedBy: ra.email,
-          isActive: true,
-          expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
-        });
-      }
+      // ALWAYS generate a NEW unique token for each invitation
+      const token = crypto.randomBytes(32).toString("hex");
+      const link = await storage.createExpertInvitationLink({
+        token,
+        projectId,
+        raId,
+        inviteType: "ra",
+        candidateName: candidateName || null,
+        candidateEmail: candidateEmail || null,
+        status: "pending",
+        recruitedBy: ra.email,
+        isActive: true,
+        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
+      });
 
       const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
       const inviteUrl = `${baseUrl}/invite/${projectId}/ra/${link.token}`;
@@ -776,7 +774,7 @@ export async function registerRoutes(
     }
   });
 
-  // Generate existing expert project invite link
+  // Generate existing expert project invite link (always creates a NEW unique token)
   app.post("/api/projects/:projectId/experts/:expertId/invite-link", authMiddleware, async (req, res) => {
     try {
       const projectId = parseInt(req.params.projectId);
@@ -793,49 +791,43 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Expert not found" });
       }
 
-      // Check for existing active link
-      let link = await storage.getExpertInvitationLinkByProjectAndExpert(projectId, expertId);
-      
-      if (!link) {
-        // Generate new token
-        const token = crypto.randomBytes(32).toString("hex");
-        const user = (req as any).user;
-        link = await storage.createExpertInvitationLink({
-          token,
-          projectId,
-          expertId,
-          angleIds: angleIds || null, // Store angle IDs if provided
-          inviteType: "existing",
-          recruitedBy: user?.email || "system",
-          isActive: true,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-        });
+      // ALWAYS generate a NEW unique token for each invitation
+      const token = crypto.randomBytes(32).toString("hex");
+      const user = (req as any).user;
+      const link = await storage.createExpertInvitationLink({
+        token,
+        projectId,
+        expertId,
+        angleIds: angleIds || null,
+        inviteType: "existing",
+        candidateName: expert.name,
+        candidateEmail: expert.email || null,
+        status: "pending",
+        recruitedBy: user?.email || "system",
+        isActive: true,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+      });
 
-        // Update project expert status with angle IDs
-        const projectExperts = await storage.getProjectExpertsByProject(projectId);
-        const pe = projectExperts.find(p => p.expertId === expertId);
-        if (pe) {
-          await storage.updateProjectExpert(pe.id, {
-            invitationStatus: "invited",
-            invitedAt: new Date(),
-            invitationToken: token,
-            angleIds: angleIds || pe.angleIds, // Preserve or update angle IDs
-          });
-        }
-
-        // Log activity
-        await storage.createProjectActivity({
-          projectId,
-          userId: user?.id,
-          expertId,
-          activityType: "expert_invited",
-          description: `Invited expert ${expert.name} to project`,
+      // Update project expert status with angle IDs
+      const projectExperts = await storage.getProjectExpertsByProject(projectId);
+      const pe = projectExperts.find(p => p.expertId === expertId);
+      if (pe) {
+        await storage.updateProjectExpert(pe.id, {
+          invitationStatus: "invited",
+          invitedAt: new Date(),
+          invitationToken: token,
+          angleIds: angleIds || pe.angleIds,
         });
-      } else if (angleIds && angleIds.length > 0) {
-        // Update existing link with new angle IDs if provided
-        await storage.updateExpertInvitationLink(link.id, { angleIds });
-        link = { ...link, angleIds };
       }
+
+      // Log activity
+      await storage.createProjectActivity({
+        projectId,
+        userId: user?.id,
+        expertId,
+        activityType: "expert_invited",
+        description: `Invited expert ${expert.name} to project`,
+      });
 
       const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
       const inviteUrl = `${baseUrl}/expert/project-invite/${link.token}`;
@@ -1213,7 +1205,7 @@ export async function registerRoutes(
     }
   });
 
-  // Send invitation to expert
+  // Send invitation to expert (always creates a NEW unique token)
   app.post("/api/project-experts/:id/invite", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -1237,23 +1229,22 @@ export async function registerRoutes(
       // Get vetting questions for this project
       const vqs = await storage.getVettingQuestionsByProject(assignment.projectId);
       
-      // Create or get invitation link using expertInvitationLinks table
-      let link = await storage.getExpertInvitationLinkByProjectAndExpert(assignment.projectId, assignment.expertId);
-      
-      if (!link) {
-        const token = crypto.randomBytes(32).toString("hex");
-        const user = (req as any).user;
-        link = await storage.createExpertInvitationLink({
-          token,
-          projectId: assignment.projectId,
-          expertId: assignment.expertId,
-          angleIds: assignment.angleIds,
-          inviteType: "existing",
-          recruitedBy: user?.email || "system",
-          isActive: true,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-        });
-      }
+      // ALWAYS create a NEW unique token for each invitation
+      const token = crypto.randomBytes(32).toString("hex");
+      const user = (req as any).user;
+      const link = await storage.createExpertInvitationLink({
+        token,
+        projectId: assignment.projectId,
+        expertId: assignment.expertId,
+        angleIds: assignment.angleIds,
+        inviteType: "existing",
+        candidateName: expert.name,
+        candidateEmail: expert.email || null,
+        status: "pending",
+        recruitedBy: user?.email || "system",
+        isActive: true,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+      });
       
       const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
       const invitationUrl = `${baseUrl}/expert/project-invite/${link.token}`;
@@ -1445,22 +1436,21 @@ export async function registerRoutes(
           // Determine angles to use: use provided angleIds if given and non-empty, otherwise use existing
           const finalAngleIds = angleIds && angleIds.length > 0 ? angleIds : pe.angleIds;
           
-          // Create or get invitation link using expertInvitationLinks table
-          let link = await storage.getExpertInvitationLinkByProjectAndExpert(projectId, expert.id);
-          
-          if (!link) {
-            const token = crypto.randomBytes(32).toString("hex");
-            link = await storage.createExpertInvitationLink({
-              token,
-              projectId,
-              expertId: expert.id,
-              angleIds: finalAngleIds,
-              inviteType: "existing",
-              recruitedBy: "system",
-              isActive: true,
-              expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-            });
-          }
+          // ALWAYS create a NEW unique token for each invitation
+          const token = crypto.randomBytes(32).toString("hex");
+          const link = await storage.createExpertInvitationLink({
+            token,
+            projectId,
+            expertId: expert.id,
+            angleIds: finalAngleIds,
+            inviteType: "existing",
+            candidateName: expert.name,
+            candidateEmail: expert.email || null,
+            status: "pending",
+            recruitedBy: "system",
+            isActive: true,
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+          });
           
           // Generate invitation URL
           const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
@@ -1576,23 +1566,22 @@ export async function registerRoutes(
         
         console.log(`[Bulk Invite] Processing expert: ${expert.name} (${expert.email})`);
         
-        // Create or get invitation link using expertInvitationLinks table
-        let link = await storage.getExpertInvitationLinkByProjectAndExpert(projectId, expert.id);
-        
-        if (!link) {
-          const token = crypto.randomBytes(32).toString("hex");
-          link = await storage.createExpertInvitationLink({
-            token,
-            projectId,
-            expertId: expert.id,
-            angleIds: pe.angleIds,
-            inviteType: "existing",
-            recruitedBy: "system",
-            isActive: true,
-            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-          });
-          console.log(`[Bulk Invite] Created new invitation token for ${expert.email}`);
-        }
+        // ALWAYS create a NEW unique token for each invitation
+        const token = crypto.randomBytes(32).toString("hex");
+        const link = await storage.createExpertInvitationLink({
+          token,
+          projectId,
+          expertId: expert.id,
+          angleIds: pe.angleIds,
+          inviteType: "existing",
+          candidateName: expert.name,
+          candidateEmail: expert.email || null,
+          status: "pending",
+          recruitedBy: "system",
+          isActive: true,
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+        });
+        console.log(`[Bulk Invite] Created new invitation token for ${expert.email}`);
         
         // Update project-expert with token and status
         const updatedPe = await storage.updateProjectExpert(peId, {
@@ -1951,12 +1940,56 @@ export async function registerRoutes(
   });
 
   // ==================== EXPERT INVITATION LINKS ====================
+  // List all invites (with optional filters)
   app.get("/api/invitation-links", authMiddleware, async (req, res) => {
     try {
       const links = await storage.getExpertInvitationLinks();
       res.json(links);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch invitation links" });
+    }
+  });
+
+  // List invites by project (with role-based access control)
+  app.get("/api/projects/:projectId/invites", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const user = (req as any).user;
+      
+      // RAs can only see invites for projects they're assigned to
+      if (user.role === "ra" || user.role === "Research Associate") {
+        const project = await storage.getProject(projectId);
+        if (!project) {
+          return res.status(404).json({ error: "Project not found" });
+        }
+        const hasAccess = raHasProjectAccess(project, user.id);
+        if (!hasAccess) {
+          return res.status(403).json({ error: "Access denied - not assigned to this project" });
+        }
+      }
+      
+      const links = await storage.getExpertInvitationLinksByProject(projectId);
+      res.json(links);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch project invites" });
+    }
+  });
+
+  // List invites by RA (with role-based access control)
+  app.get("/api/ras/:raId/invites", authMiddleware, async (req, res) => {
+    try {
+      const raId = parseInt(req.params.raId);
+      const user = (req as any).user;
+      
+      // RAs can only see their own invites
+      if ((user.role === "ra" || user.role === "Research Associate") && user.id !== raId) {
+        return res.status(403).json({ error: "Access denied - can only view your own invites" });
+      }
+      
+      const links = await storage.getExpertInvitationLinksByRa(raId);
+      res.json(links);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch RA invites" });
     }
   });
 
@@ -2463,8 +2496,13 @@ export async function registerRoutes(
         });
       }
       
-      // Mark invitation link as used after response
-      await storage.updateExpertInvitationLink(link.id, { isActive: false });
+      // Mark invitation link as used and update status in a single coordinated update
+      const inviteStatus = response === "accept" ? "accepted" : "declined";
+      await storage.updateExpertInvitationLink(link.id, { 
+        isActive: false,
+        usedAt: new Date(),
+        status: inviteStatus,
+      } as any);
       
       // Log activity
       await storage.createProjectActivity({

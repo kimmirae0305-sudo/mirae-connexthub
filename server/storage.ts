@@ -154,9 +154,11 @@ export interface IStorage {
   getExpertInvitationLinkByProjectAndRa(projectId: number, raId: number): Promise<ExpertInvitationLink | undefined>;
   getExpertInvitationLinkByProjectAndExpert(projectId: number, expertId: number): Promise<ExpertInvitationLink | undefined>;
   getExpertInvitationLinksByProject(projectId: number): Promise<ExpertInvitationLink[]>;
+  getExpertInvitationLinksByRa(raId: number): Promise<ExpertInvitationLink[]>;
   createExpertInvitationLink(link: InsertExpertInvitationLink): Promise<ExpertInvitationLink>;
   updateExpertInvitationLink(id: number, link: Partial<InsertExpertInvitationLink>): Promise<ExpertInvitationLink | undefined>;
   markInvitationLinkUsed(token: string): Promise<ExpertInvitationLink | undefined>;
+  updateInvitationLinkStatus(token: string, status: string): Promise<ExpertInvitationLink | undefined>;
 
   // Project Activities
   getProjectActivities(projectId: number): Promise<ProjectActivity[]>;
@@ -866,6 +868,14 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(expertInvitationLinks.createdAt));
   }
 
+  async getExpertInvitationLinksByRa(raId: number): Promise<ExpertInvitationLink[]> {
+    return db
+      .select()
+      .from(expertInvitationLinks)
+      .where(eq(expertInvitationLinks.raId, raId))
+      .orderBy(desc(expertInvitationLinks.createdAt));
+  }
+
   async updateExpertInvitationLink(id: number, link: Partial<InsertExpertInvitationLink>): Promise<ExpertInvitationLink | undefined> {
     const [updated] = await db
       .update(expertInvitationLinks)
@@ -879,6 +889,15 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db
       .update(expertInvitationLinks)
       .set({ usedAt: new Date(), isActive: false })
+      .where(eq(expertInvitationLinks.token, token))
+      .returning();
+    return updated || undefined;
+  }
+
+  async updateInvitationLinkStatus(token: string, status: string): Promise<ExpertInvitationLink | undefined> {
+    const [updated] = await db
+      .update(expertInvitationLinks)
+      .set({ status, updatedAt: new Date() } as any)
       .where(eq(expertInvitationLinks.token, token))
       .returning();
     return updated || undefined;
