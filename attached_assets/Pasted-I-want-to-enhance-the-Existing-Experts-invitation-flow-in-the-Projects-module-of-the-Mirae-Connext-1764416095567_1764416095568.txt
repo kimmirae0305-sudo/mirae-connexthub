@@ -1,0 +1,283 @@
+I want to enhance the “Existing Experts” invitation flow in the Projects module of the Mirae Connext app.
+
+Goals:
+1) For each attached expert in a project, I want to:
+   - Generate a project-specific invite link (as we already specified).
+   - Choose one or more channels: Email and/or WhatsApp.
+   - Choose a language: English, Portuguese, or Spanish.
+   - Get a ready-to-use invitation message (with the link included) that I can copy and paste.
+
+2) I want both Email and WhatsApp templates to support 3 languages:
+   - EN (default)
+   - PT-BR
+   - ES
+
+3) For now, I don’t need direct integration with email servers or WhatsApp API.
+   - Copy-to-clipboard from the UI is enough.
+
+Please implement the following.
+
+--------------------------------------------------
+A) DATA & INVITE LINK REUSE
+--------------------------------------------------
+
+We already have (or should have) the mechanism to generate a project-specific invite link for an existing expert:
+
+- POST /api/projects/:projectId/experts/:expertId/invite-link
+  - Returns an object with the full invite URL, e.g.:
+    {
+      "inviteUrl": "https://portal.miraeconnext.com/expert/project-invite/<token>"
+    }
+
+If a token already exists and is active, reuse it instead of creating a new one.
+
+Keep that behavior and use this inviteUrl in the templates below.
+
+--------------------------------------------------
+B) MULTI-LANGUAGE TEMPLATES – EMAIL & WHATSAPP
+--------------------------------------------------
+
+Create a small translation/template structure in the frontend for 3 languages: "en", "pt", "es".
+
+1) For Email:
+We need:
+- subject
+- body
+
+2) For WhatsApp:
+We only need a message body (no subject).
+
+Use placeholders:
+- {{expertName}}
+- {{pmName}}
+- {{projectTitle}}
+- {{inviteLink}}
+
+Implement something like:
+
+const inviteTemplates = {
+  email: {
+    en: { subject: "...", body: "..." },
+    pt: { subject: "...", body: "..." },
+    es: { subject: "...", body: "..." }
+  },
+  whatsapp: {
+    en: { body: "..." },
+    pt: { body: "..." },
+    es: { body: "..." }
+  }
+};
+
+Now fill them with the following content:
+
+--------------------
+EMAIL – ENGLISH
+--------------------
+Subject:
+"Invitation to participate in a consultation project – {{projectTitle}}"
+
+Body:
+"Dear {{expertName}},
+
+I hope you’re doing well.
+
+We would like to invite you to participate in a consultation project via Mirae Connext.
+
+Through the link below, you can review the project overview and vetting questions, and let us know if you are available to participate:
+
+{{inviteLink}}
+
+If you are interested and available, please click “Accept” on the page.
+If not, you may click “Decline” so we can update our records accordingly.
+
+Thank you in advance for your time and consideration.
+
+Best regards,
+{{pmName}}
+Mirae Connext"
+
+--------------------
+EMAIL – PORTUGUESE (PT-BR)
+--------------------
+Subject:
+"Convite para participar de um projeto de consultoria – {{projectTitle}}"
+
+Body:
+"Olá {{expertName}},
+
+Espero que você esteja bem.
+
+Gostaríamos de convidá-lo(a) para participar de um projeto de consultoria através da Mirae Connext.
+
+No link abaixo, você poderá ver o resumo do projeto e as vetting questions, e nos informar se tem disponibilidade para participar:
+
+{{inviteLink}}
+
+Se tiver interesse e disponibilidade, por favor clique em “Accept” na página.
+Caso não possa participar, você pode clicar em “Decline” para atualizarmos nossos registros.
+
+Agradeço desde já pelo seu tempo e atenção.
+
+Atenciosamente,
+{{pmName}}
+Mirae Connext"
+
+--------------------
+EMAIL – SPANISH
+--------------------
+Subject:
+"Invitación para participar en un proyecto de consultoría – {{projectTitle}}"
+
+Body:
+"Hola {{expertName}},
+
+Espero que se encuentre muy bien.
+
+Nos gustaría invitarle a participar en un proyecto de consultoría a través de Mirae Connext.
+
+En el siguiente enlace podrá revisar el resumen del proyecto y las vetting questions, y confirmar si está disponible para participar:
+
+{{inviteLink}}
+
+Si está interesado(a) y disponible, por favor haga clic en “Accept” en la página.
+Si no puede participar, puede hacer clic en “Decline” para que podamos actualizar nuestros registros.
+
+Muchas gracias de antemano por su tiempo y consideración.
+
+Saludos cordiales,
+{{pmName}}
+Mirae Connext"
+
+--------------------
+WHATSAPP – ENGLISH
+--------------------
+Body:
+"Hi {{expertName}}, this is {{pmName}} from Mirae Connext.
+
+We’d like to invite you to a consultation project: {{projectTitle}}.
+
+Through the link below, you can review the project overview and vetting questions, and let us know if you are available to participate (by clicking Accept or Decline):
+
+{{inviteLink}}"
+
+--------------------
+WHATSAPP – PORTUGUESE (PT-BR)
+--------------------
+Body:
+"Olá {{expertName}}, aqui é {{pmName}} da Mirae Connext.
+
+Gostaríamos de convidar você para participar de um projeto de consultoria: {{projectTitle}}.
+
+Pelo link abaixo, você pode ver o resumo do projeto e as vetting questions, e nos informar se tem disponibilidade para participar (clicando em Accept ou Decline):
+
+{{inviteLink}}"
+
+--------------------
+WHATSAPP – SPANISH
+--------------------
+Body:
+"Hola {{expertName}}, soy {{pmName}} de Mirae Connext.
+
+Nos gustaría invitarle a participar en un proyecto de consultoría: {{projectTitle}}.
+
+A través del siguiente enlace podrá revisar el resumen del proyecto y las vetting questions, y confirmar si está disponible para participar (haciendo clic en Accept o Decline):
+
+{{inviteLink}}"
+
+--------------------------------------------------
+C) UI – MULTI-CHANNEL & MULTI-LANGUAGE INVITE CONTROL
+--------------------------------------------------
+
+In the Project Detail → Existing Experts table:
+
+For each expert row, add a button:
+- “Invite”
+
+When the PM clicks “Invite”, open a small modal or side panel with:
+
+1) Language selection:
+   - Label: “Language”
+   - Options:
+     - English (en)
+     - Português (pt)
+     - Español (es)
+   - Default:
+     - Use the project’s default language if available, otherwise "en".
+
+2) Channel selection (multi-checkbox):
+   - Label: “Channels”
+   - Checkboxes:
+     - [ ] Email
+     - [ ] WhatsApp
+
+3) Action buttons:
+   - “Generate Message”
+   - “Close”
+
+Behavior when “Generate Message” is clicked:
+
+- Call POST /api/projects/:projectId/experts/:expertId/invite-link
+  - Get inviteUrl
+
+- Use:
+  - projectTitle from project
+  - expertName from expert
+  - pmName from the logged-in PM user
+  - language from the selector
+  - inviteLink = inviteUrl
+
+- Based on selected channels:
+  - If Email is checked:
+    - Build:
+      - subject = inviteTemplates.email[lang].subject
+      - body    = inviteTemplates.email[lang].body
+    - Replace placeholders {{expertName}}, {{pmName}}, {{projectTitle}}, {{inviteLink}}.
+  - If WhatsApp is checked:
+    - Build:
+      - body = inviteTemplates.whatsapp[lang].body
+    - Replace the same placeholders.
+
+- In the modal, show a result area with:
+
+  - If Email is selected:
+    - A section titled “Email Invite”
+    - A read-only text field or textarea with:
+      - “Subject: …”
+      - A blank line
+      - “Body: …”
+    - A “Copy Email Invite” button that copies the entire email block to the clipboard.
+
+  - If WhatsApp is selected:
+    - A section titled “WhatsApp Invite”
+    - A read-only textarea with the WhatsApp text.
+    - A “Copy WhatsApp Message” button that copies just that message.
+
+- Show a small toast notification after each copy:
+  - e.g. “Email invite copied to clipboard.”
+  - e.g. “WhatsApp message copied to clipboard.”
+
+--------------------------------------------------
+D) PERMISSIONS
+--------------------------------------------------
+
+- Only logged-in users with role = "pm" or "admin" should see and use the “Invite” button for existing experts.
+- RAs should not have access to this PM invite modal for existing experts.
+- RA invitations for new experts are handled separately via RA-specific invite links.
+
+--------------------------------------------------
+E) DOCUMENTATION
+--------------------------------------------------
+
+After implementing:
+
+- Document where the inviteTemplates object is stored and how to add/edit language strings.
+- Document the flow:
+  - PM opens Project Detail → Existing Experts.
+  - Click “Invite”.
+  - Select language and channels.
+  - Click “Generate Message”.
+  - Copy email and/or WhatsApp text to clipboard and paste into their tool of choice.
+- Confirm that:
+  - The messages always include the correct project-specific inviteLink for that expert.
+  - Placeholders are replaced correctly (expertName, pmName, projectTitle, inviteLink).
+  - At least English, Portuguese, and Spanish are fully working.
