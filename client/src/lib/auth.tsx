@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
+import { canAccessPage, type PageKey } from "./permissions";
 
 interface AuthUser {
   id: number;
@@ -129,6 +130,68 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (!isAuthenticated) {
     return null;
+  }
+
+  return <>{children}</>;
+}
+
+interface RoleGuardProps {
+  children: React.ReactNode;
+  allowedRoles?: string[];
+  requiredPage?: PageKey;
+  fallback?: React.ReactNode;
+}
+
+export function RoleGuard({ 
+  children, 
+  allowedRoles, 
+  requiredPage,
+  fallback 
+}: RoleGuardProps) {
+  const { user, isLoading } = useAuth();
+  const [, setLocation] = useLocation();
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center" data-testid="role-guard-loading">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  let hasAccess = false;
+
+  if (requiredPage) {
+    hasAccess = canAccessPage(user.role, requiredPage);
+  } else if (allowedRoles) {
+    hasAccess = allowedRoles.includes(user.role);
+  } else {
+    hasAccess = true;
+  }
+
+  if (!hasAccess) {
+    if (fallback) {
+      return <>{fallback}</>;
+    }
+    
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-4" data-testid="access-denied">
+        <div className="text-4xl text-muted-foreground">403</div>
+        <h2 className="text-xl font-semibold">Access Denied</h2>
+        <p className="text-muted-foreground">You do not have permission to view this page.</p>
+        <button
+          onClick={() => setLocation("/")}
+          className="text-primary hover:underline"
+          data-testid="button-go-home"
+        >
+          Go to Dashboard
+        </button>
+      </div>
+    );
   }
 
   return <>{children}</>;
