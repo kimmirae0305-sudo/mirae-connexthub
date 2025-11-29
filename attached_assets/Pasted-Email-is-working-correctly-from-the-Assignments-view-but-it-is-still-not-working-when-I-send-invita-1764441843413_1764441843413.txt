@@ -1,0 +1,46 @@
+Email is working correctly from the Assignments view, but it is still not working when I send invitations from the Project page.
+
+Current behavior:
+- From Assignments → clicking "Send Invite" sends an email successfully.
+- From Project → Existing Experts → Internal Experts Pipeline → clicking "Send Invite" updates the UI to "Invited", but NO email is received.
+
+So the Project-level invite is not triggering the email sending logic, even though SMTP/Nodemailer is configured correctly.
+
+Please do ALL of the following:
+
+1) Show me the code:
+   a) The backend endpoint that sends invitation emails (for example: POST /api/project-experts/:id/invite or similar).
+   b) The exact function that calls Nodemailer (e.g. sendProjectInvitationEmail in server/email.ts).
+   c) The frontend code for:
+      - The Assignments "Send Invite" button.
+      - The Project → Existing Experts → Internal Experts Pipeline "Send Invite" button.
+
+2) Unify the behavior:
+   - Both places (Assignments and Project view) MUST call the SAME backend endpoint that triggers the email.
+   - If the Project view is currently only updating a status field (e.g. invitationStatus = "Invited") without calling the invite endpoint, this is a bug.
+   - Fix the Project view so that clicking "Send Invite" does:
+
+        await fetch(`/api/project-experts/${assignmentId}/invite`, { method: "POST" });
+
+     or whatever endpoint is used in the Assignments module.
+
+3) Add clear logging to confirm email sending:
+   - In the backend email sending function, add a log like:
+        console.log("[EMAIL] Sending project invitation to", expert.email, "for project", project.id);
+   - Also log when the endpoint is hit from each view:
+        console.log("[API] Project-level invite triggered from Project Experts view");
+
+4) Only update UI status after email is actually sent:
+   - In the Project Experts frontend:
+     - Wait for the invite API response (status 200).
+     - Only then set `invitationStatus` to "Invited".
+     - If the request fails, show an error toast: "Failed to send invitation email. Please try again." and DO NOT change the status.
+
+5) Test:
+   - After implementing the fix, simulate the following:
+     - From Assignments, send an invite to my email (kimmirae0305@gmail.com) — confirm email received.
+     - From the Project → Existing Experts → Internal Experts Pipeline, send an invite to the same email — confirm that:
+       * The server logs show the email sending log.
+       * I receive the second email as well.
+
+Right now the UI gives the impression that an invitation was sent, but the backend email function is not being triggered from the Project view. Please fix this so both entry points use the same invite API and both correctly send emails.

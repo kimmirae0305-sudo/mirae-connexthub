@@ -1328,6 +1328,8 @@ export async function registerRoutes(
       const projectId = parseInt(req.params.projectId);
       const { projectExpertIds, angleIds, channel } = req.body; // angleIds: array of angle IDs to assign
       
+      console.log("[API] Bulk-send endpoint triggered from Project Experts view");
+      
       if (!Array.isArray(projectExpertIds) || projectExpertIds.length === 0) {
         return res.status(400).json({ error: "projectExpertIds must be a non-empty array" });
       }
@@ -1337,27 +1339,102 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Project not found" });
       }
       
-      // Update angleIds for each selected expert
+      // Get vetting questions for the project
+      const vettingQuestions = await storage.getVettingQuestionsByProject(projectId);
+      
+      const results = [];
+      
+      // Process each expert directly (don't use internal fetch)
       for (const peId of projectExpertIds) {
+        const pe = await storage.getProjectExpert(peId);
+        if (!pe || pe.projectId !== projectId) continue;
+        
+        const expert = await storage.getExpert(pe.expertId);
+        if (!expert) continue;
+        
+        console.log(`[EMAIL] Sending project invitation to ${expert.email} for project ${projectId}`);
+        
+        // Update angleIds for this expert
         await storage.updateProjectExpert(peId, {
           angleIds: angleIds && angleIds.length > 0 ? angleIds : undefined,
+        });
+        
+        // Create or get invitation link using expertInvitationLinks table
+        let link = await storage.getExpertInvitationLinkByProjectAndExpert(projectId, expert.id);
+        
+        if (!link) {
+          const token = crypto.randomBytes(32).toString("hex");
+          link = await storage.createExpertInvitationLink({
+            token,
+            projectId,
+            expertId: expert.id,
+            angleIds: angleIds && angleIds.length > 0 ? angleIds : pe.angleIds,
+            inviteType: "existing",
+            recruitedBy: "system",
+            isActive: true,
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+          });
+        }
+        
+        // Generate invitation URL
+        const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
+        const invitationUrl = `${baseUrl}/expert/project-invite/${link.token}`;
+        
+        // Send email invitation
+        let emailSent = false;
+        if (channel === 'email' || channel === 'both' || !channel) {
+          try {
+            console.log(`[EMAIL] Calling sendExpertInvitationEmail for ${expert.email}`);
+            emailSent = await sendExpertInvitationEmail({
+              expertName: expert.name,
+              expertEmail: expert.email,
+              projectName: project.name,
+              clientName: project.clientName || "Client",
+              industry: project.industry || undefined,
+              invitationUrl,
+              vettingQuestionsCount: vettingQuestions.length,
+            });
+            console.log(`[EMAIL] Email ${emailSent ? 'SENT' : 'FAILED'} to ${expert.email}`);
+          } catch (emailError) {
+            console.error(`[EMAIL] Error sending to ${expert.email}:`, emailError);
+          }
+        }
+        
+        // Update status to invited ONLY AFTER EMAIL IS SENT
+        await storage.updateProjectExpert(peId, {
+          status: "invited",
           invitationStatus: "invited",
           invitedAt: new Date(),
+          invitationToken: link.token,
+        });
+        
+        results.push({
+          expertId: expert.id,
+          expertName: expert.name,
+          email: expert.email,
+          invitationUrl,
+          status: emailSent ? "sent" : "failed",
+          emailSent,
         });
       }
       
-      // Call the existing send invitations endpoint
-      const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
-      const invitRes = await fetch(`${baseUrl}/api/projects/${projectId}/invitations/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectExpertIds, channel }),
-      });
-      const invitData = await invitRes.json();
+      const successCount = results.filter(r => r.emailSent).length;
+      const failedCount = results.filter(r => !r.emailSent).length;
       
-      res.json(invitData);
+      console.log(`[API] Bulk-send complete: ${successCount} sent, ${failedCount} failed`);
+      
+      res.json({
+        message: `Invitations: ${successCount} sent, ${failedCount} failed`,
+        channel: channel || 'email',
+        results,
+        summary: {
+          total: results.length,
+          sent: successCount,
+          failed: failedCount,
+        }
+      });
     } catch (error) {
-      console.error("Bulk send invitations error:", error);
+      console.error("[API] Bulk send invitations error:", error);
       res.status(500).json({ error: "Failed to send bulk invitations" });
     }
   });
