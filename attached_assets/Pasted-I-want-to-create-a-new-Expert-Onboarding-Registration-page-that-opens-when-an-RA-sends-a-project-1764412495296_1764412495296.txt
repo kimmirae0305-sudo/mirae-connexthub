@@ -1,0 +1,171 @@
+I want to create a new “Expert Onboarding / Registration” page that opens when an RA sends a project-specific invite link.
+
+The UX reference is a form like this:  
+- Login Information  
+- Basic Information  
+- Experience  
+- Biography  
+- Hourly Rate  
+- Terms & Conditions  
+
+In addition, this form must support 3 languages:  
+- Portuguese (default for Brazil)  
+- Spanish  
+- English  
+
+Please implement the following:
+
+-------------------------------------------------
+1) ROUTE & ENTRY POINT
+-------------------------------------------------
+
+This form should be the main content for the public invite route:
+
+/invite/:projectId/:inviteType/:token
+
+(You may already have this route; extend it with this UI.)
+
+
+-------------------------------------------------
+2) MULTI-LANGUAGE SUPPORT (PT / ES / EN)
+-------------------------------------------------
+
+Implement a simple multilingual system for this page only:
+
+- Supported languages: "pt", "es", "en".
+- Detect the browser language on first load:
+  - If it starts with "pt" → use Portuguese
+  - If it starts with "es" → use Spanish
+  - Otherwise → use English
+- Add a language toggle at the top-right of the form with 3 options:
+  - Português
+  - Español
+  - English
+
+Use a simple translation dictionary object in the frontend for all labels, placeholders, and section titles.  
+Example:
+
+const translations = {
+  en: { ... },
+  pt: { ... },
+  es: { ... }
+};
+
+Make sure all visible text in the form comes from this dictionary (no hard-coded English strings).
+
+
+-------------------------------------------------
+3) FORM LAYOUT & SECTIONS
+-------------------------------------------------
+
+Design a clean, modern form similar to the screenshot, with these sections:
+
+A) Login Information
+   - Email (required)
+   - Password (required)
+   - Confirm Password (required)
+   - Validation: passwords must match, minimum length (e.g. 8 characters)
+
+B) Basic Information
+   - First Name (required)
+   - Last Name (required)
+   - Country (dropdown)
+   - Region / State (text or dropdown)
+   - Email (pre-filled from login email if possible)
+   - Phone number:
+     - Country code
+     - Phone number
+   - LinkedIn URL
+   - City (optional)
+   - “Can you consult in English?”:
+     - Yes / No radio buttons
+   - Time zone (dropdown)
+
+C) Experience
+   - Repeating block “Add Experience”:
+     - Company
+     - Title / Role
+     - From (Month / Year)
+     - To (Month / Year) or “Current” checkbox
+
+D) Biography
+   - Large text area for a short professional bio
+
+E) Hourly Rate
+   - Hourly Rate (number)
+   - Currency (dropdown – at least USD, BRL, EUR)
+
+F) Terms & Conditions
+   - Checkbox:
+     - “By checking this box, I acknowledge that I agree to the Terms and Conditions and the Privacy Policy of Mirae Connext.”
+   - Make “Terms and Conditions” and “Privacy Policy” clickable links (use placeholder URLs for now).
+   - User must check the box to submit.
+
+
+-------------------------------------------------
+4) PROJECT & VETTING QUESTIONS INTEGRATION
+-------------------------------------------------
+
+When the invite link is valid:
+
+- Fetch the project basic info and its Vetting Questions.
+- At the top of the form, show:
+  - Project name
+  - Short description (if available)
+- Add a new section titled for example:
+  - “Project Vetting Questions”
+- For each Vetting Question:
+  - Show the question text
+  - Provide a text area for the expert’s sample answer.
+
+All of these labels/titles should also be translated using the same translation dictionary.
+
+
+-------------------------------------------------
+5) SUBMISSION BEHAVIOR
+-------------------------------------------------
+
+On submit:
+
+1. Validate all required fields:
+   - Login info
+   - Basic info (first name, last name, country, email, etc.)
+   - Terms & Conditions checkbox
+
+2. If validation fails:
+   - Show inline error messages in the current language.
+
+3. If validation passes:
+   - Call a backend endpoint (e.g. POST /api/invite/:projectId/:token/submit) that will:
+     - Create a new Expert record
+     - Store profile fields (basic info, experience, bio, hourly rate, languages, time zone)
+     - Store login credentials (email + password hash)
+     - Link the expert to the project with status = "interested"
+     - Save the Vetting Question answers for this project
+     - If the invite is RA-specific, record sourcedByRaId for this expert
+
+4. After success:
+   - Show a confirmation screen, also translated:
+     - Example (EN): “Thank you! Your profile and answers have been submitted. The Mirae Connext team will reach out to you if your profile matches the project requirements.”
+     - Provide a simple button like “Close” or “Back to homepage”.
+
+
+-------------------------------------------------
+6) DESIGN & UX
+-------------------------------------------------
+
+- Use the existing design system of the app (same fonts, button styles, spacing).
+- Keep the layout similar to the reference screenshot: clear section titles and good spacing.
+- On desktop: form centered with a max width (e.g. 960px).
+- On mobile: stacked layout, full width.
+
+-------------------------------------------------
+7) DOCUMENTATION
+-------------------------------------------------
+
+After implementing, please document:
+
+- Where the translation dictionary is located and how to add/edit text for PT/ES/EN.
+- Which backend endpoint handles the submission.
+- How the created expert is linked to the project and (if applicable) to an RA.
+- How to change the default language in the future if needed.
