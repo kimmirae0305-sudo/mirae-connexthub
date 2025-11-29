@@ -1,0 +1,89 @@
+Hi! There seems to be a bug with the new “Invite New Expert” flow in the RA Sourcing → RA-Sourced Experts Pipeline section.
+
+🐞 What I’m seeing
+
+When I click “Invite New Expert”, fill in the minimal fields and confirm:
+
+I get a green toast: “Invite link generated successfully” (see screenshot).
+
+But:
+
+No new row appears in the RA-Sourced Experts Pipeline table.
+
+I don’t see any invite URL to copy or share with the expert.
+
+Effectively, the system says the link was generated, but I have no way to access it and the expert lead isn’t visible anywhere.
+
+🧪 Steps to reproduce
+
+Go to any project → RA Sourcing tab.
+
+In the RA-Sourced Experts Pipeline card, click “Invite New Expert”.
+
+Enter basic info (name + LinkedIn URL or email/phone).
+
+Click the button to generate the invite link.
+
+View the page after the toast appears.
+
+Expected:
+
+Backend creates an invite record + candidate.
+
+Frontend receives a response with:
+
+inviteUrl (or token)
+
+candidate’s basic info
+
+The UI should:
+
+Show a small modal or inline card with the generated invite URL + “Copy link” button.
+
+Immediately add a new row to the RA-Sourced Experts Pipeline table with status like “Pending onboarding”.
+
+Actual:
+
+Only the success toast is shown.
+
+No visible invite link.
+
+No new expert row in the RA-Sourced pipeline.
+
+✅ What I’d like you to implement/fix
+
+Fix the backend → frontend connection
+
+Ensure the invite-creation endpoint returns the created record and unique URL/token.
+
+Add logging if the record fails to persist.
+
+Update the UI behavior
+
+After a successful mutation:
+
+Open a confirmation modal (or panel) with:
+
+Expert name
+
+Generated invite URL
+
+“Copy Link” button
+
+Insert/update a row in RA-Sourced Experts Pipeline:
+
+Name
+
+Contact (LinkedIn/email)
+
+Status: Pending onboarding
+
+If the API fails, show a red error toast with the error message instead of the green success toast.
+
+Optional: expose a quick way to re-copy the invite link from the RA-Sourced pipeline row (e.g., “Copy invite” action per expert).
+
+Once this is done, I should always be able to:
+
+See the newly created RA-sourced expert in the pipeline, and
+
+Copy/share the onboarding invite link right away.
