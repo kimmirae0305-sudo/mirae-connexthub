@@ -793,10 +793,27 @@ export async function registerRoutes(
   // Get RAs for assignment (users with role 'ra')
   app.get("/api/users/ras", authMiddleware, async (req, res) => {
     try {
+      console.log("[RAs] Fetching RAs for assignment modal");
       const users = await storage.getUsers();
+      console.log(`[RAs] Total users fetched: ${users.length}`);
+      console.log(`[RAs] Users by role:`, users.reduce((acc: any, u: any) => {
+        acc[u.role] = (acc[u.role] || 0) + 1;
+        return acc;
+      }, {}));
+      
       const ras = users.filter(u => u.role === "ra" && u.isActive);
-      res.json(ras.map(ra => ({ id: ra.id, fullName: ra.fullName, email: ra.email })));
+      console.log(`[RAs] Filtered RAs: ${ras.length} active RAs found`);
+      
+      const result = ras.map(ra => ({ 
+        id: ra.id, 
+        fullName: ra.fullName, 
+        email: ra.email 
+      }));
+      
+      console.log(`[RAs] Returning ${result.length} RAs:`, result);
+      res.json(result);
     } catch (error) {
+      console.error("[RAs] Error fetching RAs:", error);
       res.status(500).json({ error: "Failed to fetch RAs" });
     }
   });

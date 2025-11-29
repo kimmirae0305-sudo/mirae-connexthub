@@ -167,10 +167,28 @@ export default function ProjectDetail() {
 
   const { data: allRAs } = useQuery<RAUser[]>({
     queryKey: ["/api/users/ras"],
+    queryFn: async () => {
+      const res = await fetch("/api/users/ras", {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("authToken")}`,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to fetch RAs");
+      return res.json();
+    },
   });
 
   const { data: allExperts } = useQuery<Expert[]>({
     queryKey: ["/api/experts"],
+    queryFn: async () => {
+      const res = await fetch("/api/experts", {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("authToken")}`,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to fetch experts");
+      return res.json();
+    },
   });
 
   // Expert search results query with metrics
