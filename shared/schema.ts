@@ -186,6 +186,7 @@ export const callRecords = pgTable("call_records", {
 });
 
 // Expert Invitation Links table (Extended with types)
+// Each invitation generates a UNIQUE token - tokens are never reused
 export const expertInvitationLinks = pgTable("expert_invitation_links", {
   id: serial("id").primaryKey(),
   token: text("token").notNull().unique(),
@@ -194,6 +195,9 @@ export const expertInvitationLinks = pgTable("expert_invitation_links", {
   expertId: integer("expert_id").references(() => experts.id), // For existing expert invites
   angleIds: integer("angle_ids").array(), // Angles this expert is being invited for
   inviteType: text("invite_type").notNull().default("general"), // general, ra, existing
+  candidateName: text("candidate_name"), // Optional: Name of candidate invite was created for
+  candidateEmail: text("candidate_email"), // Optional: Email of candidate invite was created for
+  status: text("status").notNull().default("pending"), // pending, accepted, declined, expired
   recruitedBy: text("recruited_by").notNull(),
   isActive: boolean("is_active").notNull().default(true),
   expiresAt: timestamp("expires_at"),
