@@ -1,0 +1,66 @@
+Important correction about invite links:
+
+The current behavior seems to reuse the same invite link for a RA–Project pair.
+This is not sufficient.
+
+What I actually need is:
+
+➤ Every time an invitation is created, the system must generate a NEW unique invite link.
+Even for the same RA and the same Project.
+
+Reason:
+- For one project, an RA may outreach 10, 20, or 50 new experts externally.
+- Each outreach should have its own invite URL, so that:
+  - We can track which specific expert responded via which invite.
+  - We can safely expire or revoke a single invite without affecting others.
+  - We avoid multiple experts sharing the exact same token.
+
+So the uniqueness rules should be:
+
+1) Invite uniqueness
+   - Each invite record (Project + RA + external expert/email or “candidate slot”) must have a unique inviteToken.
+   - Example:
+     - Project A / RA Michael / Expert #1 → token A-M-1
+     - Project A / RA Michael / Expert #2 → token A-M-2
+     - Project A / RA Michael / Expert #3 → token A-M-3
+   - Even though projectId and raId are the same, inviteToken MUST always be different per invitation.
+
+2) Data model (suggestion)
+   - Create an `invites` table (or similar) with:
+     - id
+     - projectId
+     - raId
+     - inviteToken (unique)
+     - status (pending / accepted / expired)
+     - createdAt
+     - optional: email or candidateName, if known at send time
+   - Each time the RA clicks “Generate Invite Link” or “Create Invitation”:
+     - Insert a new invite row with a fresh token (e.g. uuid).
+     - Return the URL based on that token.
+
+3) URL behavior
+   - Public URL: /expert/project-invite/:token
+   - Backend:
+     - Look up the invite record by inviteToken.
+     - From there, resolve projectId and raId.
+     - If token is invalid or expired, show an error page.
+   - When the expert completes the onboarding form:
+     - Associate their new Expert profile and VQ answers with:
+       - projectId (from the invite)
+       - raId (sourcing owner)
+       - that specific invite record (for tracking).
+
+4) Project & RA level views
+   - Project detail page:
+     - Show all invites sent for that project (with status).
+   - RA view:
+     - Show invites that RA has created across projects.
+
+5) Summary
+
+- The system must NOT reuse the same invite link for all experts in a project or for all experts sourced by one RA.
+- Every invitation creation event must generate a brand NEW unique token and URL, even if:
+  - Same project
+  - Same RA
+
+Please adjust the implementation so invite links are unique per invitation, not just per RA or per project.
