@@ -532,9 +532,17 @@ export async function registerRoutes(
   });
 
   // Helper function to check if RA has access to project
+  // Checks both legacy single RA field (assignedRaId) and new array field (assignedRaIds)
   function raHasProjectAccess(project: any, userId: number): boolean {
-    return project.assignedRaId === userId || 
-           (project.assignedRaIds && project.assignedRaIds.includes(userId));
+    // Check legacy single RA assignment
+    if (project.assignedRaId === userId) {
+      return true;
+    }
+    // Check new array-based assignment (only if array exists and has entries)
+    if (Array.isArray(project.assignedRaIds) && project.assignedRaIds.includes(userId)) {
+      return true;
+    }
+    return false;
   }
 
   app.get("/api/projects/:id", authMiddleware, async (req, res) => {

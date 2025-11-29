@@ -98,6 +98,18 @@ Preferred communication style: Simple, everyday language.
   - **Result**: Bulk invites from Project tab now use identical email logic as Assignments section
   - **Testing**: Check server logs for `[Bulk Invite]` entries to verify email sending
 
+- **RA Scoped "My Projects" View**: RAs now see only projects they're assigned to
+  - **Backend Filtering** (`/api/projects`): Filters projects by RA assignment (checks both `assignedRaId` and `assignedRaIds`)
+  - **Access Control**: `/api/projects/:id` and `/api/projects/:id/detail` return 403 for RAs trying to access unassigned projects
+  - **Frontend UI Changes**:
+    - ✅ Page title shows "My Projects" for RAs, "Projects" for Admin/PM
+    - ✅ "New Project" button hidden for RAs
+    - ✅ CU Used column hidden for RAs (financial data restriction)
+    - ✅ Edit/Delete action buttons hidden for RAs (view-only access)
+    - ✅ RA-specific empty state: "No projects assigned yet. Once you're assigned to a project, it will appear here."
+  - **Helper Function**: `raHasProjectAccess()` checks both legacy single RA field and new array-based assignments
+  - **Admin/PM Views**: Unchanged, continue to see all projects with full functionality
+
 ### Core Features
 
 - **Force Password Change on First Login**: New users must change a temporary password. Implemented via a `mustChangePassword` flag in the user model, frontend redirection, and a dedicated `/api/auth/change-password` endpoint.

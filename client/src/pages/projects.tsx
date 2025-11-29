@@ -403,18 +403,20 @@ export default function Projects() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <DataTableSkeleton columns={7} rows={5} />
+            <DataTableSkeleton columns={isRA ? 6 : 7} rows={5} />
           ) : filteredProjects?.length === 0 ? (
             <EmptyState
-              icon={Briefcase}
-              title="No projects found"
+              icon={isRA ? FolderKanban : Briefcase}
+              title={isRA ? "No projects assigned yet" : "No projects found"}
               description={
                 searchQuery || statusFilter !== "all"
                   ? "Try adjusting your filters."
-                  : "Create your first project to get started."
+                  : isRA
+                    ? "Once you're assigned to a project, it will appear here."
+                    : "Create your first project to get started."
               }
               action={
-                !searchQuery && statusFilter === "all" ? (
+                !isRA && !searchQuery && statusFilter === "all" ? (
                   <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-create-empty-project">
                     <Plus className="h-4 w-4" /> Create Project
                   </Button>
@@ -430,7 +432,7 @@ export default function Projects() {
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Industry</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase">CU Used</TableHead>
+                    {!isRA && <TableHead className="text-xs font-semibold uppercase">CU Used</TableHead>}
                     <TableHead className="text-xs font-semibold uppercase">Created</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
                   </TableRow>
@@ -451,9 +453,11 @@ export default function Projects() {
                       <TableCell onClick={() => setLocation(`/projects/${project.id}`)}>
                         <StatusBadge status={project.status} type="project" />
                       </TableCell>
-                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="font-mono text-sm">
-                        {parseFloat(project.totalCuUsed || "0").toFixed(1)}
-                      </TableCell>
+                      {!isRA && (
+                        <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="font-mono text-sm">
+                          {parseFloat(project.totalCuUsed || "0").toFixed(1)}
+                        </TableCell>
+                      )}
                       <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="font-mono text-xs text-muted-foreground">
                         {format(new Date(project.createdAt), "MMM dd, yyyy")}
                       </TableCell>
@@ -467,22 +471,26 @@ export default function Projects() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleOpenDialog(project)}
-                            data-testid={`button-edit-project-${project.id}`}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setDeletingProject(project)}
-                            data-testid={`button-delete-project-${project.id}`}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          {!isRA && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleOpenDialog(project)}
+                                data-testid={`button-edit-project-${project.id}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setDeletingProject(project)}
+                                data-testid={`button-delete-project-${project.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
