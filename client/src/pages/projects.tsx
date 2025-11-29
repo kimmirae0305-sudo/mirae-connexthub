@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Search, Briefcase, Filter, Users, Eye, Clock } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Briefcase, Filter, Eye, X } from "lucide-react";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -51,12 +51,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
-import type { Project, InsertProject, ClientOrganization, ProjectExpert } from "@shared/schema";
+import type { Project, InsertProject, ClientOrganization, VettingQuestion } from "@shared/schema";
+
+const vettingQuestionSchema = z.object({
+  question: z.string().min(1, "Question is required"),
+});
 
 const projectFormSchema = z.object({
   name: z.string().min(1, "Project name is required"),
@@ -68,9 +73,9 @@ const projectFormSchema = z.object({
   description: z.string().optional(),
   industry: z.string().min(1, "Industry is required"),
   status: z.string().default("new"),
-  budget: z.string().optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  vettingQuestions: z.array(vettingQuestionSchema).optional(),
 });
 
 type ProjectFormData = z.infer<typeof projectFormSchema>;
@@ -106,12 +111,11 @@ const statuses = [
 
 export default function Projects() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [viewingProject, setViewingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery<Project[]>({
@@ -122,9 +126,9 @@ export default function Projects() {
     queryKey: ["/api/client-organizations"],
   });
 
-  const { data: projectExperts } = useQuery<ProjectExpert[]>({
-    queryKey: ["/api/project-experts", viewingProject?.id],
-    enabled: !!viewingProject,
+  const { data: existingVettingQuestions } = useQuery<VettingQuestion[]>({
+    queryKey: ["/api/vetting-questions", editingProject?.id],
+    enabled: !!editingProject,
   });
 
   const form = useForm<ProjectFormData>({
@@ -138,16 +142,50 @@ export default function Projects() {
       description: "",
       industry: "",
       status: "new",
-      budget: "",
       startDate: "",
       endDate: "",
+      vettingQuestions: [],
     },
   });
 
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: "vettingQuestions",
+  });
+
   const createMutation = useMutation({
-    mutationFn: (data: InsertProject) => apiRequest("POST", "/api/projects", data),
+    mutationFn: async (data: ProjectFormData) => {
+      const { vettingQuestions, ...projectData } = data;
+      const projectPayload: InsertProject = {
+        ...projectData,
+        projectOverview: projectData.projectOverview || null,
+        clientOrganizationId: projectData.clientOrganizationId || null,
+        clientPocName: projectData.clientPocName || null,
+        clientPocEmail: projectData.clientPocEmail || null,
+        description: projectData.description || null,
+        startDate: projectData.startDate ? new Date(projectData.startDate) : null,
+        endDate: projectData.endDate ? new Date(projectData.endDate) : null,
+      };
+      
+      const project = await apiRequest("POST", "/api/projects", projectPayload);
+      const projectResult = await project.json();
+      
+      if (vettingQuestions && vettingQuestions.length > 0) {
+        for (let i = 0; i < vettingQuestions.length; i++) {
+          await apiRequest("POST", "/api/vetting-questions", {
+            projectId: projectResult.id,
+            question: vettingQuestions[i].question,
+            orderIndex: i,
+            isRequired: true,
+          });
+        }
+      }
+      
+      return projectResult;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vetting-questions"] });
       setIsDialogOpen(false);
       form.reset();
       toast({ title: "Project created successfully" });
@@ -158,10 +196,43 @@ export default function Projects() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: InsertProject & { id: number }) =>
-      apiRequest("PATCH", `/api/projects/${data.id}`, data),
+    mutationFn: async (data: ProjectFormData & { id: number }) => {
+      const { vettingQuestions, id, ...projectData } = data;
+      const projectPayload: Partial<InsertProject> = {
+        ...projectData,
+        projectOverview: projectData.projectOverview || null,
+        clientOrganizationId: projectData.clientOrganizationId || null,
+        clientPocName: projectData.clientPocName || null,
+        clientPocEmail: projectData.clientPocEmail || null,
+        description: projectData.description || null,
+        startDate: projectData.startDate ? new Date(projectData.startDate) : null,
+        endDate: projectData.endDate ? new Date(projectData.endDate) : null,
+      };
+      
+      await apiRequest("PATCH", `/api/projects/${id}`, projectPayload);
+      
+      if (existingVettingQuestions) {
+        for (const q of existingVettingQuestions) {
+          await apiRequest("DELETE", `/api/vetting-questions/${q.id}`);
+        }
+      }
+      
+      if (vettingQuestions && vettingQuestions.length > 0) {
+        for (let i = 0; i < vettingQuestions.length; i++) {
+          await apiRequest("POST", "/api/vetting-questions", {
+            projectId: id,
+            question: vettingQuestions[i].question,
+            orderIndex: i,
+            isRequired: true,
+          });
+        }
+      }
+      
+      return { id };
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vetting-questions"] });
       setIsDialogOpen(false);
       setEditingProject(null);
       form.reset();
@@ -205,40 +276,41 @@ export default function Projects() {
         description: project.description || "",
         industry: project.industry,
         status: project.status,
-        budget: project.budget?.toString() || "",
         startDate: project.startDate ? format(new Date(project.startDate), "yyyy-MM-dd") : "",
         endDate: project.endDate ? format(new Date(project.endDate), "yyyy-MM-dd") : "",
+        vettingQuestions: [],
       });
     } else {
       setEditingProject(null);
-      form.reset();
+      form.reset({
+        name: "",
+        projectOverview: "",
+        clientName: "",
+        clientPocName: "",
+        clientPocEmail: "",
+        description: "",
+        industry: "",
+        status: "new",
+        startDate: "",
+        endDate: "",
+        vettingQuestions: [],
+      });
     }
     setIsDialogOpen(true);
   };
 
-  const onSubmit = (data: ProjectFormData) => {
-    const projectData: InsertProject = {
-      ...data,
-      projectOverview: data.projectOverview || null,
-      clientOrganizationId: data.clientOrganizationId || null,
-      clientPocName: data.clientPocName || null,
-      clientPocEmail: data.clientPocEmail || null,
-      description: data.description || null,
-      budget: data.budget || null,
-      startDate: data.startDate ? new Date(data.startDate) : null,
-      endDate: data.endDate ? new Date(data.endDate) : null,
-    };
-
-    if (editingProject) {
-      updateMutation.mutate({ ...projectData, id: editingProject.id });
-    } else {
-      createMutation.mutate(projectData);
+  const loadExistingQuestions = () => {
+    if (existingVettingQuestions && existingVettingQuestions.length > 0) {
+      form.setValue('vettingQuestions', existingVettingQuestions.map(q => ({ question: q.question })));
     }
   };
 
-  const getExpertCount = (projectId: number) => {
-    if (!viewingProject || viewingProject.id !== projectId) return null;
-    return projectExperts?.length || 0;
+  const onSubmit = (data: ProjectFormData) => {
+    if (editingProject) {
+      updateMutation.mutate({ ...data, id: editingProject.id });
+    } else {
+      createMutation.mutate(data);
+    }
   };
 
   return (
@@ -350,8 +422,8 @@ export default function Projects() {
                 </TableHeader>
                 <TableBody>
                   {filteredProjects?.map((project) => (
-                    <TableRow key={project.id} className="hover-elevate" data-testid={`row-project-${project.id}`}>
-                      <TableCell>
+                    <TableRow key={project.id} className="hover-elevate cursor-pointer" data-testid={`row-project-${project.id}`}>
+                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)}>
                         <div>
                           <p className="font-medium">{project.name}</p>
                           {project.clientPocName && (
@@ -359,15 +431,15 @@ export default function Projects() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{project.clientName}</TableCell>
-                      <TableCell className="text-muted-foreground">{project.industry}</TableCell>
-                      <TableCell>
+                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="text-muted-foreground">{project.clientName}</TableCell>
+                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="text-muted-foreground">{project.industry}</TableCell>
+                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)}>
                         <StatusBadge status={project.status} type="project" />
                       </TableCell>
-                      <TableCell className="font-mono text-sm">
+                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="font-mono text-sm">
                         {parseFloat(project.totalCuUsed || "0").toFixed(1)}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="font-mono text-xs text-muted-foreground">
                         {format(new Date(project.createdAt), "MMM dd, yyyy")}
                       </TableCell>
                       <TableCell className="text-right">
@@ -375,10 +447,7 @@ export default function Projects() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => {
-                              setViewingProject(project);
-                              setIsDetailDialogOpen(true);
-                            }}
+                            onClick={() => setLocation(`/projects/${project.id}`)}
                             data-testid={`button-view-project-${project.id}`}
                           >
                             <Eye className="h-4 w-4" />
@@ -410,7 +479,13 @@ export default function Projects() {
         </CardContent>
       </Card>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={isDialogOpen} onOpenChange={(open) => {
+        setIsDialogOpen(open);
+        if (!open) {
+          setEditingProject(null);
+          form.reset();
+        }
+      }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingProject ? "Edit Project" : "Create New Project"}</DialogTitle>
@@ -599,25 +674,7 @@ export default function Projects() {
                 )}
               />
 
-              <div className="grid gap-4 sm:grid-cols-3">
-                <FormField
-                  control={form.control}
-                  name="budget"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Budget</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          placeholder="0.00"
-                          {...field}
-                          data-testid="input-budget"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+              <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="startDate"
@@ -646,6 +703,84 @@ export default function Projects() {
                 />
               </div>
 
+              <Separator className="my-4" />
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium">Vetting Questions</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Add screening questions for experts to answer
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {editingProject && existingVettingQuestions && existingVettingQuestions.length > 0 && fields.length === 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={loadExistingQuestions}
+                        data-testid="button-load-questions"
+                      >
+                        Load Existing ({existingVettingQuestions.length})
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => append({ question: "" })}
+                      data-testid="button-add-question"
+                    >
+                      <Plus className="h-4 w-4 mr-1" /> Add Question
+                    </Button>
+                  </div>
+                </div>
+
+                {fields.length === 0 ? (
+                  <div className="border border-dashed rounded-lg p-4 text-center text-sm text-muted-foreground">
+                    No vetting questions added yet. Click "Add Question" to add screening questions.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {fields.map((field, index) => (
+                      <div key={field.id} className="flex gap-2 items-start">
+                        <div className="flex-shrink-0 w-6 h-8 flex items-center justify-center text-xs text-muted-foreground font-mono">
+                          {index + 1}.
+                        </div>
+                        <FormField
+                          control={form.control}
+                          name={`vettingQuestions.${index}.question`}
+                          render={({ field }) => (
+                            <FormItem className="flex-1">
+                              <FormControl>
+                                <Textarea
+                                  placeholder="Enter your vetting question..."
+                                  className="resize-none min-h-[60px]"
+                                  {...field}
+                                  data-testid={`input-vetting-question-${index}`}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => remove(index)}
+                          className="flex-shrink-0"
+                          data-testid={`button-remove-question-${index}`}
+                        >
+                          <X className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <DialogFooter>
                 <Button
                   type="button"
@@ -669,79 +804,6 @@ export default function Projects() {
               </DialogFooter>
             </form>
           </Form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{viewingProject?.name}</DialogTitle>
-            <DialogDescription>
-              Project details and assigned experts
-            </DialogDescription>
-          </DialogHeader>
-          {viewingProject && (
-            <div className="space-y-6">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <p className="text-sm text-muted-foreground">Client</p>
-                  <p className="font-medium">{viewingProject.clientName}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Industry</p>
-                  <p className="font-medium">{viewingProject.industry}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Status</p>
-                  <StatusBadge status={viewingProject.status} type="project" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">CU Used</p>
-                  <p className="font-mono font-medium">{parseFloat(viewingProject.totalCuUsed || "0").toFixed(1)}</p>
-                </div>
-              </div>
-              
-              {viewingProject.projectOverview && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Overview</p>
-                  <p className="text-sm">{viewingProject.projectOverview}</p>
-                </div>
-              )}
-
-              {viewingProject.description && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Description</p>
-                  <p className="text-sm">{viewingProject.description}</p>
-                </div>
-              )}
-
-              <div className="border-t pt-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="flex items-center gap-2 font-medium">
-                    <Users className="h-4 w-4" /> Assigned Experts
-                  </h4>
-                  <Badge variant="secondary">{projectExperts?.length || 0}</Badge>
-                </div>
-                {projectExperts?.length === 0 ? (
-                  <p className="mt-2 text-sm text-muted-foreground">No experts assigned yet.</p>
-                ) : (
-                  <div className="mt-2 space-y-2">
-                    {projectExperts?.map((pe) => (
-                      <div key={pe.id} className="flex items-center justify-between rounded-md border p-2">
-                        <span className="text-sm">Expert #{pe.expertId}</span>
-                        <StatusBadge status={pe.status} type="assignment" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDetailDialogOpen(false)}>
-              Close
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

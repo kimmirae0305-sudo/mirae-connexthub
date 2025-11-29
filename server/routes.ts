@@ -316,6 +316,22 @@ export async function registerRoutes(
     }
   });
 
+  // Advanced expert search with filters
+  app.get("/api/experts/search", authMiddleware, async (req, res) => {
+    try {
+      const params = {
+        query: req.query.q as string | undefined,
+        country: req.query.country as string | undefined,
+        minRate: req.query.minRate ? parseFloat(req.query.minRate as string) : undefined,
+        maxRate: req.query.maxRate ? parseFloat(req.query.maxRate as string) : undefined,
+      };
+      const experts = await storage.searchExpertsAdvanced(params);
+      res.json(experts);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to search experts" });
+    }
+  });
+
   app.get("/api/experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -584,6 +600,260 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to remove expert from project" });
+    }
+  });
+
+  // Bulk attach experts to project
+  app.post("/api/projects/:projectId/experts/bulk", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const { expertIds } = req.body;
+      
+      if (!Array.isArray(expertIds) || expertIds.length === 0) {
+        return res.status(400).json({ error: "expertIds must be a non-empty array" });
+      }
+      
+      // Check if project exists
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+      
+      // Get existing assignments to avoid duplicates
+      const existingAssignments = await storage.getProjectExpertsByProject(projectId);
+      const existingExpertIds = new Set(existingAssignments.map(a => a.expertId));
+      
+      // Filter out already assigned experts
+      const newExpertIds = expertIds.filter((id: number) => !existingExpertIds.has(id));
+      
+      if (newExpertIds.length === 0) {
+        return res.status(200).json({ 
+          message: "All experts are already assigned to this project",
+          assignments: [] 
+        });
+      }
+      
+      const assignments = await storage.createProjectExpertsBulk(
+        newExpertIds.map((expertId: number) => ({
+          projectId,
+          expertId,
+          status: "assigned",
+        }))
+      );
+      
+      res.status(201).json({ 
+        message: `${assignments.length} experts attached to project`,
+        assignments 
+      });
+    } catch (error) {
+      console.error("Bulk attach error:", error);
+      res.status(500).json({ error: "Failed to attach experts to project" });
+    }
+  });
+
+  // Send bulk invitations to experts
+  app.post("/api/projects/:projectId/invitations/send", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const { projectExpertIds, channel } = req.body; // channel: 'email' | 'whatsapp' | 'both'
+      
+      if (!Array.isArray(projectExpertIds) || projectExpertIds.length === 0) {
+        return res.status(400).json({ error: "projectExpertIds must be a non-empty array" });
+      }
+      
+      // Get project details
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+      
+      // Get vetting questions for the project
+      const vettingQuestions = await storage.getVettingQuestionsByProject(projectId);
+      
+      const results = [];
+      
+      for (const peId of projectExpertIds) {
+        const pe = await storage.getProjectExpert(peId);
+        if (!pe || pe.projectId !== projectId) continue;
+        
+        const expert = await storage.getExpert(pe.expertId);
+        if (!expert) continue;
+        
+        // Generate unique invitation token
+        const token = crypto.randomBytes(32).toString("hex");
+        
+        // Update project-expert with token and status
+        const updatedPe = await storage.updateProjectExpert(peId, {
+          status: "invited",
+          invitedAt: new Date(),
+          invitationToken: token,
+        });
+        
+        // Generate invitation URL
+        const baseUrl = process.env.REPLIT_DEV_DOMAIN 
+          ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+          : "http://localhost:5000";
+        const invitationUrl = `${baseUrl}/expert-invite/${token}`;
+        
+        // Simulate sending email/whatsapp
+        console.log(`[${channel || 'email'}] Sending invitation to ${expert.name} (${expert.email})`);
+        console.log(`  Project: ${project.name}`);
+        console.log(`  Invitation URL: ${invitationUrl}`);
+        console.log(`  Vetting Questions: ${vettingQuestions.length}`);
+        
+        results.push({
+          expertId: expert.id,
+          expertName: expert.name,
+          email: expert.email,
+          invitationUrl,
+          status: "sent",
+        });
+      }
+      
+      res.json({
+        message: `Invitations sent to ${results.length} experts`,
+        channel: channel || 'email',
+        results,
+      });
+    } catch (error) {
+      console.error("Send invitations error:", error);
+      res.status(500).json({ error: "Failed to send invitations" });
+    }
+  });
+
+  // ==================== EXPERT INVITATION (PUBLIC) ====================
+  // Get invitation details by token (for expert to view project and questions)
+  app.get("/api/expert-invite/:token", async (req, res) => {
+    try {
+      const token = req.params.token;
+      const pe = await storage.getProjectExpertByToken(token);
+      
+      if (!pe) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+      
+      // Check if already responded
+      if (pe.status === "accepted" || pe.status === "declined") {
+        return res.status(400).json({ 
+          error: "This invitation has already been responded to",
+          status: pe.status
+        });
+      }
+      
+      // Get project details
+      const project = await storage.getProject(pe.projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+      
+      // Get expert details
+      const expert = await storage.getExpert(pe.expertId);
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+      
+      // Get vetting questions
+      const vettingQuestions = await storage.getVettingQuestionsByProject(pe.projectId);
+      
+      res.json({
+        projectExpertId: pe.id,
+        project: {
+          id: project.id,
+          name: project.name,
+          clientName: project.clientName,
+          industry: project.industry,
+          projectOverview: project.projectOverview,
+          description: project.description,
+        },
+        expert: {
+          id: expert.id,
+          name: expert.name,
+          email: expert.email,
+        },
+        vettingQuestions: vettingQuestions.map(q => ({
+          id: q.id,
+          question: q.question,
+          orderIndex: q.orderIndex,
+          isRequired: q.isRequired,
+        })),
+        invitedAt: pe.invitedAt,
+      });
+    } catch (error) {
+      console.error("Get invitation error:", error);
+      res.status(500).json({ error: "Failed to fetch invitation details" });
+    }
+  });
+
+  // Accept invitation with VQ answers
+  app.post("/api/expert-invite/:token/accept", async (req, res) => {
+    try {
+      const token = req.params.token;
+      const { vqAnswers, availabilityNote } = req.body;
+      
+      const pe = await storage.getProjectExpertByToken(token);
+      
+      if (!pe) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+      
+      if (pe.status === "accepted" || pe.status === "declined") {
+        return res.status(400).json({ 
+          error: "This invitation has already been responded to",
+          status: pe.status
+        });
+      }
+      
+      // Update project-expert with answers and status
+      const updated = await storage.updateProjectExpert(pe.id, {
+        status: "accepted",
+        respondedAt: new Date(),
+        vqAnswers,
+        availabilityNote,
+      });
+      
+      res.json({
+        message: "Thank you, your response has been recorded.",
+        status: "accepted",
+      });
+    } catch (error) {
+      console.error("Accept invitation error:", error);
+      res.status(500).json({ error: "Failed to accept invitation" });
+    }
+  });
+
+  // Decline invitation
+  app.post("/api/expert-invite/:token/decline", async (req, res) => {
+    try {
+      const token = req.params.token;
+      const { reason } = req.body;
+      
+      const pe = await storage.getProjectExpertByToken(token);
+      
+      if (!pe) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+      
+      if (pe.status === "accepted" || pe.status === "declined") {
+        return res.status(400).json({ 
+          error: "This invitation has already been responded to",
+          status: pe.status
+        });
+      }
+      
+      // Update project-expert with declined status
+      const updated = await storage.updateProjectExpert(pe.id, {
+        status: "declined",
+        respondedAt: new Date(),
+        notes: reason || null,
+      });
+      
+      res.json({
+        message: "Thank you, your response has been recorded.",
+        status: "declined",
+      });
+    } catch (error) {
+      console.error("Decline invitation error:", error);
+      res.status(500).json({ error: "Failed to decline invitation" });
     }
   });
 

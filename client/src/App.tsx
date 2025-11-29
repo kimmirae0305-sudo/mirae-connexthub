@@ -10,6 +10,7 @@ import { AuthProvider, ProtectedRoute } from "@/lib/auth";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Projects from "@/pages/projects";
+import ProjectDetail from "@/pages/project-detail";
 import Experts from "@/pages/experts";
 import Clients from "@/pages/clients";
 import Vetting from "@/pages/vetting";
@@ -18,6 +19,7 @@ import Consultations from "@/pages/consultations";
 import Usage from "@/pages/usage";
 import Analytics from "@/pages/analytics";
 import ExpertRegister from "@/pages/expert-register";
+import ExpertInvite from "@/pages/expert-invite";
 import NotFound from "@/pages/not-found";
 
 function MainLayout({ children }: { children: React.ReactNode }) {
@@ -55,11 +57,17 @@ function Router() {
       <Route path="/register/:token">
         {(params) => <ExpertRegister token={params.token} />}
       </Route>
+      <Route path="/expert-invite/:token">
+        {(params) => <ExpertInvite token={params.token} />}
+      </Route>
       <Route path="/">
         <MainLayout><Dashboard /></MainLayout>
       </Route>
       <Route path="/projects">
         <MainLayout><Projects /></MainLayout>
+      </Route>
+      <Route path="/projects/:id">
+        <MainLayout><ProjectDetail /></MainLayout>
       </Route>
       <Route path="/experts">
         <MainLayout><Experts /></MainLayout>

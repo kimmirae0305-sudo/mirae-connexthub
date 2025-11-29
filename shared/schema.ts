@@ -102,7 +102,8 @@ export const projectExperts = pgTable("project_experts", {
   assignedAt: timestamp("assigned_at").defaultNow().notNull(),
   invitedAt: timestamp("invited_at"),
   respondedAt: timestamp("responded_at"),
-  vqAnswers: jsonb("vq_answers").$type<{ questionId: number; answer: string }[]>(),
+  invitationToken: text("invitation_token").unique(),
+  vqAnswers: jsonb("vq_answers").$type<{ questionId: number; questionText: string; answerText: string }[]>(),
   availabilityNote: text("availability_note"),
   notes: text("notes"),
 });

@@ -1,0 +1,166 @@
+I want to update the "Create New Project" flow and the Project detail page so that they better match an Expert Network Service workflow.
+
+Please implement the following changes:
+
+-------------------------------------------------
+1) UPDATE THE "CREATE NEW PROJECT" MODAL
+-------------------------------------------------
+
+Current modal fields:
+- Project Name
+- Client Name
+- Link to Organization
+- Client POC Name
+- Client POC Email
+- Industry
+- Status
+- Project Overview
+- Detailed Description
+- Budget
+- Start Date
+- End Date
+
+Required changes:
+
+1. Remove the "Budget" field completely from:
+   - The Create New Project modal UI
+   - The Project model/data schema (if present)
+   - Any validation or backend logic related to Budget
+
+2. Add a "Vetting Questions" section inside the project creation flow.
+
+   - In the Create New Project modal, add a Vetting Questions area that allows:
+     - Adding multiple questions (dynamic list)
+     - Each question is a simple text input or textarea
+     - Ability to add/remove questions
+   - Store these questions in the Project model as:
+     vettingQuestions: [
+       { id, questionText }
+     ]
+
+3. Ensure that when a project is created:
+   - The vettingQuestions array is saved along with the project.
+   - The Project detail page displays the vetting questions clearly.
+
+-------------------------------------------------
+2) EXPERT SEARCH + ATTACHMENT INSIDE PROJECT
+-------------------------------------------------
+
+On the Project detail page, I need a full expert sourcing workflow:
+
+1. Add an "Expert Search & Attach" panel or tab inside a project.
+
+2. The panel should include:
+   - A search bar to search existing experts in the database by:
+     - name
+     - company
+     - title
+     - skills / expertise keywords (if available in the Expert model)
+   - Optional filters such as:
+     - country / timezone
+     - rate range
+
+3. Display the search results in a table:
+   - Columns: Expert Name, Title, Company, Country/Timezone, Rate, Actions
+   - Each row should have a checkbox to select experts.
+
+4. When one or more experts are selected:
+   - Allow attaching them to the current project:
+     - Create or use a ProjectExpert (assignment) model:
+       {
+         id,
+         projectId,
+         expertId,
+         status,        // Invited, Accepted, Declined, Shortlisted, etc.
+         vqAnswers: [], // will be filled later
+         invitedAt
+       }
+   - Show attached experts in a separate table inside the project view:
+     - Columns: Expert Name, Status, Invited At, Last Response, etc.
+
+-------------------------------------------------
+3) BULK EMAIL / WHATSAPP INVITATIONS
+-------------------------------------------------
+
+From the list of attached experts for a given project, I need bulk messaging:
+
+1. Add a "Send Invitation" button above the attached experts table.
+   - The user can select multiple attached experts (checkboxes) and then click "Send Invitation".
+
+2. When clicked, open a modal to confirm and send:
+   - The modal should show:
+     - Project name
+     - Number of experts selected
+     - A message preview including an invitation link
+   - For now, implement these as backend endpoints that simulate sending and log to the console, e.g.:
+     - POST /api/projects/:projectId/invitations/email
+     - POST /api/projects/:projectId/invitations/whatsapp
+   - The payload should include:
+     - projectId
+     - list of expertIds
+     - generated invitationUrl for each expert
+
+3. For each ProjectExpert assignment, generate a **unique invitation link** that contains at least:
+   - projectId
+   - expertId
+   - and a secure token
+
+   For example:
+   - /expert-invite/:token
+   where token encodes projectId + expertId.
+
+4. The invitation message should include this project-specific link so that the expert can click it to respond.
+
+-------------------------------------------------
+4) EXPERT INVITATION PAGE (VIEW VQ + SAMPLE ANSWERS)
+-------------------------------------------------
+
+When the expert clicks the invitation link (/expert-invite/:token):
+
+1. Decode the token:
+   - Identify projectId and expertId
+   - Load:
+     - The project overview (name, client, high-level description)
+     - The vettingQuestions array for that project
+
+2. On this page, show:
+   - Basic project summary
+   - All vetting questions in order
+   - For each question, a textarea for the expert to respond / provide sample answers
+
+3. At the bottom, add buttons:
+   - "Accept & Submit Answers"
+   - "Decline"
+
+4. If the expert clicks "Accept & Submit Answers":
+   - Save their answers into the ProjectExpert.vqAnswers field as an array:
+     vqAnswers: [
+       { questionId, questionText, answerText }
+     ]
+   - Update ProjectExpert.status = "Accepted"
+
+5. If they click "Decline":
+   - Update ProjectExpert.status = "Declined"
+
+6. Show a simple confirmation message on success:
+   - "Thank you, your response has been recorded."
+
+-------------------------------------------------
+5) UI / DATA INTEGRATION
+-------------------------------------------------
+
+- Ensure that the Project detail view shows:
+  - The list of vetting questions
+  - The list of attached experts
+  - Each expert’s latest status (Invited, Accepted, Declined)
+  - An indicator if vqAnswers have been submitted
+
+- Update the backend and frontend so all of this is wired together:
+  - Create/update any required API endpoints for:
+    - Searching experts
+    - Attaching experts to a project
+    - Bulk invitation sending (email/WhatsApp simulation)
+    - Handling expert invitation links
+    - Saving VQ answers & acceptance status
+
+Please keep the existing UI styling (clean SaaS modal style) while applying these changes.

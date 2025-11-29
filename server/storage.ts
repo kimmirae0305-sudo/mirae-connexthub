@@ -70,6 +70,12 @@ export interface IStorage {
   getExpert(id: number): Promise<Expert | undefined>;
   getExpertByEmail(email: string): Promise<Expert | undefined>;
   searchExperts(query: string): Promise<Expert[]>;
+  searchExpertsAdvanced(params: {
+    query?: string;
+    country?: string;
+    minRate?: number;
+    maxRate?: number;
+  }): Promise<Expert[]>;
   createExpert(expert: InsertExpert): Promise<Expert>;
   updateExpert(id: number, expert: Partial<InsertExpert>): Promise<Expert | undefined>;
   deleteExpert(id: number): Promise<boolean>;
@@ -84,9 +90,11 @@ export interface IStorage {
   // Project Experts
   getProjectExperts(): Promise<ProjectExpert[]>;
   getProjectExpert(id: number): Promise<ProjectExpert | undefined>;
+  getProjectExpertByToken(token: string): Promise<ProjectExpert | undefined>;
   getProjectExpertsByProject(projectId: number): Promise<ProjectExpert[]>;
   getProjectExpertsByExpert(expertId: number): Promise<ProjectExpert[]>;
   createProjectExpert(assignment: InsertProjectExpert): Promise<ProjectExpert>;
+  createProjectExpertsBulk(assignments: InsertProjectExpert[]): Promise<ProjectExpert[]>;
   updateProjectExpert(id: number, assignment: Partial<InsertProjectExpert>): Promise<ProjectExpert | undefined>;
   deleteProjectExpert(id: number): Promise<boolean>;
 
@@ -257,6 +265,57 @@ export class DatabaseStorage implements IStorage {
       .orderBy(experts.name);
   }
 
+  async searchExpertsAdvanced(params: {
+    query?: string;
+    country?: string;
+    minRate?: number;
+    maxRate?: number;
+  }): Promise<Expert[]> {
+    const conditions = [];
+    
+    if (params.query) {
+      const searchPattern = `%${params.query}%`;
+      conditions.push(
+        or(
+          ilike(experts.name, searchPattern),
+          ilike(experts.expertise, searchPattern),
+          ilike(experts.industry, searchPattern),
+          ilike(experts.company, searchPattern),
+          ilike(experts.jobTitle, searchPattern),
+          ilike(experts.bio, searchPattern)
+        )
+      );
+    }
+    
+    if (params.country) {
+      const countryPattern = `%${params.country}%`;
+      conditions.push(
+        or(
+          ilike(experts.country, countryPattern),
+          ilike(experts.timezone, countryPattern)
+        )
+      );
+    }
+    
+    if (params.minRate !== undefined) {
+      conditions.push(sql`CAST(${experts.hourlyRate} AS DECIMAL) >= ${params.minRate}`);
+    }
+    
+    if (params.maxRate !== undefined) {
+      conditions.push(sql`CAST(${experts.hourlyRate} AS DECIMAL) <= ${params.maxRate}`);
+    }
+    
+    if (conditions.length === 0) {
+      return db.select().from(experts).orderBy(experts.name);
+    }
+    
+    return db
+      .select()
+      .from(experts)
+      .where(and(...conditions))
+      .orderBy(experts.name);
+  }
+
   async createExpert(expert: InsertExpert): Promise<Expert> {
     const [newExpert] = await db.insert(experts).values(expert).returning();
     return newExpert;
@@ -321,6 +380,11 @@ export class DatabaseStorage implements IStorage {
     return pe || undefined;
   }
 
+  async getProjectExpertByToken(token: string): Promise<ProjectExpert | undefined> {
+    const [pe] = await db.select().from(projectExperts).where(eq(projectExperts.invitationToken, token));
+    return pe || undefined;
+  }
+
   async getProjectExpertsByProject(projectId: number): Promise<ProjectExpert[]> {
     return db
       .select()
@@ -338,6 +402,11 @@ export class DatabaseStorage implements IStorage {
   async createProjectExpert(assignment: InsertProjectExpert): Promise<ProjectExpert> {
     const [newAssignment] = await db.insert(projectExperts).values(assignment as any).returning();
     return newAssignment;
+  }
+
+  async createProjectExpertsBulk(assignments: InsertProjectExpert[]): Promise<ProjectExpert[]> {
+    if (assignments.length === 0) return [];
+    return db.insert(projectExperts).values(assignments as any[]).returning();
   }
 
   async updateProjectExpert(id: number, assignment: Partial<InsertProjectExpert>): Promise<ProjectExpert | undefined> {
