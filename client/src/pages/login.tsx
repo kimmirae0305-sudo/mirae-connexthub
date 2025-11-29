@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Lock } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import logoUrl from "@assets/Logo_1764384177823.png";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email"),
@@ -70,8 +71,8 @@ export default function Login() {
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4" data-testid="page-login">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <Lock className="h-6 w-6 text-primary" />
+          <div className="mx-auto mb-4">
+            <img src={logoUrl} alt="Mirae Connext" className="h-20 w-20" />
           </div>
           <CardTitle className="text-2xl font-bold" data-testid="text-login-title">
             Mirae Connext
