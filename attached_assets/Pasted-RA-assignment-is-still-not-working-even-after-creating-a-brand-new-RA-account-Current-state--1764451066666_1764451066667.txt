@@ -1,0 +1,66 @@
+RA assignment is still not working, even after creating a brand-new RA account.
+
+Current state:
+
+- In the Employees module I now have at least one user with:
+  - Role: "Research Associate"
+  - Status: Active = true
+- However, in Projects → [Any Project] → RA Sourcing → "Assign RAs to Project",
+  the modal still shows: "No RAs available".
+
+So the system is still not returning any RA users for the project assignment modal.
+
+I need you to debug the RA list endpoint step by step.
+
+1) Show me the exact backend endpoint that the Project → RA Sourcing → "Assign RAs" modal is calling.
+   - URL and HTTP method (for example: GET /api/projects/:id/ras or similar).
+
+2) Inside that endpoint, before any filtering, log ALL active employees:
+
+   console.log("[RA DEBUG] All active employees:", employees.map(e => ({
+     id: e.id,
+     name: e.name,
+     email: e.email,
+     role: e.role,
+     isActive: e.isActive,
+     normalizedRole: normalizeRole(e.role),
+   })));
+
+3) Then log the filtered RA list that is actually returned to the frontend:
+
+   console.log("[RA DEBUG] Filtered RA list for project", projectId, raList);
+
+4) Make sure the filtering logic is correct:
+
+   - It should treat any employee with role "Research Associate" (case-insensitive)
+     as RA, for example:
+
+       normalizeRole(role) === "ra"
+
+   - It should NOT require the email to match the currently logged-in user.
+   - It should only require:
+       isActive === true
+       normalizedRole === "ra"
+
+5) Frontend side:
+   - In the React code for the "Assign RAs to Project" modal, please log the
+     response from the RA list endpoint:
+
+       console.log("[RA DEBUG] RAs fetched for project", projectId, ras);
+
+   - Confirm whether the frontend is receiving an empty array or if the data is
+     being filtered out again on the client.
+
+6) After fixing:
+
+   - When I open the "Assign RAs" modal, I should see all active 
+     "Research Associate" users in the list (e.g. Michael Lee and the new RA user).
+   - I should be able to select one or more and click "Save Assignments" with a 200 response.
+   - If I then log in as that RA user, I should:
+     - See the "Consultations" module in the sidebar.
+     - See only consultations for projects where this RA is assigned.
+
+Right now the UI still says "No RAs available", which means the RA list endpoint
+is not returning any rows after filtering. Please use the logs above to show me
+exactly what employees are being loaded and why none of them pass the RA filter,
+then adjust the filtering logic accordingly.
