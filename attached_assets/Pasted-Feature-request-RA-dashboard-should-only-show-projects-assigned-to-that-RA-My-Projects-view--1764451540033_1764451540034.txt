@@ -1,0 +1,54 @@
+Feature request: RA dashboard should only show projects assigned to that RA (“My Projects” view)
+
+Right now, RAs (Research Associate role) can see the global Projects list, which is not ideal.  
+I want a scoped “My Projects” experience for RA users.
+
+Requirements:
+
+1) Role in scope
+   - Applies to users with role = "Research Associate" (RA).
+   - Admin and Project Manager views must remain unchanged (they see all projects).
+
+2) Default behavior for RAs
+   - When a Research Associate logs in and opens the Projects section:
+     - They should see ONLY the projects where they are assigned as an RA.
+   - Assignment can be based on:
+     - The RA assigned in the RA Sourcing tab, or
+     - Any existing RA–Project relation you already store.
+
+3) UI options (any of these is fine, pick the cleanest):
+   Option A: “My Projects” tab
+   - For RA role, in the Projects view:
+     - Tab 1: “My Projects” (default, filtered by assignedTo = current RA)
+     - Tab 2: (optional) “All Projects” (only if permissions allow; can be hidden for RAs)
+
+   Option B: Filter chip
+   - Add a filter chip at the top: “Assigned to me”.
+   - For RAs, this filter is ON by default and cannot be turned off.
+   - For Admin/PM, the filter is optional.
+
+4) Filtering logic
+   - Backend or frontend filtering is OK, but the behavior must be:
+     - RA sees a project only if:
+       - currentUser.id is in that project’s assigned RAs list.
+   - If a RA is not assigned to any project yet:
+     - Show empty state:
+       “No projects assigned yet. Once you’re assigned to a project, it will appear here.”
+
+5) Permissions consistency
+   - From the RA “My Projects” list, the RA should only be able to:
+     - View project details (angles & VQ, existing experts, RA sourcing related to them).
+     - Manage RA-sourced experts for that project (if that’s part of the RA role).
+   - RAs must not be able to:
+     - See financials, client invoices, or admin-only fields.
+     - See or edit projects they are not assigned to (even via direct URL).
+
+6) Future extension (optional but nice to have)
+   - In the RA’s Consultations view, use the same logic:
+     - Show only consultations linked to projects assigned to that RA.
+   - This keeps the RA experience fully scoped: “My Projects” and “My Consultations”.
+
+Summary:
+- For Research Associate users, the Projects dashboard should become a “My Projects” view,
+  automatically filtered to only show projects where they are assigned.
+- Admin / PM behavior must remain unchanged.
