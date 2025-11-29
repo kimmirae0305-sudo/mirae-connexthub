@@ -17,7 +17,8 @@ import {
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
-import { authMiddleware, loginHandler, getMeHandler, type AuthRequest } from "./auth";
+import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles, hashPassword, type AuthRequest } from "./auth";
+import { insertClientSchema } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -92,6 +93,180 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  // ==================== EMPLOYEES (ADMIN ONLY) ====================
+  app.get("/api/employees", authMiddleware, requireAdmin, async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch employees" });
+    }
+  });
+
+  app.post("/api/employees", authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
+    try {
+      const { fullName, localPart, role, tempPassword } = req.body;
+      
+      if (!fullName || !localPart || !role || !tempPassword) {
+        return res.status(400).json({ error: "fullName, localPart, role, and tempPassword are required" });
+      }
+      
+      if (!["admin", "pm", "ra", "finance"].includes(role)) {
+        return res.status(400).json({ error: "Invalid role. Must be admin, pm, ra, or finance" });
+      }
+      
+      const email = `${localPart.toLowerCase()}@miraeconnext.com`;
+      
+      // Check if email already exists
+      const existingUser = await storage.getUserByEmail(email);
+      if (existingUser) {
+        return res.status(400).json({ error: "An employee with this email already exists" });
+      }
+      
+      const passwordHash = await hashPassword(tempPassword);
+      
+      const user = await storage.createUser({
+        fullName,
+        email,
+        passwordHash,
+        role,
+        isActive: true,
+      });
+      
+      // Remove passwordHash from response
+      const { passwordHash: _, ...safeUser } = user;
+      res.status(201).json(safeUser);
+    } catch (error) {
+      console.error("Create employee error:", error);
+      res.status(500).json({ error: "Failed to create employee" });
+    }
+  });
+
+  app.put("/api/employees/:id", authMiddleware, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { fullName, role, isActive } = req.body;
+      
+      const updateData: any = {};
+      if (fullName !== undefined) updateData.fullName = fullName;
+      if (role !== undefined) {
+        if (!["admin", "pm", "ra", "finance"].includes(role)) {
+          return res.status(400).json({ error: "Invalid role. Must be admin, pm, ra, or finance" });
+        }
+        updateData.role = role;
+      }
+      if (isActive !== undefined) updateData.isActive = isActive;
+      
+      const user = await storage.updateUser(id, updateData);
+      if (!user) {
+        return res.status(404).json({ error: "Employee not found" });
+      }
+      
+      // Remove passwordHash from response
+      const { passwordHash: _, ...safeUser } = user;
+      res.json(safeUser);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update employee" });
+    }
+  });
+
+  app.post("/api/employees/:id/reset-password", authMiddleware, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { tempPassword } = req.body;
+      
+      if (!tempPassword) {
+        return res.status(400).json({ error: "tempPassword is required" });
+      }
+      
+      const passwordHash = await hashPassword(tempPassword);
+      const user = await storage.updateUser(id, { passwordHash });
+      
+      if (!user) {
+        return res.status(404).json({ error: "Employee not found" });
+      }
+      
+      res.json({ message: "Password reset successfully" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  });
+
+  // ==================== CLIENTS (CRM) ====================
+  // All roles can view clients
+  app.get("/api/clients", authMiddleware, async (req, res) => {
+    try {
+      const { q, industry, status } = req.query;
+      const clients = await storage.searchClients({
+        query: q as string | undefined,
+        industry: industry as string | undefined,
+        status: status as string | undefined,
+      });
+      res.json(clients);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch clients" });
+    }
+  });
+
+  app.get("/api/clients/:id", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const client = await storage.getClient(id);
+      if (!client) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+      res.json(client);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch client" });
+    }
+  });
+
+  // Only admin and pm can create clients
+  app.post("/api/clients", authMiddleware, requireRoles("admin", "pm", "ra"), async (req, res) => {
+    try {
+      const result = insertClientSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const client = await storage.createClient(result.data);
+      res.status(201).json(client);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create client" });
+    }
+  });
+
+  // Only admin and pm can update clients
+  app.patch("/api/clients/:id", authMiddleware, requireRoles("admin", "pm", "ra"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = insertClientSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const client = await storage.updateClient(id, result.data);
+      if (!client) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+      res.json(client);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update client" });
+    }
+  });
+
+  // Only admin can delete clients
+  app.delete("/api/clients/:id", authMiddleware, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const deleted = await storage.deleteClient(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Client not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete client" });
     }
   });
 

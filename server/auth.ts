@@ -62,6 +62,32 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
   next();
 }
 
+export function requireRoles(...allowedRoles: string[]) {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ error: "Forbidden - Insufficient permissions" });
+    }
+    
+    next();
+  };
+}
+
+export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ error: "Forbidden - Admin access required" });
+  }
+  
+  next();
+}
+
 export async function loginHandler(req: Request, res: Response) {
   try {
     const { email, password } = req.body;
