@@ -1,0 +1,213 @@
+I want to refine the internal permissions of the Mirae Connext app.
+
+Important:
+- There is NO client portal.
+- Only employees log in.
+- Clients are managed as records (companies/contacts) inside a "Clients" module.
+
+I need:
+
+1) An Employee management module (admin-only).
+2) Role-based menu/page visibility for internal roles.
+3) A simple Clients module (if not already present) for managing client records.
+
+The existing roles are internal only:
+- admin
+- pm
+- ra
+- finance
+
+-------------------------------------------------
+1) EMPLOYEE MANAGEMENT MODULE (ADMIN ONLY)
+-------------------------------------------------
+
+Goal:
+- Only admin users (e.g. admin@miraeconnext.com with role=admin) can manage employees.
+- Admin can create new employee accounts.
+- Employee emails use the company domain: @miraeconnext.com
+
+a) USER MODEL / STORAGE
+
+Ensure the User model has at least:
+
+- id
+- fullName
+- email (unique)
+- role: "admin" | "pm" | "ra" | "finance"
+- passwordHash
+- isActive (boolean)
+- createdAt
+
+Use the same storage that auth/login uses (for now a JSON file or similar is fine, but structure it to be swappable to a real DB later).
+
+b) BACKEND ROUTES (ADMIN ONLY)
+
+Create these API routes, all protected with:
+- auth middleware
+- role = 'admin' only
+
+1. GET /api/employees
+   - Return list of all users (employees).
+
+2. POST /api/employees
+   - Accept payload:
+     {
+       fullName: string,
+       localPart: string,   // e.g. "diego"
+       role: "admin" | "pm" | "ra" | "finance",
+       tempPassword: string
+     }
+   - Construct email as:
+     email = `${localPart}@miraeconnext.com`
+   - Hash tempPassword server-side and store as passwordHash.
+   - Set isActive = true by default.
+   - Return the created user.
+
+3. PUT /api/employees/:id
+   - Update:
+     - fullName
+     - role
+     - isActive
+
+4. POST /api/employees/:id/reset-password
+   - Accept { tempPassword }
+   - Hash and update passwordHash.
+
+All of the above must return 403 if the logged-in user is not admin.
+
+c) EMPLOYEES PAGE (FRONTEND)
+
+- Add an "Employees" (or "Team") page that is visible ONLY to admin users.
+- In the sidebar, add an "Employees" menu entry under an "Admin" section.
+- Show it only if currentUser.role === "admin".
+
+Employees page:
+
+- Table columns:
+  - Name
+  - Email
+  - Role
+  - Status (Active / Inactive)
+  - Created At
+  - Actions (Edit, Deactivate, Reset Password)
+
+- "Create Employee" button opens a modal:
+  - Full name
+  - Email local part (text input; display @miraeconnext.com next to it)
+  - Role (admin, pm, ra, finance)
+  - Temporary password
+
+On submit → call POST /api/employees → refresh table.
+
+-------------------------------------------------
+2) CLIENTS MODULE (INTERNAL CRM)
+-------------------------------------------------
+
+If a Clients module does not exist yet, create it.
+
+a) CLIENT MODEL
+
+Define a Client model with fields such as:
+
+- id
+- clientName (company name)
+- country / region
+- industry
+- mainContactName
+- mainContactEmail
+- mainContactPhone (optional)
+- notes
+- createdAt
+- status (Active, Inactive, Prospect, etc.)
+
+b) BACKEND ROUTES
+
+Create standard CRUD routes, protected by auth:
+
+- GET /api/clients
+  - Accessible by: admin, pm, ra, finance
+- POST /api/clients
+  - Accessible by: admin, pm (and optionally ra)
+- PUT /api/clients/:id
+  - Accessible by: admin, pm (and optionally ra)
+- DELETE (or soft delete) /api/clients/:id
+  - Accessible by: admin only
+
+c) CLIENTS PAGE (FRONTEND)
+
+- Add a "Clients" page accessible to internal users (depending on role).
+- Clients page includes:
+  - Table with columns:
+    - Client Name
+    - Country / Region
+    - Industry
+    - Main Contact
+    - Status
+    - Created At
+    - Actions (View / Edit)
+  - "Add Client" button (for admin/pm; RA optional).
+  - Filter/search by client name, industry, status.
+
+- Clicking a row opens a Client detail view showing:
+  - Basic info
+  - Notes
+  - (Optional) related projects list.
+
+-------------------------------------------------
+3) ROLE-BASED PAGE VISIBILITY (FRONTEND)
+-------------------------------------------------
+
+I want each role to see different menus/pages.  
+Please centralize permissions in a single configuration and reuse it across sidebar + route guards.
+
+a) ROLE → PAGES CONFIG
+
+Create something like:
+
+const ROLE_PERMISSIONS = {
+  admin:   ["dashboard", "projects", "experts", "assignments", "cu", "invoices", "clients", "employees", "settings"],
+  pm:      ["dashboard", "projects", "experts", "assignments", "clients", "cu"],
+  ra:      ["dashboard", "projects", "experts", "assignments", "clients"],
+  finance: ["dashboard", "cu", "invoices", "clients"]
+};
+
+Adjust the page keys so they match actual routes/components.
+
+b) SIDEBAR / NAVIGATION
+
+- Use ROLE_PERMISSIONS[currentUser.role] to decide which menu items show in the sidebar.
+- Examples:
+  - admin: sees everything including Employees.
+  - pm: sees Clients, Projects, Experts, CU but not Employees or pure system settings.
+  - ra: sees Projects, Experts, Clients but not Finance or Employees.
+  - finance: sees CU, Invoices, Clients but not Expert sourcing tools.
+
+c) ROUTE GUARD BY ROLE
+
+- Extend the existing ProtectedRoute or create a RoleGuard component that:
+  - Takes allowedRoles or uses ROLE_PERMISSIONS internally.
+  - If currentUser.role is not allowed for that route:
+    - Show "Not authorized" or redirect to a safe page (e.g., dashboard).
+
+- Wrap key pages:
+  - Employees page → allowedRoles = ["admin"]
+  - Invoices page → allowedRoles = ["finance", "admin"]
+  - Clients page → allowedRoles = ["admin", "pm", "ra", "finance"]
+  - Projects/Experts/Assignments → allowedRoles = ["admin", "pm", "ra"]
+  - CU page → allowedRoles = ["admin", "pm", "finance"]
+
+d) BACKEND CHECKS (RECOMMENDED)
+
+- For sensitive APIs (employees, invoices, etc.), make sure the backend also checks the role:
+  - e.g., an admin-only middleware for /api/employees.
+  - Finance-only or finance+admin for /api/invoices and certain CU actions.
+
+-------------------------------------------------
+4) DOCUMENTATION
+-------------------------------------------------
+
+At the end, please output a short summary that explains:
+- How the Employee module works and which role can use it (admin only).
+- How client records are managed in the Clients module.
+- Which pages each role can see.
+- How the ROLE_PERMISSIONS configuration connects to the sidebar and route guards.
