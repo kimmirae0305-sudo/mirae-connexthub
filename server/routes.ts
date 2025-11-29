@@ -25,7 +25,7 @@ import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles,
 import { insertClientSchema } from "@shared/schema";
 import { eq, and, gte, lt, sql } from "drizzle-orm";
 import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
-import { startOfMonth, endOfMonth } from "date-fns";
+import { startOfMonth, addMonths } from "date-fns";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -1346,11 +1346,12 @@ export async function registerRoutes(
       
       // Get month boundaries in Brazil timezone
       const monthStartInBrazil = startOfMonth(brazilNow);
-      const monthEndInBrazil = endOfMonth(brazilNow);
+      const nextMonthStartInBrazil = addMonths(monthStartInBrazil, 1);
       
       // Convert back to UTC for database queries (DST-safe)
+      // Use start of next month as exclusive upper bound
       const monthStartUTC = fromZonedTime(monthStartInBrazil, BRAZIL_TZ);
-      const monthEndUTC = fromZonedTime(new Date(monthEndInBrazil.getTime() + 24 * 60 * 60 * 1000 - 1), BRAZIL_TZ);
+      const monthEndUTC = fromZonedTime(nextMonthStartInBrazil, BRAZIL_TZ);
 
       // Base query: get all completed call records for this month with joins
       const baseQuery = await db
@@ -1376,8 +1377,9 @@ export async function registerRoutes(
         .where(
           and(
             eq(callRecords.status, "completed"),
-            gte(sql`COALESCE(${callRecords.completedAt}, ${callRecords.callDate})`, monthStartUTC),
-            lt(sql`COALESCE(${callRecords.completedAt}, ${callRecords.callDate})`, monthEndUTC)
+            sql`${callRecords.completedAt} IS NOT NULL`,
+            gte(callRecords.completedAt, monthStartUTC),
+            lt(callRecords.completedAt, monthEndUTC)
           )
         );
 
@@ -1392,14 +1394,14 @@ export async function registerRoutes(
       const userId = user.id;
 
       if (role === "ra") {
-        // RA: Only calls where expert was sourced by this RA AND call is within 60 days of sourcing
+        // RA: Only calls where expert was sourced by this RA AND call completed within 60 days of sourcing
         filteredCalls = baseQuery.filter((call) => {
           if (call.expertSourcedByRaId !== userId) return false;
-          if (!call.expertSourcedAt) return false;
+          if (!call.expertSourcedAt || !call.completedAt) return false;
           
           const sourcedAt = new Date(call.expertSourcedAt);
-          const callDate = call.completedAt ? new Date(call.completedAt) : new Date(call.callDate);
-          const daysDiff = (callDate.getTime() - sourcedAt.getTime()) / (1000 * 60 * 60 * 24);
+          const completedAt = new Date(call.completedAt);
+          const daysDiff = (completedAt.getTime() - sourcedAt.getTime()) / (1000 * 60 * 60 * 24);
           
           return daysDiff <= 60;
         });

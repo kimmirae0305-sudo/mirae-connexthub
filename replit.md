@@ -95,7 +95,7 @@ Preferred communication style: Simple, everyday language.
 **Third-Party UI Libraries**
 - @radix-ui/* components (20+ primitives) for accessible, unstyled UI building blocks
 - lucide-react for consistent iconography
-- date-fns for date formatting and manipulation
+- date-fns and date-fns-tz for date formatting with DST-safe timezone support (America/Sao_Paulo)
 - embla-carousel-react for carousel/slider components
 - cmdk for command palette interfaces
 
