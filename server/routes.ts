@@ -1356,76 +1356,87 @@ export async function registerRoutes(
       
       // Process each expert directly (don't use internal fetch)
       for (const peId of projectExpertIds) {
-        const pe = await storage.getProjectExpert(peId);
-        if (!pe || pe.projectId !== projectId) continue;
-        
-        const expert = await storage.getExpert(pe.expertId);
-        if (!expert) continue;
-        
-        console.log(`[EMAIL] Sending project invitation to ${expert.email} for project ${projectId}`);
-        
-        // Update angleIds for this expert
-        await storage.updateProjectExpert(peId, {
-          angleIds: angleIds && angleIds.length > 0 ? angleIds : undefined,
-        });
-        
-        // Create or get invitation link using expertInvitationLinks table
-        let link = await storage.getExpertInvitationLinkByProjectAndExpert(projectId, expert.id);
-        
-        if (!link) {
-          const token = crypto.randomBytes(32).toString("hex");
-          link = await storage.createExpertInvitationLink({
-            token,
-            projectId,
-            expertId: expert.id,
-            angleIds: angleIds && angleIds.length > 0 ? angleIds : pe.angleIds,
-            inviteType: "existing",
-            recruitedBy: "system",
-            isActive: true,
-            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-          });
-        }
-        
-        // Generate invitation URL
-        const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
-        const invitationUrl = `${baseUrl}/expert/project-invite/${link.token}`;
-        
-        // Send email invitation
-        let emailSent = false;
-        if (channel === 'email' || channel === 'both' || !channel) {
-          try {
-            console.log(`[EMAIL] Calling sendExpertInvitationEmail for ${expert.email}`);
-            emailSent = await sendExpertInvitationEmail({
-              expertName: expert.name,
-              expertEmail: expert.email,
-              projectName: project.name,
-              clientName: project.clientName || "Client",
-              industry: project.industry || undefined,
-              invitationUrl,
-              vettingQuestionsCount: vettingQuestions.length,
+        try {
+          const pe = await storage.getProjectExpert(peId);
+          if (!pe || pe.projectId !== projectId) continue;
+          
+          const expert = await storage.getExpert(pe.expertId);
+          if (!expert) continue;
+          
+          console.log(`[EMAIL] Sending project invitation to ${expert.email} for project ${projectId}`);
+          
+          // Determine angles to use: use provided angleIds if given and non-empty, otherwise use existing
+          const finalAngleIds = angleIds && angleIds.length > 0 ? angleIds : pe.angleIds;
+          
+          // Create or get invitation link using expertInvitationLinks table
+          let link = await storage.getExpertInvitationLinkByProjectAndExpert(projectId, expert.id);
+          
+          if (!link) {
+            const token = crypto.randomBytes(32).toString("hex");
+            link = await storage.createExpertInvitationLink({
+              token,
+              projectId,
+              expertId: expert.id,
+              angleIds: finalAngleIds,
+              inviteType: "existing",
+              recruitedBy: "system",
+              isActive: true,
+              expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
             });
-            console.log(`[EMAIL] Email ${emailSent ? 'SENT' : 'FAILED'} to ${expert.email}`);
-          } catch (emailError) {
-            console.error(`[EMAIL] Error sending to ${expert.email}:`, emailError);
           }
+          
+          // Generate invitation URL
+          const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
+          const invitationUrl = `${baseUrl}/expert/project-invite/${link.token}`;
+          
+          // Send email invitation
+          let emailSent = false;
+          if (channel === 'email' || channel === 'both' || !channel) {
+            try {
+              console.log(`[EMAIL] Calling sendExpertInvitationEmail for ${expert.email}`);
+              emailSent = await sendExpertInvitationEmail({
+                expertName: expert.name,
+                expertEmail: expert.email,
+                projectName: project.name,
+                clientName: project.clientName || "Client",
+                industry: project.industry || undefined,
+                invitationUrl,
+                vettingQuestionsCount: vettingQuestions.length,
+              });
+              console.log(`[EMAIL] Email ${emailSent ? 'SENT' : 'FAILED'} to ${expert.email}`);
+            } catch (emailError) {
+              console.error(`[EMAIL] Error sending to ${expert.email}:`, emailError);
+            }
+          }
+          
+          // Update status to invited ONLY AFTER EMAIL IS SENT
+          // Include angleIds update if provided and non-empty
+          const updateData: any = {
+            status: "invited",
+            invitationStatus: "invited",
+            invitedAt: new Date(),
+            invitationToken: link.token,
+          };
+          
+          // Only add angleIds to update if we have values to set
+          if (angleIds && angleIds.length > 0) {
+            updateData.angleIds = angleIds;
+          }
+          
+          await storage.updateProjectExpert(peId, updateData);
+          
+          results.push({
+            expertId: expert.id,
+            expertName: expert.name,
+            email: expert.email,
+            invitationUrl,
+            status: emailSent ? "sent" : "failed",
+            emailSent,
+          });
+        } catch (expertError) {
+          console.error(`[INVITES] Error processing expert ${peId}:`, expertError);
+          // Continue processing other experts even if one fails
         }
-        
-        // Update status to invited ONLY AFTER EMAIL IS SENT
-        await storage.updateProjectExpert(peId, {
-          status: "invited",
-          invitationStatus: "invited",
-          invitedAt: new Date(),
-          invitationToken: link.token,
-        });
-        
-        results.push({
-          expertId: expert.id,
-          expertName: expert.name,
-          email: expert.email,
-          invitationUrl,
-          status: emailSent ? "sent" : "failed",
-          emailSent,
-        });
       }
       
       const successCount = results.filter(r => r.emailSent).length;
@@ -1433,7 +1444,8 @@ export async function registerRoutes(
       
       console.log(`[API] Bulk-send complete: ${successCount} sent, ${failedCount} failed`);
       
-      res.json({
+      // Return 200 with proper summary (success if at least one was sent)
+      res.status(200).json({
         message: `Invitations: ${successCount} sent, ${failedCount} failed`,
         channel: channel || 'email',
         results,
@@ -1444,8 +1456,14 @@ export async function registerRoutes(
         }
       });
     } catch (error) {
-      console.error("[API] Bulk send invitations error:", error);
-      res.status(500).json({ error: "Failed to send bulk invitations" });
+      console.error("[INVITES] Bulk send invitations error:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to send bulk invitations";
+      res.status(500).json({ 
+        success: false,
+        error: "Failed to send bulk invitations",
+        details: errorMessage,
+        message: errorMessage
+      });
     }
   });
 

@@ -1,0 +1,41 @@
+The bulk invitation flow from the Project → Existing Experts view is still failing.
+
+UI behavior:
+- I select an expert in Internal Experts Pipeline.
+- Click "Create Invitations".
+- In the modal, I see "Assign Angles (Optional)" with "No angles available".
+- I click "Send Invitations".
+- A red toast appears: "Failed to send invitations".
+- No email is received.
+
+This time, I need to see the real error.
+
+Please do the following:
+
+1) Log the backend error clearly:
+   - In the bulk invite endpoint that handles this request, wrap the logic in a try/catch and add:
+       console.error("[INVITES] Bulk invite error:", error);
+   - If the error comes from SMTP / Nodemailer, log the full error message and stack.
+
+2) Expose the error in the API response:
+   - When the bulk invite fails, return an HTTP 500 (or 4xx) with a JSON body like:
+       { success: false, message: "reason...", details: ... }
+   - Do NOT swallow the error or always return 200.
+
+3) Frontend debugging:
+   - In the handler for the "Send Invitations" button (Project → Existing Experts):
+       - Log the response in the browser console:
+         console.log("[INVITES] Bulk invite response (Project view):", res.status, data);
+       - If res.ok is false, log data.message as well.
+
+4) Show me:
+   - The exact API endpoint being called from the Project view (URL and method).
+   - The current implementation of that endpoint.
+   - One real example of the failing response (status code and JSON body) from the logs.
+
+5) After you identify the root cause, fix it so that:
+   - The bulk invite endpoint returns 200 and { success: true, summary: { total, sent, failed } } when emails are successfully sent.
+   - Only when ALL invitations fail should it return an error and trigger the red "Failed to send invitations" toast.
+   - SMTP-related issues (e.g. authentication, invalid sender, rate limits) are handled with a clear error message.
+
+I need a concrete explanation of WHY the current request is failing (e.g., SMTP error, invalid APP_BASE_URL, missing field, etc.) plus a fix so the invitations work reliably from the Project view.
