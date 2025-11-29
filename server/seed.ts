@@ -10,6 +10,7 @@ import {
   callRecords,
   expertInvitationLinks
 } from "@shared/schema";
+import bcrypt from "bcryptjs";
 
 async function seed() {
   console.log("Seeding database...");
@@ -20,11 +21,13 @@ async function seed() {
     return;
   }
 
+  const passwordHash = await bcrypt.hash("Test1234!", 10);
+
   const insertedUsers = await db.insert(users).values([
-    { email: "admin@mirae.com", fullName: "Admin User", role: "admin" },
-    { email: "pm@mirae.com", fullName: "Sarah Chen", role: "pm" },
-    { email: "ra@mirae.com", fullName: "Michael Lee", role: "ra" },
-    { email: "finance@mirae.com", fullName: "Emily Park", role: "finance" },
+    { email: "admin@miraeconnext.com", fullName: "Admin User", role: "admin", passwordHash },
+    { email: "pm@miraeconnext.com", fullName: "Sarah Chen", role: "pm", passwordHash },
+    { email: "ra@miraeconnext.com", fullName: "Michael Lee", role: "ra", passwordHash },
+    { email: "finance@miraeconnext.com", fullName: "Emily Park", role: "finance", passwordHash },
   ]).returning();
 
   console.log(`Inserted ${insertedUsers.length} users`);

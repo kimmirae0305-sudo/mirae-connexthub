@@ -1,5 +1,6 @@
-import type { Express } from "express";
+import type { Express, Router } from "express";
 import { createServer, type Server } from "http";
+import { Router as ExpressRouter } from "express";
 import { storage } from "./storage";
 import {
   insertProjectSchema,
@@ -16,13 +17,20 @@ import {
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
+import { authMiddleware, loginHandler, getMeHandler, type AuthRequest } from "./auth";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // ==================== USERS ====================
-  app.get("/api/users", async (req, res) => {
+  // ==================== AUTH ROUTES (PUBLIC) ====================
+  app.post("/api/auth/login", loginHandler);
+  app.get("/api/auth/me", authMiddleware, getMeHandler);
+
+  // Note: Some routes need to be public for expert registration
+  // Public routes: /api/auth/*, /api/register-expert/:token, /api/invitation-links/:token (GET only)
+  // ==================== USERS (PROTECTED) ====================
+  app.get("/api/users", authMiddleware, async (req, res) => {
     try {
       const users = await storage.getUsers();
       res.json(users);
@@ -31,7 +39,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/users/:id", async (req, res) => {
+  app.get("/api/users/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const user = await storage.getUser(id);
@@ -44,7 +52,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", authMiddleware, async (req, res) => {
     try {
       const result = insertUserSchema.safeParse(req.body);
       if (!result.success) {
@@ -57,7 +65,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/users/:id", async (req, res) => {
+  app.patch("/api/users/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = insertUserSchema.partial().safeParse(req.body);
@@ -74,7 +82,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/users/:id", async (req, res) => {
+  app.delete("/api/users/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const deleted = await storage.deleteUser(id);
@@ -88,7 +96,7 @@ export async function registerRoutes(
   });
 
   // ==================== CLIENT ORGANIZATIONS ====================
-  app.get("/api/client-organizations", async (req, res) => {
+  app.get("/api/client-organizations", authMiddleware, async (req, res) => {
     try {
       const organizations = await storage.getClientOrganizations();
       res.json(organizations);
@@ -97,7 +105,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/client-organizations/:id", async (req, res) => {
+  app.get("/api/client-organizations/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const org = await storage.getClientOrganization(id);
@@ -110,7 +118,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/client-organizations/:id/projects", async (req, res) => {
+  app.get("/api/client-organizations/:id/projects", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const projects = await storage.getProjectsByOrganization(id);
@@ -120,7 +128,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/client-organizations/:id/pocs", async (req, res) => {
+  app.get("/api/client-organizations/:id/pocs", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const pocs = await storage.getClientPocsByOrganization(id);
@@ -130,7 +138,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/client-organizations", async (req, res) => {
+  app.post("/api/client-organizations", authMiddleware, async (req, res) => {
     try {
       const result = insertClientOrganizationSchema.safeParse(req.body);
       if (!result.success) {
@@ -143,7 +151,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/client-organizations/:id", async (req, res) => {
+  app.patch("/api/client-organizations/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = insertClientOrganizationSchema.partial().safeParse(req.body);
@@ -160,7 +168,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/client-organizations/:id", async (req, res) => {
+  app.delete("/api/client-organizations/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const deleted = await storage.deleteClientOrganization(id);
@@ -174,7 +182,7 @@ export async function registerRoutes(
   });
 
   // ==================== CLIENT POCS ====================
-  app.get("/api/client-pocs", async (req, res) => {
+  app.get("/api/client-pocs", authMiddleware, async (req, res) => {
     try {
       const organizationId = req.query.organizationId ? parseInt(req.query.organizationId as string) : null;
       const pocs = organizationId
@@ -186,7 +194,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/client-pocs", async (req, res) => {
+  app.post("/api/client-pocs", authMiddleware, async (req, res) => {
     try {
       const result = insertClientPocSchema.safeParse(req.body);
       if (!result.success) {
@@ -199,7 +207,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/client-pocs/:id", async (req, res) => {
+  app.patch("/api/client-pocs/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = insertClientPocSchema.partial().safeParse(req.body);
@@ -216,7 +224,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/client-pocs/:id", async (req, res) => {
+  app.delete("/api/client-pocs/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const deleted = await storage.deleteClientPoc(id);
@@ -230,7 +238,7 @@ export async function registerRoutes(
   });
 
   // ==================== PROJECTS ====================
-  app.get("/api/projects", async (req, res) => {
+  app.get("/api/projects", authMiddleware, async (req, res) => {
     try {
       const projects = await storage.getProjects();
       res.json(projects);
@@ -239,7 +247,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/projects/:id", async (req, res) => {
+  app.get("/api/projects/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const project = await storage.getProject(id);
@@ -252,7 +260,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/projects", async (req, res) => {
+  app.post("/api/projects", authMiddleware, async (req, res) => {
     try {
       const result = insertProjectSchema.safeParse(req.body);
       if (!result.success) {
@@ -265,7 +273,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/projects/:id", async (req, res) => {
+  app.patch("/api/projects/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = insertProjectSchema.partial().safeParse(req.body);
@@ -282,7 +290,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/projects/:id", async (req, res) => {
+  app.delete("/api/projects/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const deleted = await storage.deleteProject(id);
@@ -296,7 +304,7 @@ export async function registerRoutes(
   });
 
   // ==================== EXPERTS ====================
-  app.get("/api/experts", async (req, res) => {
+  app.get("/api/experts", authMiddleware, async (req, res) => {
     try {
       const query = req.query.search as string;
       const experts = query
@@ -308,7 +316,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/experts/:id", async (req, res) => {
+  app.get("/api/experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const expert = await storage.getExpert(id);
@@ -321,7 +329,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/experts/:id/consultations", async (req, res) => {
+  app.get("/api/experts/:id/consultations", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const callRecords = await storage.getCallRecordsByExpert(id);
@@ -331,7 +339,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/experts/:id/assignments", async (req, res) => {
+  app.get("/api/experts/:id/assignments", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const assignments = await storage.getProjectExpertsByExpert(id);
@@ -341,7 +349,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/experts", async (req, res) => {
+  app.post("/api/experts", authMiddleware, async (req, res) => {
     try {
       const result = insertExpertSchema.safeParse(req.body);
       if (!result.success) {
@@ -354,7 +362,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/experts/:id", async (req, res) => {
+  app.patch("/api/experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = insertExpertSchema.partial().safeParse(req.body);
@@ -371,7 +379,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/experts/:id", async (req, res) => {
+  app.delete("/api/experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const deleted = await storage.deleteExpert(id);
@@ -385,7 +393,7 @@ export async function registerRoutes(
   });
 
   // ==================== VETTING QUESTIONS ====================
-  app.get("/api/vetting-questions", async (req, res) => {
+  app.get("/api/vetting-questions", authMiddleware, async (req, res) => {
     try {
       const projectId = req.query.projectId ? parseInt(req.query.projectId as string) : null;
       const questions = projectId
@@ -397,7 +405,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/vetting-questions", async (req, res) => {
+  app.post("/api/vetting-questions", authMiddleware, async (req, res) => {
     try {
       const result = insertVettingQuestionSchema.safeParse(req.body);
       if (!result.success) {
@@ -410,7 +418,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/vetting-questions/:id", async (req, res) => {
+  app.patch("/api/vetting-questions/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = insertVettingQuestionSchema.partial().safeParse(req.body);
@@ -427,7 +435,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/vetting-questions/:id", async (req, res) => {
+  app.delete("/api/vetting-questions/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const deleted = await storage.deleteVettingQuestion(id);
@@ -441,7 +449,7 @@ export async function registerRoutes(
   });
 
   // ==================== PROJECT EXPERTS ====================
-  app.get("/api/project-experts", async (req, res) => {
+  app.get("/api/project-experts", authMiddleware, async (req, res) => {
     try {
       const projectId = req.query.projectId ? parseInt(req.query.projectId as string) : null;
       const assignments = projectId
@@ -453,7 +461,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/project-experts/:id", async (req, res) => {
+  app.get("/api/project-experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const assignment = await storage.getProjectExpert(id);
@@ -466,7 +474,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/project-experts", async (req, res) => {
+  app.post("/api/project-experts", authMiddleware, async (req, res) => {
     try {
       const result = insertProjectExpertSchema.safeParse(req.body);
       if (!result.success) {
@@ -479,7 +487,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/project-experts/:id", async (req, res) => {
+  app.patch("/api/project-experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = insertProjectExpertSchema.partial().safeParse(req.body);
@@ -497,7 +505,7 @@ export async function registerRoutes(
   });
 
   // Send invitation to expert
-  app.post("/api/project-experts/:id/invite", async (req, res) => {
+  app.post("/api/project-experts/:id/invite", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const assignment = await storage.updateProjectExpert(id, {
@@ -514,7 +522,7 @@ export async function registerRoutes(
   });
 
   // Expert accepts invitation
-  app.post("/api/project-experts/:id/accept", async (req, res) => {
+  app.post("/api/project-experts/:id/accept", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { vqAnswers, availabilityNote } = req.body;
@@ -534,7 +542,7 @@ export async function registerRoutes(
   });
 
   // Expert declines invitation
-  app.post("/api/project-experts/:id/decline", async (req, res) => {
+  app.post("/api/project-experts/:id/decline", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const assignment = await storage.updateProjectExpert(id, {
@@ -551,7 +559,7 @@ export async function registerRoutes(
   });
 
   // Client selects expert
-  app.post("/api/project-experts/:id/select", async (req, res) => {
+  app.post("/api/project-experts/:id/select", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const assignment = await storage.updateProjectExpert(id, {
@@ -566,7 +574,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/project-experts/:id", async (req, res) => {
+  app.delete("/api/project-experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const deleted = await storage.deleteProjectExpert(id);
@@ -580,7 +588,7 @@ export async function registerRoutes(
   });
 
   // ==================== CALL RECORDS ====================
-  app.get("/api/call-records", async (req, res) => {
+  app.get("/api/call-records", authMiddleware, async (req, res) => {
     try {
       const projectId = req.query.projectId ? parseInt(req.query.projectId as string) : null;
       const expertId = req.query.expertId ? parseInt(req.query.expertId as string) : null;
@@ -599,7 +607,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/call-records/:id", async (req, res) => {
+  app.get("/api/call-records/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const record = await storage.getCallRecord(id);
@@ -612,7 +620,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/call-records", async (req, res) => {
+  app.post("/api/call-records", authMiddleware, async (req, res) => {
     try {
       const result = insertCallRecordSchema.safeParse(req.body);
       if (!result.success) {
@@ -625,7 +633,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/call-records/:id", async (req, res) => {
+  app.patch("/api/call-records/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = insertCallRecordSchema.partial().safeParse(req.body);
@@ -643,7 +651,7 @@ export async function registerRoutes(
   });
 
   // Schedule consultation
-  app.post("/api/call-records/:id/schedule", async (req, res) => {
+  app.post("/api/call-records/:id/schedule", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { scheduledStartTime, scheduledEndTime, zoomLink } = req.body;
@@ -663,7 +671,7 @@ export async function registerRoutes(
   });
 
   // Complete consultation
-  app.post("/api/call-records/:id/complete", async (req, res) => {
+  app.post("/api/call-records/:id/complete", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { actualDurationMinutes, recordingUrl, notes } = req.body;
@@ -686,7 +694,7 @@ export async function registerRoutes(
   });
 
   // Cancel consultation
-  app.post("/api/call-records/:id/cancel", async (req, res) => {
+  app.post("/api/call-records/:id/cancel", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { reason } = req.body;
@@ -703,7 +711,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/call-records/:id", async (req, res) => {
+  app.delete("/api/call-records/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const deleted = await storage.deleteCallRecord(id);
@@ -717,7 +725,7 @@ export async function registerRoutes(
   });
 
   // ==================== EXPERT INVITATION LINKS ====================
-  app.get("/api/invitation-links", async (req, res) => {
+  app.get("/api/invitation-links", authMiddleware, async (req, res) => {
     try {
       const links = await storage.getExpertInvitationLinks();
       res.json(links);
@@ -745,7 +753,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/invitation-links", async (req, res) => {
+  app.post("/api/invitation-links", authMiddleware, async (req, res) => {
     try {
       const token = crypto.randomBytes(32).toString("hex");
       const result = insertExpertInvitationLinkSchema.safeParse({
@@ -807,7 +815,7 @@ export async function registerRoutes(
   });
 
   // ==================== USAGE RECORDS (LEGACY) ====================
-  app.get("/api/usage", async (req, res) => {
+  app.get("/api/usage", authMiddleware, async (req, res) => {
     try {
       const records = await storage.getUsageRecords();
       res.json(records);
@@ -816,7 +824,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/usage", async (req, res) => {
+  app.post("/api/usage", authMiddleware, async (req, res) => {
     try {
       const result = insertUsageRecordSchema.safeParse(req.body);
       if (!result.success) {
@@ -829,7 +837,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/usage/:id", async (req, res) => {
+  app.delete("/api/usage/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const deleted = await storage.deleteUsageRecord(id);

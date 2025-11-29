@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AuthProvider, ProtectedRoute } from "@/lib/auth";
+import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Projects from "@/pages/projects";
 import Experts from "@/pages/experts";
@@ -25,26 +27,31 @@ function MainLayout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <SidebarProvider style={sidebarStyle as React.CSSProperties}>
-      <div className="flex h-screen w-full">
-        <AppSidebar />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-background px-4">
-            <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <ThemeToggle />
-          </header>
-          <main className="flex-1 overflow-auto bg-background">
-            {children}
-          </main>
+    <ProtectedRoute>
+      <SidebarProvider style={sidebarStyle as React.CSSProperties}>
+        <div className="flex h-screen w-full">
+          <AppSidebar />
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-background px-4">
+              <SidebarTrigger data-testid="button-sidebar-toggle" />
+              <ThemeToggle />
+            </header>
+            <main className="flex-1 overflow-auto bg-background">
+              {children}
+            </main>
+          </div>
         </div>
-      </div>
-    </SidebarProvider>
+      </SidebarProvider>
+    </ProtectedRoute>
   );
 }
 
 function Router() {
   return (
     <Switch>
+      <Route path="/login">
+        <Login />
+      </Route>
       <Route path="/register/:token">
         {(params) => <ExpertRegister token={params.token} />}
       </Route>
@@ -86,8 +93,10 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Router />
-        <Toaster />
+        <AuthProvider>
+          <Router />
+          <Toaster />
+        </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

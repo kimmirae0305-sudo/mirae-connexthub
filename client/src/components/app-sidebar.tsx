@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Building2,
   Phone,
+  LogOut,
 } from "lucide-react";
 import {
   Sidebar,
@@ -22,6 +23,8 @@ import {
   SidebarMenuItem,
   SidebarFooter,
 } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/lib/auth";
 
 const mainNavItems = [
   {
@@ -76,6 +79,28 @@ const managementItems = [
 
 export function AppSidebar() {
   const [location] = useLocation();
+  const { user, logout } = useAuth();
+
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  const getRoleBadge = (role: string) => {
+    const roleLabels: Record<string, string> = {
+      admin: "Admin",
+      pm: "Project Manager",
+      ra: "Research Associate",
+      finance: "Finance",
+      client: "Client",
+      expert: "Expert",
+    };
+    return roleLabels[role] || role;
+  };
 
   return (
     <Sidebar>
@@ -139,14 +164,31 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border p-4">
-        <div className="flex items-center gap-3 px-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-            <span className="text-xs font-medium">AD</span>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3 px-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+              <span className="text-xs font-medium" data-testid="text-user-initials">
+                {user ? getInitials(user.fullName) : "??"}
+              </span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-medium" data-testid="text-user-name">
+                {user?.fullName || "Loading..."}
+              </span>
+              <span className="text-xs text-muted-foreground" data-testid="text-user-role">
+                {user ? getRoleBadge(user.role) : ""}
+              </span>
+            </div>
           </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium">Admin User</span>
-            <span className="text-xs text-muted-foreground">admin@mirae.com</span>
-          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={logout}
+            title="Sign out"
+            data-testid="button-logout"
+          >
+            <LogOut className="h-4 w-4" />
+          </Button>
         </div>
       </SidebarFooter>
     </Sidebar>
