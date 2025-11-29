@@ -40,6 +40,15 @@ Preferred communication style: Simple, everyday language.
     - **Endpoints**: `/api/kpi/my-monthly` for user-specific KPIs; `/api/employees/:id/overview` for admin/finance employee oversight, including accounts list for PMs.
 - **Migration Strategy**: Drizzle Kit for schema migrations, with schema definitions in `shared/schema.ts`.
 
+### Recent Changes (This Session)
+
+- **Expert Profile Editor**: New RA interface for editing expert profiles
+  - Components: `/expert-profile/:id` route with ExpertProfileEditor component
+  - Fields: Name, Email, Phone, LinkedIn URL, Work History (company/job title/years), Biography
+  - UI: Card layout with Edit/Save buttons, read-only by default, inline table editing for work history
+  - API: Uses PATCH `/api/experts/:id` to update expert records
+  - Schema: Added `workHistory` (JSONB array) and `biography` (text) fields to experts table
+
 ### Core Features
 
 - **Force Password Change on First Login**: New users must change a temporary password. Implemented via a `mustChangePassword` flag in the user model, frontend redirection, and a dedicated `/api/auth/change-password` endpoint.

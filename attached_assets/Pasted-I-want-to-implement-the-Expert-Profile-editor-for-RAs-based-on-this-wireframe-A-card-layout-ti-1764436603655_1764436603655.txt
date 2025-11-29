@@ -1,0 +1,96 @@
+I want to implement the Expert Profile editor for RAs based on this wireframe:
+
+- A card layout titled like "Advisor #12"
+- Top-right: two buttons "Edit" and "Save"
+- Basic info section:
+  - Name       (text)
+  - Email      (text)
+  - Phone      (text)
+  - LinkedIn URL (text)
+- Work History section:
+  - Table with columns: Company, Job title, From, To
+  - Each row is one experience entry
+  - Button "Add Experience" to append a new empty row
+- Biography section:
+  - Large multiline text area
+
+### Business logic
+
+1. When an expert completes the public registration form, their base profile must be automatically created in the database.
+   - That record should include at least: id, name, email, phone, LinkedIn URL, and any fields already captured in the registration form.
+   - Set default empty values for work history and biography if they are not provided by the expert.
+
+2. This Expert Profile editor is **internal** – only RAs use it.
+   - RAs open a profile using an expert/advisor ID.
+   - The screen fetches the advisor data from the database and populates:
+     - Name, email, phone, LinkedIn URL
+     - Work history list
+     - Biography
+
+3. Edit / Save behavior:
+   - By default, all fields are in read-only mode.
+   - When the RA clicks **Edit**:
+     - All fields become editable.
+   - When the RA clicks **Save**:
+     - Validate required fields (Name, Email at minimum).
+     - Save changes to the database (update the existing expert record, do not create a new one).
+     - Switch back to read-only mode.
+   - The profile must always show the most up-to-date information stored in the database.
+
+4. Work History behavior:
+   - Each entry has: `company`, `jobTitle`, `fromYear`, `toYear`.
+   - RAs can:
+     - Edit existing rows.
+     - Click "Add Experience" to add a new blank row at the end.
+     - Optionally delete a row (provide a small "Remove" or trash icon per row).
+   - Work history should be stored as an array in the expert record, e.g.:
+
+     workHistory: [
+       { company: "Innotech Solutions", jobTitle: "Software Engineer", fromYear: 2018, toYear: 2021 },
+       ...
+     ]
+
+5. Biography behavior:
+   - The RA writes or edits the biography based on the expert’s LinkedIn profile and/or direct communication.
+   - The biography should be written so that it aligns with the vetting questions for the project (no need to enforce this technically, but add a comment in the code).
+   - The biography field is a long text column in the database (string / text type).
+
+6. Data model (you can adapt the names to our existing schema, but keep the structure):
+
+   type WorkExperience = {
+     company: string;
+     jobTitle: string;
+     fromYear: number;
+     toYear: number;
+   };
+
+   type Expert = {
+     id: string;
+     name: string;
+     email: string;
+     phone?: string;
+     linkedinUrl?: string;
+     workHistory: WorkExperience[];
+     biography: string;
+     // other existing fields...
+   };
+
+7. Implementation requirements:
+
+   - Create a React (or the framework we are using) component like `<ExpertProfileEditor expertId="..." />`.
+   - On mount, fetch the expert data by `expertId` (mock API or real API depending on current project).
+   - Implement local state for:
+     - isEditing (boolean)
+     - expert data (form state)
+   - Map the form fields to the state and to the data model above.
+   - On Save:
+     - Call an update API endpoint (e.g. `PUT /api/experts/:id`) or equivalent function, passing the updated expert object.
+     - Handle loading and error states gracefully (disabled save button + error message if needed).
+
+8. Please:
+   - Show me the full implementation of the ExpertProfileEditor component.
+   - Include the functions that:
+     - Fetch an expert by ID.
+     - Update an expert in the database (or mocked service).
+   - Make the layout visually similar to the wireframe provided (simple card with sections and labels is enough).
+   - Add comments where I should later connect it to the real backend.

@@ -23,6 +23,7 @@ import ExpertRegister from "@/pages/expert-register";
 import ExpertInvite from "@/pages/expert-invite";
 import ExpertOnboarding from "@/pages/expert-onboarding";
 import ExpertProjectInvite from "@/pages/expert-project-invite";
+import ExpertProfile from "@/pages/expert-profile";
 import ChangePassword from "@/pages/change-password";
 import NotFound from "@/pages/not-found";
 
@@ -92,6 +93,9 @@ function Router() {
       </Route>
       <Route path="/experts">
         <MainLayout><Experts /></MainLayout>
+      </Route>
+      <Route path="/expert-profile/:id">
+        {(params) => <MainLayout><ExpertProfile /></MainLayout>}
       </Route>
       <Route path="/clients">
         <MainLayout><Clients /></MainLayout>
