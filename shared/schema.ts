@@ -90,17 +90,22 @@ export const experts = pgTable("experts", {
   phone: text("phone"),
   linkedinUrl: text("linkedin_url"),
   country: text("country"),
+  city: text("city"), // City for geographic filtering
   timezone: text("timezone"),
   whatsapp: text("whatsapp"),
   expertise: text("expertise").notNull(),
   areasOfExpertise: text("areas_of_expertise").array(),
   industry: text("industry").notNull(),
-  company: text("company"),
+  company: text("company"), // Current employer
+  pastEmployers: text("past_employers").array(), // List of past employer names
   jobTitle: text("job_title"),
   yearsOfExperience: integer("years_of_experience").notNull(),
   hourlyRate: decimal("hourly_rate", { precision: 10, scale: 2 }).notNull(),
   bio: text("bio"),
   status: text("status").notNull().default("available"), // available, busy, inactive
+  availableNow: boolean("available_now").default(true), // Whether expert is currently available
+  nextAvailableDate: timestamp("next_available_date"), // When expert becomes available next
+  totalHoursWorked: decimal("total_hours_worked", { precision: 10, scale: 2 }).default("0"), // Total hours in past projects
   recruitedBy: text("recruited_by"),
   sourcedByRaId: integer("sourced_by_ra_id").references(() => users.id),
   sourcedAt: timestamp("sourced_at"),

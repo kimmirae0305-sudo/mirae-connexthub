@@ -92,6 +92,8 @@ export interface IStorage {
   searchExpertsAdvanced(params: {
     query?: string;
     country?: string;
+    currentEmployer?: string;
+    pastEmployers?: string;
     minRate?: number;
     maxRate?: number;
     minYearsExperience?: number;
@@ -101,6 +103,8 @@ export interface IStorage {
     language?: string;
     hasPriorProjects?: boolean;
     minAcceptanceRate?: number;
+    minHoursWorked?: number;
+    availableOnly?: boolean;
     excludeProjectId?: number;
   }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number })[]>;
   createExpert(expert: InsertExpert): Promise<Expert>;
@@ -385,6 +389,8 @@ export class DatabaseStorage implements IStorage {
   async searchExpertsAdvanced(params: {
     query?: string;
     country?: string;
+    currentEmployer?: string;
+    pastEmployers?: string;
     minRate?: number;
     maxRate?: number;
     minYearsExperience?: number;
@@ -394,64 +400,108 @@ export class DatabaseStorage implements IStorage {
     language?: string;
     hasPriorProjects?: boolean;
     minAcceptanceRate?: number;
+    minHoursWorked?: number;
+    availableOnly?: boolean;
     excludeProjectId?: number;
   }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number })[]> {
     const conditions = [];
     
+    // 1) Domain Expertise / Skills (Keywords) - search across name, title, skills, bio
     if (params.query) {
-      const searchPattern = `%${params.query}%`;
-      conditions.push(
-        or(
-          ilike(experts.name, searchPattern),
-          ilike(experts.expertise, searchPattern),
-          sql`array_to_string(${experts.areasOfExpertise}, ',') ILIKE ${searchPattern}`,
-          ilike(experts.industry, searchPattern),
-          ilike(experts.company, searchPattern),
-          ilike(experts.jobTitle, searchPattern),
-          ilike(experts.bio, searchPattern)
-        )
-      );
+      const keywords = params.query.split(/[,\s]+/).filter(k => k.trim());
+      if (keywords.length > 0) {
+        const keywordConditions = keywords.map(keyword => {
+          const searchPattern = `%${keyword.trim()}%`;
+          return or(
+            ilike(experts.name, searchPattern),
+            ilike(experts.expertise, searchPattern),
+            sql`array_to_string(${experts.areasOfExpertise}, ',') ILIKE ${searchPattern}`,
+            ilike(experts.industry, searchPattern),
+            ilike(experts.company, searchPattern),
+            ilike(experts.jobTitle, searchPattern),
+            ilike(experts.bio, searchPattern)
+          );
+        });
+        // All keywords must match (AND logic within keywords)
+        keywordConditions.forEach(cond => conditions.push(cond));
+      }
     }
     
-    if (params.country) {
-      const countryPattern = `%${params.country}%`;
-      conditions.push(
-        or(
-          ilike(experts.country, countryPattern),
-          ilike(experts.timezone, countryPattern)
-        )
-      );
+    // 2) Industry / Sector - match if expert.industry contains at least one of provided industries
+    if (params.industry) {
+      const industries = params.industry.split(',').map(i => i.trim().toLowerCase()).filter(i => i);
+      if (industries.length > 0) {
+        const industryConditions = industries.map(ind => 
+          ilike(experts.industry, `%${ind}%`)
+        );
+        conditions.push(or(...industryConditions));
+      }
     }
     
-    if (params.minRate !== undefined) {
-      conditions.push(sql`CAST(${experts.hourlyRate} AS DECIMAL) >= ${params.minRate}`);
+    // 3) Current Employer - partial, case-insensitive match
+    if (params.currentEmployer) {
+      const employerPattern = `%${params.currentEmployer.trim()}%`;
+      conditions.push(ilike(experts.company, employerPattern));
     }
     
-    if (params.maxRate !== undefined) {
-      conditions.push(sql`CAST(${experts.hourlyRate} AS DECIMAL) <= ${params.maxRate}`);
+    // 4) Past Employers - match if any provided name appears in pastEmployers array
+    if (params.pastEmployers) {
+      const pastEmps = params.pastEmployers.split(',').map(e => e.trim().toLowerCase()).filter(e => e);
+      if (pastEmps.length > 0) {
+        const pastEmpConditions = pastEmps.map(emp =>
+          sql`array_to_string(${experts.pastEmployers}, ',') ILIKE ${'%' + emp + '%'}`
+        );
+        conditions.push(or(...pastEmpConditions));
+      }
     }
-
-    if (params.minYearsExperience !== undefined) {
-      conditions.push(sql`${experts.yearsOfExperience} >= ${params.minYearsExperience}`);
-    }
-
-    if (params.maxYearsExperience !== undefined) {
-      conditions.push(sql`${experts.yearsOfExperience} <= ${params.maxYearsExperience}`);
-    }
-
+    
+    // 5) Role / Seniority (Job Title) - partial, case-insensitive match
     if (params.jobTitle) {
       const titlePattern = `%${params.jobTitle}%`;
       conditions.push(ilike(experts.jobTitle, titlePattern));
     }
-
-    if (params.industry) {
-      const industryPattern = `%${params.industry}%`;
-      conditions.push(ilike(experts.industry, industryPattern));
+    
+    // 6) Geography / Location - match country, city, or timezone
+    if (params.country) {
+      const locations = params.country.split(',').map(l => l.trim().toLowerCase()).filter(l => l);
+      if (locations.length > 0) {
+        const locationConditions = locations.map(loc => {
+          const locPattern = `%${loc}%`;
+          return or(
+            ilike(experts.country, locPattern),
+            ilike(experts.city, locPattern),
+            ilike(experts.timezone, locPattern)
+          );
+        });
+        conditions.push(or(...locationConditions));
+      }
     }
-
+    
+    // 7) Experience Level - min/max years
+    if (params.minYearsExperience !== undefined) {
+      conditions.push(sql`${experts.yearsOfExperience} >= ${params.minYearsExperience}`);
+    }
+    if (params.maxYearsExperience !== undefined) {
+      conditions.push(sql`${experts.yearsOfExperience} <= ${params.maxYearsExperience}`);
+    }
+    
+    // 8) Language - match if languages array contains at least one of provided languages
     if (params.language) {
-      const langPattern = `%${params.language.toLowerCase()}%`;
-      conditions.push(sql`array_to_string(${experts.languages}, ',') ILIKE ${langPattern}`);
+      const langs = params.language.split(',').map(l => l.trim().toLowerCase()).filter(l => l);
+      if (langs.length > 0) {
+        const langConditions = langs.map(lang =>
+          sql`array_to_string(${experts.languages}, ',') ILIKE ${'%' + lang + '%'}`
+        );
+        conditions.push(or(...langConditions));
+      }
+    }
+    
+    // Rate filters (kept for backwards compatibility)
+    if (params.minRate !== undefined) {
+      conditions.push(sql`CAST(${experts.hourlyRate} AS DECIMAL) >= ${params.minRate}`);
+    }
+    if (params.maxRate !== undefined) {
+      conditions.push(sql`CAST(${experts.hourlyRate} AS DECIMAL) <= ${params.maxRate}`);
     }
     
     // Get base experts
@@ -501,6 +551,28 @@ export class DatabaseStorage implements IStorage {
     // Apply post-fetch filters
     let filtered = expertsWithMetrics;
 
+    // 9) Availability - filter by availableNow or nextAvailableDate within 7 days
+    if (params.availableOnly) {
+      const sevenDaysFromNow = new Date();
+      sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+      
+      filtered = filtered.filter(e => {
+        if (e.availableNow === true) return true;
+        if (e.nextAvailableDate && new Date(e.nextAvailableDate) <= sevenDaysFromNow) return true;
+        // Also check status for backwards compatibility
+        return e.status === 'available';
+      });
+    }
+
+    // 10a) Past Engagements - minimum hours worked
+    if (params.minHoursWorked !== undefined) {
+      filtered = filtered.filter(e => {
+        const hours = e.totalHoursWorked ? parseFloat(e.totalHoursWorked) : 0;
+        return hours >= params.minHoursWorked!;
+      });
+    }
+
+    // 10b) Past Engagements - only show experts with prior project involvement
     if (params.hasPriorProjects) {
       filtered = filtered.filter(e => (e.priorProjectCount ?? 0) > 0);
     }

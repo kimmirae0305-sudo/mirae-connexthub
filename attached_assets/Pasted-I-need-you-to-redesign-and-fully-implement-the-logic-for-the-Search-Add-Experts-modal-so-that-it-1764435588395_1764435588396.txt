@@ -1,0 +1,133 @@
+I need you to redesign and fully implement the logic for the "Search & Add Experts" modal so that it reflects the following prioritized filters, and that ALL filters work together correctly.
+
+### GOAL
+Implement an advanced expert search that supports these filters (in order of importance):
+
+1) Domain Expertise / Skills
+2) Industry / Sector
+3) Current Employer
+4) Past Employers
+5) Role / Seniority
+6) Geography / Location
+7) Experience Level
+8) Language
+9) Availability
+10) Past Engagements
+
+### UI REQUIREMENTS
+
+Keep the 2-column layout but update/confirm the fields as follows:
+
+LEFT COLUMN
+- Keywords / Expertise  (text input)
+- Current Employer      (text input)
+- Past Employers        (text input, comma-separated list)
+- Years of Experience   (min / max number inputs)
+- Availability          (checkbox: "Only show currently available experts")
+
+RIGHT COLUMN
+- Country / Location    (text input, can contain multiple cities/countries separated by commas)
+- Job Title             (text input)
+- Industry / Sector     (text input, comma-separated list)
+- Language              (text input, comma-separated list)
+- Past Engagements      (number input: "Minimum Hours Worked")
+- Checkbox: "Only show experts with prior project involvement"
+
+If some of these fields already exist, reuse them. If they do not exist, add them to the modal and wire them to the search function.
+
+### DATA MODEL (you can adapt names to the existing schema)
+
+Assume each expert object has at least:
+
+- name: string
+- title: string
+- skills: string[]            // tags for domain expertise
+- industries: string[]        // industry/sector tags
+- current_employer: string
+- past_employers: string[]    // list of company names
+- country: string
+- city: string
+- years_experience: number
+- seniority_level: string     // e.g. "Analyst", "Manager", "Director", "VP", "C-Level"
+- languages: string[]         // e.g. ["English", "Portuguese"]
+- available_now: boolean
+- next_available_date: Date   // optional
+- total_hours_worked: number  // total hours in past projects
+- projects: Project[]         // list of past projects
+
+If any of these fields do not exist, adapt the code to use the closest existing field and clearly comment where I should plug the real field names later.
+
+### FILTERING LOGIC
+
+Implement a single function, for example `filterExperts(experts, filters)`, that:
+
+- Receives the full experts list and a `filters` object with all the above fields.
+- Returns only experts that match **all active filters** (AND logic), where an "active filter" is a filter whose input is not empty / not null.
+
+Rules per filter:
+
+1) Domain Expertise / Skills (Keywords / Expertise)
+   - Search across: name, title, skills, bio (or equivalent text fields).
+   - Case-insensitive, partial match.
+   - If multiple keywords are entered (space or comma separated), match experts that contain ALL keywords in at least one of those fields.
+
+2) Industry / Sector
+   - Input: comma-separated list such as "Energy, Mining, Healthcare".
+   - Normalize to lowercase and trim spaces.
+   - Match if expert.industries contains AT LEAST ONE of the provided industries.
+
+3) Current Employer
+   - Partial, case-insensitive match on `current_employer`.
+
+4) Past Employers
+   - Input: comma-separated list of company names.
+   - Match if ANY of those names appear (partial, case-insensitive) inside `past_employers`.
+
+5) Role / Seniority
+   - `Job Title` field: partial, case-insensitive match on `title`.
+   - If there is a `seniority_level` dropdown or field, also filter by it when provided.
+
+6) Geography / Location
+   - Input can include country and/or city, separated by commas, e.g. "Brazil, São Paulo, Rio de Janeiro".
+   - Normalize and match against `country` and `city`.
+   - If any one of the provided locations matches the expert’s country or city, the expert passes this filter.
+
+7) Experience Level
+   - `Years of Experience` min/max.
+   - If min is provided, require `expert.years_experience >= min`.
+   - If max is provided, require `expert.years_experience <= max`.
+
+8) Language
+   - Input: comma-separated, e.g. "English, Portuguese".
+   - Normalize to lowercase.
+   - Expert passes if `languages` array contains at least one of those languages.
+
+9) Availability
+   - Checkbox: "Only show currently available experts".
+   - If checked, filter experts where:
+       `available_now === true`
+     OR (if `next_available_date` exists)
+       `next_available_date <= today + 7 days`  (you can choose a 7-day window and comment it).
+
+10) Past Engagements
+   - Number input: "Minimum Hours Worked".
+   - If provided, require `total_hours_worked >= minimum_hours`.
+   - Checkbox: "Only show experts with prior project involvement"
+     → require `projects.length > 0`.
+
+### BEHAVIOR
+
+- If no filters are active, return the full list of experts.
+- All active filters must be combined with AND logic.
+- Implement defensive checks so that missing fields do not break the function.
+
+### IMPLEMENTATION STEPS
+
+1. Find the current expert search function (e.g. `searchExperts`, `filterExperts`, or the API call used when the modal submits).
+2. Show me the current implementation in the response.
+3. Refactor it to use a `filterExperts(experts, filters)` function that implements all rules above.
+4. Update the modal so it builds the `filters` object based on user inputs and passes it to `filterExperts` (or to the backend API with equivalent parameters).
+5. Provide the full final code for:
+   - the `filterExperts` function
+   - any updated React/Vue/JSX code for the modal inputs and onSubmit handler.
+6. Finally, show a small test block with sample experts and filters t

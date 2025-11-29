@@ -818,6 +818,8 @@ export async function registerRoutes(
       const params = {
         query: req.query.q as string | undefined,
         country: req.query.country as string | undefined,
+        currentEmployer: req.query.currentEmployer as string | undefined,
+        pastEmployers: req.query.pastEmployers as string | undefined,
         minRate: req.query.minRate ? parseFloat(req.query.minRate as string) : undefined,
         maxRate: req.query.maxRate ? parseFloat(req.query.maxRate as string) : undefined,
         minYearsExperience: req.query.minYearsExperience ? parseInt(req.query.minYearsExperience as string) : undefined,
@@ -827,6 +829,8 @@ export async function registerRoutes(
         language: req.query.language as string | undefined,
         hasPriorProjects: req.query.hasPriorProjects === 'true',
         minAcceptanceRate: req.query.minAcceptanceRate ? parseInt(req.query.minAcceptanceRate as string) : undefined,
+        minHoursWorked: req.query.minHoursWorked ? parseFloat(req.query.minHoursWorked as string) : undefined,
+        availableOnly: req.query.availableOnly === 'true',
         excludeProjectId: req.query.excludeProjectId ? parseInt(req.query.excludeProjectId as string) : undefined,
       };
       const experts = await storage.searchExpertsAdvanced(params);

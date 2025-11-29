@@ -138,12 +138,16 @@ export default function ProjectDetail() {
   // Expert Search modal state
   const [isExpertSearchModalOpen, setIsExpertSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchCountry, setSearchCountry] = useState("");
+  const [searchCurrentEmployer, setSearchCurrentEmployer] = useState("");
+  const [searchPastEmployers, setSearchPastEmployers] = useState("");
   const [searchMinExp, setSearchMinExp] = useState("");
   const [searchMaxExp, setSearchMaxExp] = useState("");
+  const [searchAvailableOnly, setSearchAvailableOnly] = useState(false);
+  const [searchCountry, setSearchCountry] = useState("");
   const [searchJobTitle, setSearchJobTitle] = useState("");
   const [searchIndustry, setSearchIndustry] = useState("");
   const [searchLanguage, setSearchLanguage] = useState("");
+  const [searchMinHoursWorked, setSearchMinHoursWorked] = useState("");
   const [searchHasPriorProjects, setSearchHasPriorProjects] = useState(false);
   const [searchMinAcceptanceRate, setSearchMinAcceptanceRate] = useState("");
 
@@ -177,21 +181,27 @@ export default function ProjectDetail() {
       { 
         query: searchQuery, country: searchCountry, minExp: searchMinExp, maxExp: searchMaxExp, 
         jobTitle: searchJobTitle, industry: searchIndustry, language: searchLanguage,
-        hasPriorProjects: searchHasPriorProjects, minAcceptanceRate: searchMinAcceptanceRate,
+        hasPriorProjects: searchHasPriorProjects, currentEmployer: searchCurrentEmployer,
+        pastEmployers: searchPastEmployers, availableOnly: searchAvailableOnly,
+        minHoursWorked: searchMinHoursWorked, minAcceptanceRate: searchMinAcceptanceRate,
         excludeProjectId: projectId
       },
     ],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (searchQuery) params.append("q", searchQuery);
+      if (searchCurrentEmployer) params.append("currentEmployer", searchCurrentEmployer);
+      if (searchPastEmployers) params.append("pastEmployers", searchPastEmployers);
       if (searchCountry) params.append("country", searchCountry);
       if (searchMinExp) params.append("minYearsExperience", searchMinExp);
       if (searchMaxExp) params.append("maxYearsExperience", searchMaxExp);
       if (searchJobTitle) params.append("jobTitle", searchJobTitle);
       if (searchIndustry) params.append("industry", searchIndustry);
       if (searchLanguage) params.append("language", searchLanguage);
-      if (searchHasPriorProjects) params.append("hasPriorProjects", "true");
+      if (searchAvailableOnly) params.append("availableOnly", "true");
+      if (searchMinHoursWorked) params.append("minHoursWorked", searchMinHoursWorked);
       if (searchMinAcceptanceRate) params.append("minAcceptanceRate", searchMinAcceptanceRate);
+      if (searchHasPriorProjects) params.append("hasPriorProjects", "true");
       if (projectId) params.append("excludeProjectId", String(projectId));
       const res = await fetch(`/api/experts/search?${params}`, {
         headers: {
@@ -1901,111 +1911,170 @@ export default function ProjectDetail() {
 
       {/* Expert Search Modal */}
       <Dialog open={isExpertSearchModalOpen} onOpenChange={setIsExpertSearchModalOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Search & Add Experts</DialogTitle>
             <DialogDescription>
-              Find experts from your database with advanced filters
+              Find experts from your database with advanced filters (all filters work together)
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4 overflow-y-auto flex-1">
+            {/* Two-column filter layout */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Keywords / Expertise</label>
-                <Input
-                  placeholder="Search by name, expertise, role..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  data-testid="input-search-query"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Country / Location</label>
-                <Input
-                  placeholder="e.g., Brazil, São Paulo"
-                  value={searchCountry}
-                  onChange={(e) => setSearchCountry(e.target.value)}
-                  data-testid="input-search-country"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Years of Experience</label>
-                <div className="flex gap-2">
+              {/* LEFT COLUMN */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Keywords / Expertise</label>
                   <Input
-                    type="number"
-                    placeholder="Min"
-                    value={searchMinExp}
-                    onChange={(e) => setSearchMinExp(e.target.value)}
-                    data-testid="input-min-exp"
+                    placeholder="Search by name, skills, bio..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    data-testid="input-search-query"
                   />
+                  <p className="text-xs text-muted-foreground">Multiple keywords separated by space or comma</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Current Employer</label>
                   <Input
-                    type="number"
-                    placeholder="Max"
-                    value={searchMaxExp}
-                    onChange={(e) => setSearchMaxExp(e.target.value)}
-                    data-testid="input-max-exp"
+                    placeholder="e.g., Google, Tesla"
+                    value={searchCurrentEmployer}
+                    onChange={(e) => setSearchCurrentEmployer(e.target.value)}
+                    data-testid="input-current-employer"
                   />
                 </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Past Employers</label>
+                  <Input
+                    placeholder="e.g., Apple, Microsoft, Amazon"
+                    value={searchPastEmployers}
+                    onChange={(e) => setSearchPastEmployers(e.target.value)}
+                    data-testid="input-past-employers"
+                  />
+                  <p className="text-xs text-muted-foreground">Comma-separated list of company names</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Years of Experience</label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      placeholder="Min"
+                      value={searchMinExp}
+                      onChange={(e) => setSearchMinExp(e.target.value)}
+                      data-testid="input-min-exp"
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Max"
+                      value={searchMaxExp}
+                      onChange={(e) => setSearchMaxExp(e.target.value)}
+                      data-testid="input-max-exp"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pt-2">
+                  <Checkbox
+                    id="available-only"
+                    checked={searchAvailableOnly}
+                    onCheckedChange={(checked) => setSearchAvailableOnly(checked === true)}
+                    data-testid="checkbox-available-only"
+                  />
+                  <label htmlFor="available-only" className="text-sm font-medium cursor-pointer">
+                    Only show currently available experts
+                  </label>
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Job Title</label>
-                <Input
-                  placeholder="e.g., Director, Manager"
-                  value={searchJobTitle}
-                  onChange={(e) => setSearchJobTitle(e.target.value)}
-                  data-testid="input-search-job-title"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Industry</label>
-                <Input
-                  placeholder="e.g., Finance, Healthcare"
-                  value={searchIndustry}
-                  onChange={(e) => setSearchIndustry(e.target.value)}
-                  data-testid="input-search-industry"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Language</label>
-                <Input
-                  placeholder="e.g., English, Portuguese"
-                  value={searchLanguage}
-                  onChange={(e) => setSearchLanguage(e.target.value)}
-                  data-testid="input-search-language"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Min Acceptance Rate (%)</label>
-                <Input
-                  type="number"
-                  placeholder="e.g., 50"
-                  value={searchMinAcceptanceRate}
-                  onChange={(e) => setSearchMinAcceptanceRate(e.target.value)}
-                  data-testid="input-min-acceptance-rate"
-                />
-              </div>
-              <div className="flex items-center gap-2 pt-4">
-                <Checkbox
-                  id="prior-projects"
-                  checked={searchHasPriorProjects}
-                  onCheckedChange={(checked) => setSearchHasPriorProjects(checked === true)}
-                  data-testid="checkbox-prior-projects"
-                />
-                <label htmlFor="prior-projects" className="text-sm font-medium cursor-pointer">
-                  Only show experts with prior project involvement
-                </label>
+
+              {/* RIGHT COLUMN */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Country / Location</label>
+                  <Input
+                    placeholder="e.g., Brazil, São Paulo, Rio"
+                    value={searchCountry}
+                    onChange={(e) => setSearchCountry(e.target.value)}
+                    data-testid="input-search-country"
+                  />
+                  <p className="text-xs text-muted-foreground">Multiple locations separated by commas</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Job Title / Role</label>
+                  <Input
+                    placeholder="e.g., Director, VP, Manager"
+                    value={searchJobTitle}
+                    onChange={(e) => setSearchJobTitle(e.target.value)}
+                    data-testid="input-search-job-title"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Industry / Sector</label>
+                  <Input
+                    placeholder="e.g., Energy, Mining, Healthcare"
+                    value={searchIndustry}
+                    onChange={(e) => setSearchIndustry(e.target.value)}
+                    data-testid="input-search-industry"
+                  />
+                  <p className="text-xs text-muted-foreground">Comma-separated list of industries</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Language</label>
+                  <Input
+                    placeholder="e.g., English, Portuguese, Spanish"
+                    value={searchLanguage}
+                    onChange={(e) => setSearchLanguage(e.target.value)}
+                    data-testid="input-search-language"
+                  />
+                  <p className="text-xs text-muted-foreground">Comma-separated list of languages</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Min Hours Worked</label>
+                    <Input
+                      type="number"
+                      placeholder="e.g., 10"
+                      value={searchMinHoursWorked}
+                      onChange={(e) => setSearchMinHoursWorked(e.target.value)}
+                      data-testid="input-min-hours-worked"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Min Accept Rate (%)</label>
+                    <Input
+                      type="number"
+                      placeholder="e.g., 50"
+                      value={searchMinAcceptanceRate}
+                      onChange={(e) => setSearchMinAcceptanceRate(e.target.value)}
+                      data-testid="input-min-acceptance-rate"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pt-2">
+                  <Checkbox
+                    id="prior-projects"
+                    checked={searchHasPriorProjects}
+                    onCheckedChange={(checked) => setSearchHasPriorProjects(checked === true)}
+                    data-testid="checkbox-prior-projects"
+                  />
+                  <label htmlFor="prior-projects" className="text-sm font-medium cursor-pointer">
+                    Only show experts with prior project involvement
+                  </label>
+                </div>
               </div>
             </div>
 
             {/* Results */}
             <div className="space-y-3 border-t pt-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">
+                  {expertSearchLoading ? "Searching..." : `${expertSearchResults?.length || 0} experts found`}
+                </p>
+              </div>
               {expertSearchLoading && (
                 <p className="text-sm text-muted-foreground text-center py-4">Loading results...</p>
               )}
               {!expertSearchLoading && expertSearchResults && expertSearchResults.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-4">No experts match your filters</p>
               )}
-              <div className="max-h-[400px] overflow-y-auto space-y-2">
+              <div className="max-h-[300px] overflow-y-auto space-y-2">
                 {expertSearchResults?.map((expert: ExpertWithMetrics) => {
                   const isAssigned = assignedExpertIds.has(expert.id);
                   return (
@@ -2065,14 +2134,18 @@ export default function ProjectDetail() {
               onClick={() => {
                 setIsExpertSearchModalOpen(false);
                 setSearchQuery("");
+                setSearchCurrentEmployer("");
+                setSearchPastEmployers("");
                 setSearchCountry("");
                 setSearchMinExp("");
                 setSearchMaxExp("");
                 setSearchJobTitle("");
                 setSearchIndustry("");
                 setSearchLanguage("");
-                setSearchHasPriorProjects(false);
+                setSearchAvailableOnly(false);
+                setSearchMinHoursWorked("");
                 setSearchMinAcceptanceRate("");
+                setSearchHasPriorProjects(false);
               }}
               data-testid="button-close-search"
             >
