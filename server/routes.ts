@@ -525,6 +525,269 @@ export async function registerRoutes(
     }
   });
 
+  // Get project detail with experts, activities, and vetting questions
+  app.get("/api/projects/:id/detail", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const project = await storage.getProject(id);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      // Fetch related data
+      const [projectExperts, vettingQuestions, activities, inviteLinks] = await Promise.all([
+        storage.getProjectExpertsByProject(id),
+        storage.getVettingQuestionsByProject(id),
+        storage.getProjectActivities(id),
+        storage.getExpertInvitationLinksByProject(id),
+      ]);
+
+      // Enrich project experts with expert details
+      const enrichedExperts = await Promise.all(
+        projectExperts.map(async (pe) => {
+          const expert = await storage.getExpert(pe.expertId);
+          let sourcedByRa = null;
+          if (pe.sourcedByRaId) {
+            sourcedByRa = await storage.getUser(pe.sourcedByRaId);
+          }
+          return {
+            ...pe,
+            expert,
+            sourcedByRa: sourcedByRa ? { id: sourcedByRa.id, fullName: sourcedByRa.fullName } : null,
+          };
+        })
+      );
+
+      // Fetch assigned RAs details
+      let assignedRas: { id: number; fullName: string; email: string }[] = [];
+      if (project.assignedRaIds && project.assignedRaIds.length > 0) {
+        const raPromises = project.assignedRaIds.map(async (raId) => {
+          const ra = await storage.getUser(raId);
+          return ra ? { id: ra.id, fullName: ra.fullName, email: ra.email } : null;
+        });
+        assignedRas = (await Promise.all(raPromises)).filter(Boolean) as typeof assignedRas;
+      }
+
+      // Fetch PM details
+      let createdByPm = null;
+      if (project.createdByPmId) {
+        const pm = await storage.getUser(project.createdByPmId);
+        if (pm) {
+          createdByPm = { id: pm.id, fullName: pm.fullName, email: pm.email };
+        }
+      }
+
+      // Separate experts by source type
+      const internalExperts = enrichedExperts.filter(e => e.sourceType === "internal_db");
+      const raSourcedExperts = enrichedExperts.filter(e => e.sourceType === "ra_external");
+
+      // Get RA invite links
+      const raInviteLinks = inviteLinks.filter(l => l.inviteType === "ra" && l.isActive);
+
+      res.json({
+        ...project,
+        createdByPm,
+        assignedRas,
+        vettingQuestions,
+        internalExperts,
+        raSourcedExperts,
+        activities,
+        raInviteLinks,
+      });
+    } catch (error) {
+      console.error("Error fetching project detail:", error);
+      res.status(500).json({ error: "Failed to fetch project detail" });
+    }
+  });
+
+  // Assign RAs to project
+  app.post("/api/projects/:id/assign-ras", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { raIds } = req.body;
+
+      if (!Array.isArray(raIds)) {
+        return res.status(400).json({ error: "raIds must be an array" });
+      }
+
+      const project = await storage.getProject(id);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      // Update project with assigned RAs
+      const updated = await storage.updateProject(id, {
+        assignedRaIds: raIds,
+        updatedAt: new Date(),
+      } as any);
+
+      // Log activity
+      const user = (req as any).user;
+      await storage.createProjectActivity({
+        projectId: id,
+        userId: user?.id,
+        activityType: "ra_assigned",
+        description: `Assigned ${raIds.length} RA(s) to project`,
+        metadata: { raIds } as Record<string, any>,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error assigning RAs:", error);
+      res.status(500).json({ error: "Failed to assign RAs" });
+    }
+  });
+
+  // Generate RA-specific invite link
+  app.post("/api/projects/:id/ra-invite-link", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.id);
+      const { raId } = req.body;
+
+      if (!raId) {
+        return res.status(400).json({ error: "raId is required" });
+      }
+
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const ra = await storage.getUser(raId);
+      if (!ra || ra.role !== "ra") {
+        return res.status(400).json({ error: "Invalid RA" });
+      }
+
+      // Check for existing active link
+      let link = await storage.getExpertInvitationLinkByProjectAndRa(projectId, raId);
+      
+      if (!link) {
+        // Generate new token
+        const token = crypto.randomBytes(32).toString("hex");
+        link = await storage.createExpertInvitationLink({
+          token,
+          projectId,
+          raId,
+          inviteType: "ra",
+          recruitedBy: ra.email,
+          isActive: true,
+          expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
+        });
+      }
+
+      const inviteUrl = `/invite/${projectId}/ra/${link.token}`;
+      res.json({ link, inviteUrl });
+    } catch (error) {
+      console.error("Error generating RA invite link:", error);
+      res.status(500).json({ error: "Failed to generate RA invite link" });
+    }
+  });
+
+  // Generate existing expert project invite link
+  app.post("/api/projects/:projectId/experts/:expertId/invite-link", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const expertId = parseInt(req.params.expertId);
+
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const expert = await storage.getExpert(expertId);
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+
+      // Check for existing active link
+      let link = await storage.getExpertInvitationLinkByProjectAndExpert(projectId, expertId);
+      
+      if (!link) {
+        // Generate new token
+        const token = crypto.randomBytes(32).toString("hex");
+        const user = (req as any).user;
+        link = await storage.createExpertInvitationLink({
+          token,
+          projectId,
+          expertId,
+          inviteType: "existing",
+          recruitedBy: user?.email || "system",
+          isActive: true,
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+        });
+
+        // Update project expert status
+        const projectExperts = await storage.getProjectExpertsByProject(projectId);
+        const pe = projectExperts.find(p => p.expertId === expertId);
+        if (pe) {
+          await storage.updateProjectExpert(pe.id, {
+            invitationStatus: "invited",
+            invitedAt: new Date(),
+            invitationToken: token,
+          });
+        }
+
+        // Log activity
+        await storage.createProjectActivity({
+          projectId,
+          userId: user?.id,
+          expertId,
+          activityType: "expert_invited",
+          description: `Invited expert ${expert.name} to project`,
+        });
+      }
+
+      const inviteUrl = `/expert/project-invite/${link.token}`;
+      res.json({ link, inviteUrl });
+    } catch (error) {
+      console.error("Error generating expert invite link:", error);
+      res.status(500).json({ error: "Failed to generate invite link" });
+    }
+  });
+
+  // Get project activities
+  app.get("/api/projects/:id/activities", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const activities = await storage.getProjectActivities(id);
+      res.json(activities);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch activities" });
+    }
+  });
+
+  // Add project activity/note
+  app.post("/api/projects/:id/activities", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.id);
+      const { activityType, description, metadata } = req.body;
+      const user = (req as any).user;
+
+      const activity = await storage.createProjectActivity({
+        projectId,
+        userId: user?.id,
+        activityType: activityType || "note_added",
+        description,
+        metadata,
+      });
+
+      res.status(201).json(activity);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to add activity" });
+    }
+  });
+
+  // Get RAs for assignment (users with role 'ra')
+  app.get("/api/users/ras", authMiddleware, async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      const ras = users.filter(u => u.role === "ra" && u.isActive);
+      res.json(ras.map(ra => ({ id: ra.id, fullName: ra.fullName, email: ra.email })));
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch RAs" });
+    }
+  });
+
   // ==================== EXPERTS ====================
   app.get("/api/experts", authMiddleware, async (req, res) => {
     try {
@@ -1524,6 +1787,208 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Expert registration error:", error);
       res.status(500).json({ error: "Failed to register expert" });
+    }
+  });
+
+  // ==================== EXISTING EXPERT PROJECT INVITE (Accept/Decline) ====================
+  // GET /api/expert/project-invite/:token - Get project invite details for existing expert
+  app.get("/api/expert/project-invite/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      
+      // Find the invitation link
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      
+      if (!link) {
+        return res.status(404).json({ error: "Invitation link not found" });
+      }
+      if (link.inviteType !== "existing") {
+        return res.status(400).json({ error: "Invalid invite type" });
+      }
+      if (!link.isActive) {
+        return res.status(400).json({ error: "Invitation link is no longer active" });
+      }
+      if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+        return res.status(400).json({ error: "Invitation link has expired" });
+      }
+      if (!link.projectId || !link.expertId) {
+        return res.status(400).json({ error: "Invalid invitation link" });
+      }
+      
+      // Get project details
+      const project = await storage.getProject(link.projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+      
+      // Get expert details
+      const expert = await storage.getExpert(link.expertId);
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+      
+      // Get vetting questions
+      const vettingQuestions = await storage.getVettingQuestionsByProject(link.projectId);
+      
+      // Get project-expert assignment
+      const projectExperts = await storage.getProjectExpertsByProject(link.projectId);
+      const assignment = projectExperts.find(pe => pe.expertId === link.expertId);
+      
+      // Update invitation status to "opened" if not already responded
+      if (assignment && assignment.invitationStatus !== "accepted" && assignment.invitationStatus !== "declined") {
+        await storage.updateProjectExpert(assignment.id, {
+          invitationStatus: "opened",
+          openedAt: new Date(),
+          lastActivityAt: new Date(),
+        });
+        
+        // Log activity
+        await storage.createProjectActivity({
+          projectId: link.projectId,
+          expertId: link.expertId,
+          activityType: "expert_opened",
+          description: `Expert ${expert.name} opened the project invitation`,
+        });
+      }
+      
+      res.json({
+        project: {
+          id: project.id,
+          name: project.name,
+          clientName: project.clientName,
+          clientCompany: project.clientCompany,
+          industry: project.industry,
+          region: project.region,
+          projectOverview: project.projectOverview,
+          description: project.description,
+        },
+        expert: {
+          id: expert.id,
+          name: expert.name,
+          email: expert.email,
+        },
+        vettingQuestions: vettingQuestions.map(q => ({
+          id: q.id,
+          question: q.question,
+          orderIndex: q.orderIndex,
+          isRequired: q.isRequired,
+        })),
+        currentStatus: assignment?.invitationStatus || "not_invited",
+        hasResponded: assignment?.invitationStatus === "accepted" || assignment?.invitationStatus === "declined",
+      });
+    } catch (error) {
+      console.error("Get project invite error:", error);
+      res.status(500).json({ error: "Failed to fetch project invite details" });
+    }
+  });
+
+  // POST /api/expert/project-invite/:token/respond - Expert responds to project invite (Accept/Decline)
+  app.post("/api/expert/project-invite/:token/respond", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const { response, vqAnswers, availabilityNote } = req.body;
+      
+      if (!response || (response !== "accept" && response !== "decline")) {
+        return res.status(400).json({ error: "Response must be 'accept' or 'decline'" });
+      }
+      
+      // Find the invitation link
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      
+      if (!link) {
+        return res.status(404).json({ error: "Invitation link not found" });
+      }
+      if (link.inviteType !== "existing") {
+        return res.status(400).json({ error: "Invalid invite type" });
+      }
+      if (!link.isActive) {
+        return res.status(400).json({ error: "Invitation link is no longer active" });
+      }
+      if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+        return res.status(400).json({ error: "Invitation link has expired" });
+      }
+      if (!link.projectId || !link.expertId) {
+        return res.status(400).json({ error: "Invalid invitation link" });
+      }
+      
+      // Get project and expert
+      const project = await storage.getProject(link.projectId);
+      const expert = await storage.getExpert(link.expertId);
+      
+      if (!project || !expert) {
+        return res.status(404).json({ error: "Project or expert not found" });
+      }
+      
+      // Get vetting questions for formatting answers
+      const vettingQuestions = await storage.getVettingQuestionsByProject(link.projectId);
+      
+      // Format VQ answers
+      const formattedVqAnswers = vqAnswers?.map((answer: { questionId: number; answer: string }) => {
+        const question = vettingQuestions.find(q => q.id === answer.questionId);
+        return {
+          questionId: answer.questionId,
+          questionText: question?.question || "",
+          answerText: answer.answer,
+        };
+      }) || [];
+      
+      // Get or create project-expert assignment
+      const projectExperts = await storage.getProjectExpertsByProject(link.projectId);
+      let assignment = projectExperts.find(pe => pe.expertId === link.expertId);
+      
+      const newStatus = response === "accept" ? "accepted" : "declined";
+      const newPipelineStatus = response === "accept" ? "accepted" : "declined";
+      
+      if (assignment) {
+        // Update existing assignment
+        await storage.updateProjectExpert(assignment.id, {
+          status: newStatus,
+          invitationStatus: newStatus,
+          pipelineStatus: newPipelineStatus,
+          respondedAt: new Date(),
+          lastActivityAt: new Date(),
+          vqAnswers: formattedVqAnswers.length > 0 ? formattedVqAnswers : assignment.vqAnswers,
+          availabilityNote: availabilityNote || assignment.availabilityNote,
+        });
+      } else {
+        // Create new assignment (shouldn't happen normally, but just in case)
+        await storage.createProjectExpert({
+          projectId: link.projectId,
+          expertId: link.expertId,
+          status: newStatus,
+          invitationStatus: newStatus,
+          pipelineStatus: newPipelineStatus,
+          sourceType: "internal_db",
+          invitedAt: link.createdAt,
+          respondedAt: new Date(),
+          invitationToken: token,
+          vqAnswers: formattedVqAnswers,
+          availabilityNote,
+        });
+      }
+      
+      // Mark invitation link as used after response
+      await storage.updateExpertInvitationLink(link.id, { isActive: false });
+      
+      // Log activity
+      await storage.createProjectActivity({
+        projectId: link.projectId,
+        expertId: link.expertId,
+        activityType: response === "accept" ? "expert_accepted" : "expert_declined",
+        description: `Expert ${expert.name} ${response === "accept" ? "accepted" : "declined"} the project invitation`,
+        metadata: { response, hasVqAnswers: formattedVqAnswers.length > 0 } as Record<string, any>,
+      });
+      
+      res.json({ 
+        success: true, 
+        response,
+        message: response === "accept" 
+          ? "Thank you for accepting! The team will be in touch soon." 
+          : "Thank you for your response. We appreciate your time.",
+      });
+    } catch (error) {
+      console.error("Project invite response error:", error);
+      res.status(500).json({ error: "Failed to submit response" });
     }
   });
 

@@ -10,6 +10,7 @@ import {
   clientPocs,
   callRecords,
   expertInvitationLinks,
+  projectActivities,
   type Project,
   type InsertProject,
   type Expert,
@@ -32,6 +33,8 @@ import {
   type InsertCallRecord,
   type ExpertInvitationLink,
   type InsertExpertInvitationLink,
+  type ProjectActivity,
+  type InsertProjectActivity,
   calculateCU,
 } from "@shared/schema";
 import { db } from "./db";
@@ -72,6 +75,8 @@ export interface IStorage {
   getProjects(): Promise<Project[]>;
   getProject(id: number): Promise<Project | undefined>;
   getProjectsByOrganization(organizationId: number): Promise<Project[]>;
+  getProjectsByPm(pmId: number): Promise<Project[]>;
+  getProjectsByAssignedRa(raId: number): Promise<Project[]>;
   createProject(project: InsertProject): Promise<Project>;
   updateProject(id: number, project: Partial<InsertProject>): Promise<Project | undefined>;
   deleteProject(id: number): Promise<boolean>;
@@ -121,8 +126,16 @@ export interface IStorage {
   // Expert Invitation Links
   getExpertInvitationLinks(): Promise<ExpertInvitationLink[]>;
   getExpertInvitationLinkByToken(token: string): Promise<ExpertInvitationLink | undefined>;
+  getExpertInvitationLinkByProjectAndRa(projectId: number, raId: number): Promise<ExpertInvitationLink | undefined>;
+  getExpertInvitationLinkByProjectAndExpert(projectId: number, expertId: number): Promise<ExpertInvitationLink | undefined>;
+  getExpertInvitationLinksByProject(projectId: number): Promise<ExpertInvitationLink[]>;
   createExpertInvitationLink(link: InsertExpertInvitationLink): Promise<ExpertInvitationLink>;
+  updateExpertInvitationLink(id: number, link: Partial<InsertExpertInvitationLink>): Promise<ExpertInvitationLink | undefined>;
   markInvitationLinkUsed(token: string): Promise<ExpertInvitationLink | undefined>;
+
+  // Project Activities
+  getProjectActivities(projectId: number): Promise<ProjectActivity[]>;
+  createProjectActivity(activity: InsertProjectActivity): Promise<ProjectActivity>;
 
   // Usage Records (legacy)
   getUsageRecords(): Promise<UsageRecord[]>;
@@ -277,6 +290,23 @@ export class DatabaseStorage implements IStorage {
 
   async getProjectsByOrganization(organizationId: number): Promise<Project[]> {
     return db.select().from(projects).where(eq(projects.clientOrganizationId, organizationId)).orderBy(desc(projects.createdAt));
+  }
+
+  async getProjectsByPm(pmId: number): Promise<Project[]> {
+    return db.select().from(projects).where(eq(projects.createdByPmId, pmId)).orderBy(desc(projects.createdAt));
+  }
+
+  async getProjectsByAssignedRa(raId: number): Promise<Project[]> {
+    return db
+      .select()
+      .from(projects)
+      .where(
+        or(
+          eq(projects.assignedRaId, raId),
+          sql`${raId} = ANY(${projects.assignedRaIds})`
+        )
+      )
+      .orderBy(desc(projects.createdAt));
   }
 
   async createProject(project: InsertProject): Promise<Project> {
@@ -567,13 +597,74 @@ export class DatabaseStorage implements IStorage {
     return newLink;
   }
 
+  async getExpertInvitationLinkByProjectAndRa(projectId: number, raId: number): Promise<ExpertInvitationLink | undefined> {
+    const [link] = await db
+      .select()
+      .from(expertInvitationLinks)
+      .where(
+        and(
+          eq(expertInvitationLinks.projectId, projectId),
+          eq(expertInvitationLinks.raId, raId),
+          eq(expertInvitationLinks.inviteType, "ra"),
+          eq(expertInvitationLinks.isActive, true)
+        )
+      );
+    return link || undefined;
+  }
+
+  async getExpertInvitationLinkByProjectAndExpert(projectId: number, expertId: number): Promise<ExpertInvitationLink | undefined> {
+    const [link] = await db
+      .select()
+      .from(expertInvitationLinks)
+      .where(
+        and(
+          eq(expertInvitationLinks.projectId, projectId),
+          eq(expertInvitationLinks.expertId, expertId),
+          eq(expertInvitationLinks.inviteType, "existing"),
+          eq(expertInvitationLinks.isActive, true)
+        )
+      );
+    return link || undefined;
+  }
+
+  async getExpertInvitationLinksByProject(projectId: number): Promise<ExpertInvitationLink[]> {
+    return db
+      .select()
+      .from(expertInvitationLinks)
+      .where(eq(expertInvitationLinks.projectId, projectId))
+      .orderBy(desc(expertInvitationLinks.createdAt));
+  }
+
+  async updateExpertInvitationLink(id: number, link: Partial<InsertExpertInvitationLink>): Promise<ExpertInvitationLink | undefined> {
+    const [updated] = await db
+      .update(expertInvitationLinks)
+      .set({ ...link, updatedAt: new Date() } as any)
+      .where(eq(expertInvitationLinks.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
   async markInvitationLinkUsed(token: string): Promise<ExpertInvitationLink | undefined> {
     const [updated] = await db
       .update(expertInvitationLinks)
-      .set({ usedAt: new Date() })
+      .set({ usedAt: new Date(), isActive: false })
       .where(eq(expertInvitationLinks.token, token))
       .returning();
     return updated || undefined;
+  }
+
+  // Project Activities
+  async getProjectActivities(projectId: number): Promise<ProjectActivity[]> {
+    return db
+      .select()
+      .from(projectActivities)
+      .where(eq(projectActivities.projectId, projectId))
+      .orderBy(desc(projectActivities.createdAt));
+  }
+
+  async createProjectActivity(activity: InsertProjectActivity): Promise<ProjectActivity> {
+    const [newActivity] = await db.insert(projectActivities).values(activity).returning();
+    return newActivity;
   }
 
   // Usage Records (legacy)
