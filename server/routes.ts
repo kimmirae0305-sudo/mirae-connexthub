@@ -1239,6 +1239,7 @@ export async function registerRoutes(
           projectId,
           expertId,
           status: "assigned",
+          sourceType: "internal_db",
         }))
       );
       
