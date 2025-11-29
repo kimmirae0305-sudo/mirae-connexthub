@@ -774,6 +774,148 @@ export async function registerRoutes(
     }
   });
 
+  // Register new expert from RA Sourcing tab (creates expert, attaches to project, generates invite)
+  app.post("/api/projects/:projectId/register-expert", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const user = (req as any).user;
+
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const {
+        email,
+        firstName,
+        lastName,
+        country,
+        region,
+        countryCode,
+        phoneNumber,
+        linkedinUrl,
+        city,
+        canConsultInEnglish,
+        timezone,
+        experiences,
+        biography,
+        workHistory,
+        hourlyRate,
+        currency,
+      } = req.body;
+
+      // Check if expert with email already exists
+      const existingExpert = await storage.getExpertByEmail(email);
+      if (existingExpert) {
+        return res.status(400).json({ error: "An expert with this email already exists" });
+      }
+
+      // Format phone number
+      const fullPhone = `${countryCode} ${phoneNumber}`.trim();
+
+      // Format experience for bio/company/job title
+      const currentExperience = experiences?.find((e: any) => e.isCurrent) || experiences?.[0];
+      const experienceText = experiences?.map((e: any) => {
+        const period = e.isCurrent 
+          ? `${e.fromMonth}/${e.fromYear} - Present`
+          : `${e.fromMonth}/${e.fromYear} - ${e.toMonth}/${e.toYear}`;
+        return `${e.title} at ${e.company} (${period})`;
+      }).join("\n") || "";
+
+      // Get RA ID for sourcedByRaId
+      let sourcedByRaId: number | null = null;
+      if (user && (user.role === "ra" || user.role === "Research Associate")) {
+        sourcedByRaId = user.id;
+      }
+
+      // Create expert
+      const expertData = {
+        name: `${firstName} ${lastName}`.trim(),
+        email,
+        phone: fullPhone || null,
+        linkedinUrl: linkedinUrl || null,
+        country: country || null,
+        city: city || null,
+        region: region || null,
+        timezone: timezone || null,
+        company: currentExperience?.company || null,
+        jobTitle: currentExperience?.title || null,
+        expertise: currentExperience?.title || null,
+        industry: project.industry || null,
+        yearsOfExperience: 0,
+        hourlyRate: hourlyRate || null,
+        currency: currency || "USD",
+        bio: biography || null,
+        biography: biography || null,
+        workHistory: {
+          summary: workHistory,
+          experiences: experiences || [],
+        },
+        languages: canConsultInEnglish === "yes" ? ["English"] : [],
+        status: "available" as const,
+        sourcedByRaId,
+        pastEmployers: experiences?.map((e: any) => e.company) || [],
+      };
+
+      const newExpert = await storage.createExpert(expertData);
+
+      // Attach expert to project
+      const projectExpert = await storage.createProjectExpert({
+        projectId,
+        expertId: newExpert.id,
+        status: "assigned",
+        sourceType: "ra_sourced",
+        sourcedByRaId,
+        pipelineStatus: "ra_sourced",
+      });
+
+      // Generate unique invite token
+      const token = crypto.randomBytes(32).toString("hex");
+      const link = await storage.createExpertInvitationLink({
+        token,
+        projectId,
+        expertId: newExpert.id,
+        inviteType: "existing",
+        candidateName: newExpert.name,
+        candidateEmail: newExpert.email || null,
+        status: "pending",
+        recruitedBy: user?.email || "system",
+        raId: sourcedByRaId,
+        isActive: true,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+      });
+
+      // Update project expert with invitation info
+      await storage.updateProjectExpert(projectExpert.id, {
+        invitationStatus: "invited",
+        invitedAt: new Date(),
+        invitationToken: token,
+      });
+
+      // Log activity
+      await storage.createProjectActivity({
+        projectId,
+        userId: user?.id,
+        expertId: newExpert.id,
+        activityType: "expert_registered",
+        description: `Registered and invited expert ${newExpert.name} to project`,
+      });
+
+      const inviteUrl = `/expert/project-invite/${token}`;
+      
+      res.status(201).json({
+        expertId: newExpert.id,
+        projectExpertId: projectExpert.id,
+        inviteUrl,
+        token,
+        message: "Expert registered and attached to project successfully",
+      });
+    } catch (error) {
+      console.error("Error registering expert:", error);
+      res.status(500).json({ error: "Failed to register expert" });
+    }
+  });
+
   // Generate existing expert project invite link (always creates a NEW unique token)
   app.post("/api/projects/:projectId/experts/:expertId/invite-link", authMiddleware, async (req, res) => {
     try {

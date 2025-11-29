@@ -78,6 +78,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
+import { RegisterExpertForm } from "@/components/experts/RegisterExpertForm";
 import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle } from "@shared/schema";
 
 interface EnrichedExpert extends ProjectExpert {
@@ -150,6 +151,9 @@ export default function ProjectDetail() {
   const [searchMinHoursWorked, setSearchMinHoursWorked] = useState("");
   const [searchHasPriorProjects, setSearchHasPriorProjects] = useState(false);
   const [searchMinAcceptanceRate, setSearchMinAcceptanceRate] = useState("");
+  
+  // Register Expert modal state
+  const [isRegisterExpertModalOpen, setIsRegisterExpertModalOpen] = useState(false);
 
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
@@ -1529,13 +1533,27 @@ export default function ProjectDetail() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <ExternalLink className="h-4 w-4" />
-                RA-Sourced Experts Pipeline
-              </CardTitle>
-              <CardDescription>
-                Experts sourced by RAs through external channels
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <ExternalLink className="h-4 w-4" />
+                    RA-Sourced Experts Pipeline
+                  </CardTitle>
+                  <CardDescription>
+                    Experts sourced by RAs through external channels
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsRegisterExpertModalOpen(true)}
+                  className="gap-2"
+                  data-testid="button-register-expert"
+                >
+                  <Plus className="h-4 w-4" />
+                  Register Expert
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               {!projectDetail.raSourcedExperts || projectDetail.raSourcedExperts.length === 0 ? (
@@ -2221,6 +2239,23 @@ export default function ProjectDetail() {
               Close
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isRegisterExpertModalOpen} onOpenChange={setIsRegisterExpertModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden" aria-describedby="register-expert-description">
+          <DialogDescription id="register-expert-description" className="sr-only">
+            Fill in the form to register a new expert for this project
+          </DialogDescription>
+          <RegisterExpertForm
+            projectId={projectId}
+            onSuccess={() => {
+              refetchProject();
+              queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+            }}
+            onCancel={() => setIsRegisterExpertModalOpen(false)}
+            minimalMode={true}
+          />
         </DialogContent>
       </Dialog>
     </div>

@@ -74,6 +74,9 @@ export interface TranslationStrings {
   termsLink: string;
   privacyLink: string;
   termsRequired: string;
+  lgpdCheckboxLabel: string;
+  lgpdLink: string;
+  lgpdRequired: string;
   
   submitButton: string;
   submitting: string;
@@ -93,6 +96,14 @@ export interface TranslationStrings {
   invalidUrl: string;
   
   languageLabel: string;
+  
+  registerExpertModalTitle: string;
+  registerExpertModalSubtitle: string;
+  registerExpertButton: string;
+  inviteLinkCreated: string;
+  inviteLinkCopied: string;
+  copyLink: string;
+  expertRegistered: string;
 }
 
 export const translations: Record<Language, TranslationStrings> = {
@@ -170,6 +181,9 @@ export const translations: Record<Language, TranslationStrings> = {
     termsLink: "Termos e Condições",
     privacyLink: "Política de Privacidade",
     termsRequired: "Você deve aceitar os termos para continuar",
+    lgpdCheckboxLabel: "Concordo com a",
+    lgpdLink: "Política LGPD",
+    lgpdRequired: "Você deve aceitar a política LGPD para continuar",
     
     submitButton: "Enviar Cadastro",
     submitting: "Enviando...",
@@ -189,6 +203,14 @@ export const translations: Record<Language, TranslationStrings> = {
     invalidUrl: "URL inválida",
     
     languageLabel: "Idioma",
+    
+    registerExpertModalTitle: "Cadastrar Novo Especialista",
+    registerExpertModalSubtitle: "Preencha os dados do especialista para cadastrá-lo no projeto.",
+    registerExpertButton: "Cadastrar Especialista",
+    inviteLinkCreated: "Link de convite criado!",
+    inviteLinkCopied: "Link copiado para a área de transferência",
+    copyLink: "Copiar Link",
+    expertRegistered: "Especialista cadastrado com sucesso!",
   },
   es: {
     pageTitle: "Registro de Experto",
@@ -264,6 +286,9 @@ export const translations: Record<Language, TranslationStrings> = {
     termsLink: "Términos y Condiciones",
     privacyLink: "Política de Privacidad",
     termsRequired: "Debe aceptar los términos para continuar",
+    lgpdCheckboxLabel: "Acepto la",
+    lgpdLink: "Política LGPD",
+    lgpdRequired: "Debe aceptar la política LGPD para continuar",
     
     submitButton: "Enviar Registro",
     submitting: "Enviando...",
@@ -283,6 +308,14 @@ export const translations: Record<Language, TranslationStrings> = {
     invalidUrl: "URL inválida",
     
     languageLabel: "Idioma",
+    
+    registerExpertModalTitle: "Registrar Nuevo Experto",
+    registerExpertModalSubtitle: "Complete los datos del experto para registrarlo en el proyecto.",
+    registerExpertButton: "Registrar Experto",
+    inviteLinkCreated: "¡Enlace de invitación creado!",
+    inviteLinkCopied: "Enlace copiado al portapapeles",
+    copyLink: "Copiar Enlace",
+    expertRegistered: "¡Experto registrado con éxito!",
   },
   en: {
     pageTitle: "Expert Registration",
@@ -358,6 +391,9 @@ export const translations: Record<Language, TranslationStrings> = {
     termsLink: "Terms and Conditions",
     privacyLink: "Privacy Policy",
     termsRequired: "You must accept the terms to continue",
+    lgpdCheckboxLabel: "I agree to the",
+    lgpdLink: "LGPD Policy",
+    lgpdRequired: "You must accept the LGPD policy to continue",
     
     submitButton: "Submit Registration",
     submitting: "Submitting...",
@@ -377,6 +413,14 @@ export const translations: Record<Language, TranslationStrings> = {
     invalidUrl: "Invalid URL",
     
     languageLabel: "Language",
+    
+    registerExpertModalTitle: "Register New Expert",
+    registerExpertModalSubtitle: "Fill in the expert details to register them for the project.",
+    registerExpertButton: "Register Expert",
+    inviteLinkCreated: "Invitation link created!",
+    inviteLinkCopied: "Link copied to clipboard",
+    copyLink: "Copy Link",
+    expertRegistered: "Expert registered successfully!",
   },
 };
 
