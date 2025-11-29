@@ -7,14 +7,229 @@ import {
   insertVettingQuestionSchema,
   insertProjectExpertSchema,
   insertUsageRecordSchema,
+  insertUserSchema,
+  insertClientOrganizationSchema,
+  insertClientPocSchema,
+  insertCallRecordSchema,
+  insertExpertInvitationLinkSchema,
+  calculateCU,
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
+import crypto from "crypto";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Projects routes
+  // ==================== USERS ====================
+  app.get("/api/users", async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  app.get("/api/users/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const user = await storage.getUser(id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch user" });
+    }
+  });
+
+  app.post("/api/users", async (req, res) => {
+    try {
+      const result = insertUserSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const user = await storage.createUser(result.data);
+      res.status(201).json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create user" });
+    }
+  });
+
+  app.patch("/api/users/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = insertUserSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const user = await storage.updateUser(id, result.data);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+
+  app.delete("/api/users/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const deleted = await storage.deleteUser(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  // ==================== CLIENT ORGANIZATIONS ====================
+  app.get("/api/client-organizations", async (req, res) => {
+    try {
+      const organizations = await storage.getClientOrganizations();
+      res.json(organizations);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch client organizations" });
+    }
+  });
+
+  app.get("/api/client-organizations/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const org = await storage.getClientOrganization(id);
+      if (!org) {
+        return res.status(404).json({ error: "Client organization not found" });
+      }
+      res.json(org);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch client organization" });
+    }
+  });
+
+  app.get("/api/client-organizations/:id/projects", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const projects = await storage.getProjectsByOrganization(id);
+      res.json(projects);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch organization projects" });
+    }
+  });
+
+  app.get("/api/client-organizations/:id/pocs", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const pocs = await storage.getClientPocsByOrganization(id);
+      res.json(pocs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch organization POCs" });
+    }
+  });
+
+  app.post("/api/client-organizations", async (req, res) => {
+    try {
+      const result = insertClientOrganizationSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const org = await storage.createClientOrganization(result.data);
+      res.status(201).json(org);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create client organization" });
+    }
+  });
+
+  app.patch("/api/client-organizations/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = insertClientOrganizationSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const org = await storage.updateClientOrganization(id, result.data);
+      if (!org) {
+        return res.status(404).json({ error: "Client organization not found" });
+      }
+      res.json(org);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update client organization" });
+    }
+  });
+
+  app.delete("/api/client-organizations/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const deleted = await storage.deleteClientOrganization(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Client organization not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete client organization" });
+    }
+  });
+
+  // ==================== CLIENT POCS ====================
+  app.get("/api/client-pocs", async (req, res) => {
+    try {
+      const organizationId = req.query.organizationId ? parseInt(req.query.organizationId as string) : null;
+      const pocs = organizationId
+        ? await storage.getClientPocsByOrganization(organizationId)
+        : await storage.getClientPocs();
+      res.json(pocs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch client POCs" });
+    }
+  });
+
+  app.post("/api/client-pocs", async (req, res) => {
+    try {
+      const result = insertClientPocSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const poc = await storage.createClientPoc(result.data);
+      res.status(201).json(poc);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create client POC" });
+    }
+  });
+
+  app.patch("/api/client-pocs/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = insertClientPocSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const poc = await storage.updateClientPoc(id, result.data);
+      if (!poc) {
+        return res.status(404).json({ error: "Client POC not found" });
+      }
+      res.json(poc);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update client POC" });
+    }
+  });
+
+  app.delete("/api/client-pocs/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const deleted = await storage.deleteClientPoc(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Client POC not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete client POC" });
+    }
+  });
+
+  // ==================== PROJECTS ====================
   app.get("/api/projects", async (req, res) => {
     try {
       const projects = await storage.getProjects();
@@ -80,10 +295,13 @@ export async function registerRoutes(
     }
   });
 
-  // Experts routes
+  // ==================== EXPERTS ====================
   app.get("/api/experts", async (req, res) => {
     try {
-      const experts = await storage.getExperts();
+      const query = req.query.search as string;
+      const experts = query
+        ? await storage.searchExperts(query)
+        : await storage.getExperts();
       res.json(experts);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch experts" });
@@ -100,6 +318,26 @@ export async function registerRoutes(
       res.json(expert);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch expert" });
+    }
+  });
+
+  app.get("/api/experts/:id/consultations", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const callRecords = await storage.getCallRecordsByExpert(id);
+      res.json(callRecords);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch expert consultations" });
+    }
+  });
+
+  app.get("/api/experts/:id/assignments", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const assignments = await storage.getProjectExpertsByExpert(id);
+      res.json(assignments);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch expert assignments" });
     }
   });
 
@@ -146,7 +384,7 @@ export async function registerRoutes(
     }
   });
 
-  // Vetting Questions routes
+  // ==================== VETTING QUESTIONS ====================
   app.get("/api/vetting-questions", async (req, res) => {
     try {
       const projectId = req.query.projectId ? parseInt(req.query.projectId as string) : null;
@@ -202,7 +440,7 @@ export async function registerRoutes(
     }
   });
 
-  // Project Experts routes
+  // ==================== PROJECT EXPERTS ====================
   app.get("/api/project-experts", async (req, res) => {
     try {
       const projectId = req.query.projectId ? parseInt(req.query.projectId as string) : null;
@@ -212,6 +450,19 @@ export async function registerRoutes(
       res.json(assignments);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch project experts" });
+    }
+  });
+
+  app.get("/api/project-experts/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const assignment = await storage.getProjectExpert(id);
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+      res.json(assignment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch assignment" });
     }
   });
 
@@ -228,6 +479,93 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/project-experts/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = insertProjectExpertSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const assignment = await storage.updateProjectExpert(id, result.data);
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+      res.json(assignment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update assignment" });
+    }
+  });
+
+  // Send invitation to expert
+  app.post("/api/project-experts/:id/invite", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const assignment = await storage.updateProjectExpert(id, {
+        status: "invited",
+        invitedAt: new Date(),
+      });
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+      res.json(assignment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to send invitation" });
+    }
+  });
+
+  // Expert accepts invitation
+  app.post("/api/project-experts/:id/accept", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { vqAnswers, availabilityNote } = req.body;
+      const assignment = await storage.updateProjectExpert(id, {
+        status: "accepted",
+        respondedAt: new Date(),
+        vqAnswers,
+        availabilityNote,
+      });
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+      res.json(assignment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to accept invitation" });
+    }
+  });
+
+  // Expert declines invitation
+  app.post("/api/project-experts/:id/decline", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const assignment = await storage.updateProjectExpert(id, {
+        status: "declined",
+        respondedAt: new Date(),
+      });
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+      res.json(assignment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to decline invitation" });
+    }
+  });
+
+  // Client selects expert
+  app.post("/api/project-experts/:id/select", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const assignment = await storage.updateProjectExpert(id, {
+        status: "client_selected",
+      });
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+      res.json(assignment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to select expert" });
+    }
+  });
+
   app.delete("/api/project-experts/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -241,7 +579,234 @@ export async function registerRoutes(
     }
   });
 
-  // Usage Records routes
+  // ==================== CALL RECORDS ====================
+  app.get("/api/call-records", async (req, res) => {
+    try {
+      const projectId = req.query.projectId ? parseInt(req.query.projectId as string) : null;
+      const expertId = req.query.expertId ? parseInt(req.query.expertId as string) : null;
+      
+      let records;
+      if (projectId) {
+        records = await storage.getCallRecordsByProject(projectId);
+      } else if (expertId) {
+        records = await storage.getCallRecordsByExpert(expertId);
+      } else {
+        records = await storage.getCallRecords();
+      }
+      res.json(records);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch call records" });
+    }
+  });
+
+  app.get("/api/call-records/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const record = await storage.getCallRecord(id);
+      if (!record) {
+        return res.status(404).json({ error: "Call record not found" });
+      }
+      res.json(record);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch call record" });
+    }
+  });
+
+  app.post("/api/call-records", async (req, res) => {
+    try {
+      const result = insertCallRecordSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const record = await storage.createCallRecord(result.data);
+      res.status(201).json(record);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create call record" });
+    }
+  });
+
+  app.patch("/api/call-records/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = insertCallRecordSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const record = await storage.updateCallRecord(id, result.data);
+      if (!record) {
+        return res.status(404).json({ error: "Call record not found" });
+      }
+      res.json(record);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update call record" });
+    }
+  });
+
+  // Schedule consultation
+  app.post("/api/call-records/:id/schedule", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { scheduledStartTime, scheduledEndTime, zoomLink } = req.body;
+      const record = await storage.updateCallRecord(id, {
+        status: "scheduled",
+        scheduledStartTime: new Date(scheduledStartTime),
+        scheduledEndTime: new Date(scheduledEndTime),
+        zoomLink,
+      });
+      if (!record) {
+        return res.status(404).json({ error: "Call record not found" });
+      }
+      res.json(record);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to schedule consultation" });
+    }
+  });
+
+  // Complete consultation
+  app.post("/api/call-records/:id/complete", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { actualDurationMinutes, recordingUrl, notes } = req.body;
+      
+      const cuUsed = calculateCU(actualDurationMinutes || 0);
+      const record = await storage.updateCallRecord(id, {
+        status: "completed",
+        actualDurationMinutes,
+        durationMinutes: actualDurationMinutes,
+        recordingUrl,
+        notes,
+      });
+      if (!record) {
+        return res.status(404).json({ error: "Call record not found" });
+      }
+      res.json(record);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to complete consultation" });
+    }
+  });
+
+  // Cancel consultation
+  app.post("/api/call-records/:id/cancel", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { reason } = req.body;
+      const record = await storage.updateCallRecord(id, {
+        status: "cancelled",
+        notes: reason,
+      });
+      if (!record) {
+        return res.status(404).json({ error: "Call record not found" });
+      }
+      res.json(record);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to cancel consultation" });
+    }
+  });
+
+  app.delete("/api/call-records/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const deleted = await storage.deleteCallRecord(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Call record not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete call record" });
+    }
+  });
+
+  // ==================== EXPERT INVITATION LINKS ====================
+  app.get("/api/invitation-links", async (req, res) => {
+    try {
+      const links = await storage.getExpertInvitationLinks();
+      res.json(links);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invitation links" });
+    }
+  });
+
+  app.get("/api/invitation-links/:token", async (req, res) => {
+    try {
+      const token = req.params.token;
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      if (!link) {
+        return res.status(404).json({ error: "Invitation link not found" });
+      }
+      if (link.usedAt) {
+        return res.status(400).json({ error: "Invitation link already used" });
+      }
+      if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+        return res.status(400).json({ error: "Invitation link expired" });
+      }
+      res.json(link);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invitation link" });
+    }
+  });
+
+  app.post("/api/invitation-links", async (req, res) => {
+    try {
+      const token = crypto.randomBytes(32).toString("hex");
+      const result = insertExpertInvitationLinkSchema.safeParse({
+        ...req.body,
+        token,
+      });
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const link = await storage.createExpertInvitationLink(result.data);
+      res.status(201).json(link);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create invitation link" });
+    }
+  });
+
+  // Register expert via invitation link
+  app.post("/api/register-expert/:token", async (req, res) => {
+    try {
+      const token = req.params.token;
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      
+      if (!link) {
+        return res.status(404).json({ error: "Invitation link not found" });
+      }
+      if (link.usedAt) {
+        return res.status(400).json({ error: "Invitation link already used" });
+      }
+      if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+        return res.status(400).json({ error: "Invitation link expired" });
+      }
+
+      const expertData = {
+        ...req.body,
+        recruitedBy: link.recruitedBy,
+      };
+
+      const result = insertExpertSchema.safeParse(expertData);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+
+      const expert = await storage.createExpert(result.data);
+      await storage.markInvitationLinkUsed(token);
+
+      // If link is for a specific project, auto-assign expert
+      if (link.projectId) {
+        await storage.createProjectExpert({
+          projectId: link.projectId,
+          expertId: expert.id,
+          status: "assigned",
+        });
+      }
+
+      res.status(201).json(expert);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to register expert" });
+    }
+  });
+
+  // ==================== USAGE RECORDS (LEGACY) ====================
   app.get("/api/usage", async (req, res) => {
     try {
       const records = await storage.getUsageRecords();
@@ -274,6 +839,17 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete usage record" });
+    }
+  });
+
+  // ==================== CU CALCULATION UTILITY ====================
+  app.get("/api/calculate-cu", (req, res) => {
+    try {
+      const minutes = parseInt(req.query.minutes as string) || 0;
+      const cu = calculateCU(minutes);
+      res.json({ minutes, cu });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to calculate CU" });
     }
   });
 
