@@ -679,7 +679,8 @@ export async function registerRoutes(
         });
       }
 
-      const inviteUrl = `/invite/${projectId}/ra/${link.token}`;
+      const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
+      const inviteUrl = `${baseUrl}/invite/${projectId}/ra/${link.token}`;
       res.json({ link, inviteUrl });
     } catch (error) {
       console.error("Error generating RA invite link:", error);
@@ -748,7 +749,8 @@ export async function registerRoutes(
         link = { ...link, angleIds };
       }
 
-      const inviteUrl = `/expert/project-invite/${link.token}`;
+      const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
+      const inviteUrl = `${baseUrl}/expert/project-invite/${link.token}`;
       res.json({ link, inviteUrl });
     } catch (error) {
       console.error("Error generating expert invite link:", error);
@@ -1160,7 +1162,7 @@ export async function registerRoutes(
       
       // Create or get invitation link
       const token = crypto.randomBytes(16).toString("hex");
-      const baseUrl = process.env.BASE_URL || "http://localhost:5000";
+      const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
       const invitationUrl = `${baseUrl}/expert/project-invite/${assignment.projectId}/ra/${token}`;
       
       // Send email
@@ -1327,7 +1329,8 @@ export async function registerRoutes(
       }
       
       // Call the existing send invitations endpoint
-      const invitRes = await fetch(`http://localhost:5000/api/projects/${projectId}/invitations/send`, {
+      const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
+      const invitRes = await fetch(`${baseUrl}/api/projects/${projectId}/invitations/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectExpertIds, channel }),
@@ -1380,9 +1383,7 @@ export async function registerRoutes(
         });
         
         // Generate invitation URL
-        const baseUrl = process.env.REPLIT_DEV_DOMAIN 
-          ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
-          : "http://localhost:5000";
+        const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
         const invitationUrl = `${baseUrl}/expert-invite/${token}`;
         
         // Send email invitation
