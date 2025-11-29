@@ -168,13 +168,19 @@ export default function ProjectDetail() {
   const { data: allRAs } = useQuery<RAUser[]>({
     queryKey: ["/api/users/ras"],
     queryFn: async () => {
+      console.log("[RA DEBUG] Frontend: Fetching RAs from /api/users/ras");
       const res = await fetch("/api/users/ras", {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
       });
-      if (!res.ok) throw new Error("Failed to fetch RAs");
-      return res.json();
+      if (!res.ok) {
+        console.error("[RA DEBUG] Frontend: Failed to fetch RAs, status:", res.status);
+        throw new Error("Failed to fetch RAs");
+      }
+      const data = await res.json();
+      console.log("[RA DEBUG] Frontend: RAs fetched for project", projectId, ":", data);
+      return data;
     },
   });
 

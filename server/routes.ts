@@ -793,16 +793,36 @@ export async function registerRoutes(
   // Get RAs for assignment (users with role 'ra')
   app.get("/api/users/ras", authMiddleware, async (req, res) => {
     try {
-      console.log("[RAs] Fetching RAs for assignment modal");
+      console.log("[RA DEBUG] ===== START RAs ENDPOINT =====");
       const users = await storage.getUsers();
-      console.log(`[RAs] Total users fetched: ${users.length}`);
-      console.log(`[RAs] Users by role:`, users.reduce((acc: any, u: any) => {
+      console.log(`[RA DEBUG] Total users fetched: ${users.length}`);
+      
+      // Log ALL active employees with full details
+      console.log("[RA DEBUG] All active employees:", users.map(u => ({
+        id: u.id,
+        fullName: u.fullName,
+        email: u.email,
+        role: u.role,
+        isActive: u.isActive,
+        isRaRawCheck: u.role === "ra",
+        isResearchAssociateRawCheck: u.role === "Research Associate",
+        isActiveCheck: u.isActive === true,
+      })));
+      
+      console.log(`[RA DEBUG] Users by role:`, users.reduce((acc: any, u: any) => {
         acc[u.role] = (acc[u.role] || 0) + 1;
         return acc;
       }, {}));
       
-      const ras = users.filter(u => (u.role === "ra" || u.role === "Research Associate") && u.isActive);
-      console.log(`[RAs] Filtered RAs: ${ras.length} active RAs found`);
+      // Apply filtering with detailed logging
+      const ras = users.filter(u => {
+        const matchesRole = u.role === "ra" || u.role === "Research Associate";
+        const isActive = u.isActive === true;
+        console.log(`[RA DEBUG] User ${u.fullName} (${u.email}): role="${u.role}", matchesRole=${matchesRole}, isActive=${isActive}, passes=${matchesRole && isActive}`);
+        return matchesRole && isActive;
+      });
+      
+      console.log(`[RA DEBUG] Filtered RAs: ${ras.length} active RAs found`);
       
       const result = ras.map(ra => ({ 
         id: ra.id, 
@@ -810,10 +830,11 @@ export async function registerRoutes(
         email: ra.email 
       }));
       
-      console.log(`[RAs] Returning ${result.length} RAs:`, result);
+      console.log(`[RA DEBUG] Returning ${result.length} RAs:`, result);
+      console.log("[RA DEBUG] ===== END RAs ENDPOINT =====");
       res.json(result);
     } catch (error) {
-      console.error("[RAs] Error fetching RAs:", error);
+      console.error("[RA DEBUG] Error fetching RAs:", error);
       res.status(500).json({ error: "Failed to fetch RAs" });
     }
   });
