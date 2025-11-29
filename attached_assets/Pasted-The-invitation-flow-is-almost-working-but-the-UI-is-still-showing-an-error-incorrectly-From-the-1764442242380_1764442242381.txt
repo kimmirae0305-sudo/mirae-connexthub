@@ -1,0 +1,61 @@
+The invitation flow is almost working, but the UI is still showing an error incorrectly.
+
+From the Project → Existing Experts → Internal Experts Pipeline:
+
+- I select an expert and click "Create Invitations".
+- The "Create Invitations" modal appears with "Assign Angles (Optional)" and "No angles available".
+- I click "Send Invitations".
+- The red toast "Failed to send invitations" appears.
+
+However, the side instructions say:
+- [API] Bulk-send endpoint triggered from Project Experts view ✅
+- [INVITES] Creating invitations with no angles for project {projectId} ✅
+- [EMAIL] Sending project invitation to {email} ✅
+- [EMAIL] Email SENT to {email} ✅
+
+So on the backend, emails are actually being sent successfully, but the frontend still treats this as a failure.
+
+This means the bug is now on the frontend side: the API response is being interpreted as an error even when the backend succeeded.
+
+Please do the following:
+
+1) Show me the exact frontend code that runs when I click "Send Invitations" in this modal
+   (the handler that calls the bulk invitation endpoint).
+
+2) Show me the API response shape from the backend for this request:
+   - HTTP status code (should be 200 on success)
+   - Response body (e.g. { success: true, sentCount, failedCount } or similar)
+
+3) Fix the success / error handling logic:
+
+   - If the HTTP response status is 200 and at least one invitation/email was sent,
+     the frontend must:
+       * NOT show the "Failed to send invitations" toast.
+       * Show a success toast instead, e.g. "Invitations sent successfully".
+       * Update the selected experts' Invitation Status in the table to "Invited".
+
+   - Only show the red "Failed to send invitations" toast when:
+       * The HTTP status is not 2xx
+       OR
+       * The backend explicitly returns an error flag (e.g. { success: false, error: ... }).
+
+   - Make sure the code is not treating a truthy `errors` array or a partial failure as a total failure
+     if at least one invite was sent successfully. In that case, the UI should show a success message,
+     possibly with a note about partial failures if needed.
+
+4) Add a temporary console.log in the frontend for the API response:
+   console.log("[INVITES] Bulk invite response", responseStatus, responseData);
+
+   This will help confirm what the frontend is receiving and why it is currently going into the error branch.
+
+5) After fixing:
+   - Trigger another invitation from the Project → Existing Experts view.
+   - Confirm that:
+       * The server logs still show "[EMAIL] Email SENT to {email}".
+       * The toast shows a green success message instead of "Failed to send invitations".
+       * The Invitation Status column changes from "Not Invited" to "Invited".
+
+In summary:
+- The backend is already successfully sending emails.
+- The frontend logic for detecting success vs failure is incorrect for the Project Experts view.
+- Please adjust the condition so that a successful backend response results in a success toast and status update, not a failure.
