@@ -403,6 +403,275 @@ async function seed() {
 
   console.log(`Inserted ${insertedLinks.length} invitation links`);
 
+  const insertedMockProject = await db.insert(projects).values([
+    {
+      name: "Global Digital Payments Benchmarking Study",
+      projectOverview: "Comparative benchmarking of digital wallets, BNPL, and merchant acquiring models across emerging markets (Brazil, India, Mexico, Indonesia)",
+      clientOrganizationId: insertedOrgs[0].id,
+      clientName: "Alpha Capital Partners",
+      clientPocName: "Jennifer Kim",
+      clientPocEmail: "jennifer.kim@mckinsey.com",
+      description: "Comparative benchmarking of digital wallets, BNPL, and merchant acquiring models across emerging markets. Mock project for end-to-end workflow testing including expert invitation, email delivery, and availability check.",
+      industry: "Finance",
+      status: "sourcing",
+      createdByPmId: insertedUsers[1].id,
+      assignedRaId: insertedUsers[2].id,
+      totalCuUsed: "0.00"
+    }
+  ]).returning();
+
+  console.log(`Inserted ${insertedMockProject.length} mock projects`);
+
+  const insertedMockExperts = await db.insert(experts).values([
+    {
+      name: "Mirae Kim",
+      email: "kimmirae0305@gmail.com",
+      phone: "+55 11 98765 4321",
+      linkedinUrl: "https://linkedin.com/in/mirae-kim",
+      country: "Brazil",
+      timezone: "America/Sao_Paulo",
+      expertise: "Digital Payments",
+      areasOfExpertise: ["Market entry", "Expert networks", "Latin America", "B2B sales", "Consulting operations"],
+      industry: "Fintech",
+      company: "Global Digital Bank",
+      jobTitle: "Growth and Strategy Consultant",
+      yearsOfExperience: 9,
+      hourlyRate: "250.00",
+      bio: "Growth consultant with experience in expert networks and Latin American market entry. 9+ years in fintech and digital payments.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "Guidepoint", jobTitle: "Research Manager", fromYear: 2021, toYear: 2025 },
+        { company: "Benchlink", jobTitle: "Business Development Lead", fromYear: 2025, toYear: 2025 }
+      ]
+    },
+    {
+      name: "Carlos Eduardo Silva",
+      email: "carlos.silva@example.com",
+      phone: "+55 11 99876 5432",
+      linkedinUrl: "https://linkedin.com/in/carloseduardo",
+      country: "Brazil",
+      timezone: "America/Sao_Paulo",
+      expertise: "Digital Payments",
+      areasOfExpertise: ["Digital wallets", "Credit card", "BNPL", "Growth strategy", "Unit economics"],
+      industry: "Fintech",
+      company: "Nubank",
+      jobTitle: "Head of Digital Payments",
+      yearsOfExperience: 14,
+      hourlyRate: "300.00",
+      bio: "Brazil based digital payments leader with experience launching wallets and BNPL products across Latin America.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "Nubank", jobTitle: "Head of Digital Payments", fromYear: 2020, toYear: 2025 },
+        { company: "Itau Unibanco", jobTitle: "Payments Product Manager", fromYear: 2014, toYear: 2020 }
+      ]
+    },
+    {
+      name: "Ana Luisa Rocha",
+      email: "ana.rocha@example.com",
+      phone: "+55 21 99876 5432",
+      linkedinUrl: "https://linkedin.com/in/analuisa",
+      country: "Brazil",
+      timezone: "America/Sao_Paulo",
+      expertise: "Payment Acquiring",
+      areasOfExpertise: ["Merchant acquiring", "QR payments", "Partnerships", "SME onboarding", "KYC"],
+      industry: "Fintech",
+      company: "PicPay",
+      jobTitle: "Senior Product Manager",
+      yearsOfExperience: 11,
+      hourlyRate: "280.00",
+      bio: "Product leader focused on merchant acquiring and QR based payments in Brazil.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "PicPay", jobTitle: "Senior Product Manager", fromYear: 2021, toYear: 2025 },
+        { company: "StoneCo", jobTitle: "Product Manager", fromYear: 2016, toYear: 2021 }
+      ]
+    },
+    {
+      name: "Rohit Verma",
+      email: "rohit.verma@example.com",
+      phone: "+91 80 9876 5432",
+      linkedinUrl: "https://linkedin.com/in/rohitverma",
+      country: "India",
+      timezone: "Asia/Kolkata",
+      expertise: "Digital Payments",
+      areasOfExpertise: ["UPI", "Digital wallets", "Super app", "Product localization", "Partnerships"],
+      industry: "Fintech",
+      company: "Paytm",
+      jobTitle: "VP Product, Consumer Payments",
+      yearsOfExperience: 13,
+      hourlyRate: "275.00",
+      bio: "Leads consumer payments products including UPI and wallet solutions for a major Indian fintech.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "Paytm", jobTitle: "VP Product, Consumer Payments", fromYear: 2019, toYear: 2025 },
+        { company: "HDFC Bank", jobTitle: "Digital Banking Product Lead", fromYear: 2013, toYear: 2019 }
+      ]
+    },
+    {
+      name: "Priya Nair",
+      email: "priya.nair@example.com",
+      phone: "+91 22 9876 5432",
+      linkedinUrl: "https://linkedin.com/in/priyanair",
+      country: "India",
+      timezone: "Asia/Kolkata",
+      expertise: "Payment Networks",
+      areasOfExpertise: ["Network partnerships", "Issuing", "Co branded cards", "Regulatory", "Risk"],
+      industry: "Finance",
+      company: "Global Card Network",
+      jobTitle: "Director Partnerships, South Asia",
+      yearsOfExperience: 15,
+      hourlyRate: "320.00",
+      bio: "Director responsible for payment network partnerships and co branded card launches across South Asia.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "Global Card Network", jobTitle: "Director Partnerships, South Asia", fromYear: 2018, toYear: 2025 },
+        { company: "Axis Bank", jobTitle: "Senior Manager, Cards", fromYear: 2010, toYear: 2018 }
+      ]
+    },
+    {
+      name: "Mariana Torres",
+      email: "mariana.torres@example.com",
+      phone: "+52 55 9876 5432",
+      linkedinUrl: "https://linkedin.com/in/marianatorres",
+      country: "Mexico",
+      timezone: "America/Mexico_City",
+      expertise: "Digital Payments",
+      areasOfExpertise: ["Wallets", "BNPL", "Online checkout", "Risk models", "Growth marketing"],
+      industry: "Fintech",
+      company: "Mercado Pago",
+      jobTitle: "Head of Product, Wallet and BNPL",
+      yearsOfExperience: 12,
+      hourlyRate: "290.00",
+      bio: "Product lead for wallet and BNPL solutions across Mexico and LatAm markets.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "Mercado Pago", jobTitle: "Head of Product, Wallet and BNPL", fromYear: 2020, toYear: 2025 },
+        { company: "BBVA Mexico", jobTitle: "Digital Product Manager", fromYear: 2013, toYear: 2020 }
+      ]
+    },
+    {
+      name: "Diego Hernandez",
+      email: "diego.hernandez@example.com",
+      phone: "+52 81 9876 5432",
+      linkedinUrl: "https://linkedin.com/in/diegohernandez",
+      country: "Mexico",
+      timezone: "America/Mexico_City",
+      expertise: "Banking & Payments",
+      areasOfExpertise: ["Agent network", "Cash in cash out", "Retail payments", "POS", "SME"],
+      industry: "Finance",
+      company: "Regional Bank",
+      jobTitle: "Digital Banking Manager",
+      yearsOfExperience: 8,
+      hourlyRate: "200.00",
+      bio: "Focus on digital banking for mass market and SME clients with experience in retail payment channels.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "Regional Bank", jobTitle: "Digital Banking Manager", fromYear: 2020, toYear: 2025 },
+        { company: "Oxxo Pay", jobTitle: "Product Specialist", fromYear: 2016, toYear: 2020 }
+      ]
+    },
+    {
+      name: "Siti Aisyah",
+      email: "siti.aisyah@example.com",
+      phone: "+62 21 9876 5432",
+      linkedinUrl: "https://linkedin.com/in/sitiaisyah",
+      country: "Indonesia",
+      timezone: "Asia/Jakarta",
+      expertise: "Super App Payments",
+      areasOfExpertise: ["Super app payments", "Wallet integration", "QRIS", "Merchant ecosystem", "Product operations"],
+      industry: "Fintech",
+      company: "Gojek",
+      jobTitle: "Senior Product Lead, Payments",
+      yearsOfExperience: 10,
+      hourlyRate: "260.00",
+      bio: "Leads payments within a super app, with experience in merchant acceptance and QRIS rollout.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "Gojek", jobTitle: "Senior Product Lead, Payments", fromYear: 2019, toYear: 2025 },
+        { company: "Local Fintech Startup", jobTitle: "Product Manager", fromYear: 2015, toYear: 2019 }
+      ]
+    },
+    {
+      name: "Johannes Müller",
+      email: "johannes.muller@example.com",
+      phone: "+49 30 9876 5432",
+      linkedinUrl: "https://linkedin.com/in/johannesmuller",
+      country: "Germany",
+      timezone: "Europe/Berlin",
+      expertise: "Neobanking",
+      areasOfExpertise: ["Europe", "PSD2", "Open banking", "Cards"],
+      industry: "Fintech",
+      company: "European Neo Bank",
+      jobTitle: "Product Manager",
+      yearsOfExperience: 6,
+      hourlyRate: "240.00",
+      bio: "European neobank product manager focused on open banking and PSD2 use cases.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "European Neo Bank", jobTitle: "Product Manager", fromYear: 2021, toYear: 2025 },
+        { company: "Traditional Bank", jobTitle: "Business Analyst", fromYear: 2018, toYear: 2021 }
+      ]
+    },
+    {
+      name: "Laura Kim",
+      email: "laura.kim@example.com",
+      phone: "+1 415 555 9999",
+      linkedinUrl: "https://linkedin.com/in/laurakim",
+      country: "United States",
+      timezone: "America/Los_Angeles",
+      expertise: "Technology",
+      areasOfExpertise: ["Cloud", "SaaS", "Data platforms"],
+      industry: "Technology",
+      company: "Big Tech",
+      jobTitle: "Senior Program Manager",
+      yearsOfExperience: 9,
+      hourlyRate: "350.00",
+      bio: "Works on cloud and SaaS programs with fintech interest.",
+      status: "available",
+      termsAccepted: true,
+      lgpdAccepted: true,
+      workHistory: [
+        { company: "Big Tech", jobTitle: "Senior Program Manager", fromYear: 2019, toYear: 2025 },
+        { company: "Startup", jobTitle: "Operations Manager", fromYear: 2014, toYear: 2019 }
+      ]
+    }
+  ]).returning();
+
+  console.log(`Inserted ${insertedMockExperts.length} mock experts`);
+
+  const insertedMockVQ = await db.insert(vettingQuestions).values([
+    { projectId: insertedMockProject[0].id, question: "What is your experience with digital wallet growth and user acquisition?", isRequired: true, orderIndex: 1 },
+    { projectId: insertedMockProject[0].id, question: "What were the key drivers of BNPL adoption in your market?", isRequired: true, orderIndex: 2 },
+    { projectId: insertedMockProject[0].id, question: "How are merchant fees structured in your region?", isRequired: false, orderIndex: 3 },
+    { projectId: insertedMockProject[0].id, question: "What regulatory shifts have impacted payments in the last 3 years?", isRequired: false, orderIndex: 4 },
+  ]).returning();
+
+  console.log(`Inserted ${insertedMockVQ.length} mock vetting questions`);
+
+  const mockMiraeExpertInProject = await db.insert(projectExperts).values([
+    { projectId: insertedMockProject[0].id, expertId: insertedMockExperts[0].id, status: "invited", notes: "Mock expert for testing invitation workflow" }
+  ]).returning();
+
+  console.log(`Linked Mirae Kim to mock project`);
+
   console.log("Seeding completed successfully!");
 }
 
