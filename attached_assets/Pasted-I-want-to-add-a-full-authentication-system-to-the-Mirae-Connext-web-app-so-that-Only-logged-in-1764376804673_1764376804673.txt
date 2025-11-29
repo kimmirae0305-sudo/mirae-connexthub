@@ -1,0 +1,115 @@
+I want to add a full authentication system to the Mirae Connext web app so that:
+
+✔ Only logged-in users can access all internal pages  
+✔ The login page is the ONLY public page  
+✔ All other routes (dashboard, experts, projects, CU, invoices, etc.) must require authentication  
+✔ Unauthorized users must always be redirected to /login  
+
+Please implement the following:
+
+---
+
+### 1) LOGIN PAGE (PUBLIC ONLY)
+- Create a page at /login with:
+  - email input
+  - password input
+  - login button
+- This must be the **only** page accessible without authentication.
+- If a logged-in user visits /login, redirect them to the main dashboard.
+
+---
+
+### 2) USER MODEL + TEST USERS
+If not present yet, create a simple user model (can be in-memory or stored in a file for now):
+
+Fields:
+- id
+- fullName
+- email
+- passwordHash
+- role (admin, pm, ra, finance, client)
+
+Seed at least two test users:
+- admin@miraeconnext.com / password: Test1234! / role: admin
+- pm@miraeconnext.com / password: Test1234! / role: pm
+
+---
+
+### 3) BACKEND AUTHENTICATION (API)
+Create:
+
+#### POST /api/auth/login
+- Accepts { email, password }
+- Validates against the seeded users
+- On success:
+  - Return a signed JWT (or secure token) containing:
+    - userId
+    - fullName
+    - role
+  - Return 401 on invalid credentials
+
+#### AUTH MIDDLEWARE
+- Read token from Authorization header: "Bearer <token>"
+- Verify the token
+- Attach the user object to req.user
+- If invalid or missing → return 401 immediately
+
+---
+
+### 4) PROTECT ALL INTERNAL API ROUTES
+Wrap **all existing API routes** with the auth middleware:
+
+- /api/projects
+- /api/experts
+- /api/vetting
+- /api/assignments
+- /api/cu
+- /api/invoices
+- /api/dashboard
+- Any other internal route
+
+If the request has no valid token → respond with 401.
+
+---
+
+### 5) FRONTEND AUTH HANDLING
+- After a successful login:
+  - Save token in localStorage (key: authToken)
+  - Save user role + name in global state
+  - Redirect to dashboard
+
+- Add a ProtectedRoute component:
+  - If no token in localStorage → redirect to /login
+  - Wrap ALL internal pages with this
+
+Protected pages include:
+- /dashboard
+- /projects
+- /experts
+- /cu
+- /invoices
+- /assignments
+- everything except /login
+
+---
+
+### 6) LOGOUT FUNCTION
+- Add a logout button in the sidebar
+- On click:
+  - Delete token from localStorage
+  - Clear user data
+  - Redirect to /login
+
+---
+
+### 7) DOCUMENTATION (REQUIRED)
+After implementation, please output a summary describing:
+- How to log in using the test accounts
+- Which routes are now protected
+- How the auth middleware works
+- Token storage and redirect behavior
+
+---
+
+Goal:
+Make the entire Mirae Connext platform accessible **only** after login, with /login as the only public page.
