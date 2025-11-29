@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { canAccessPage, type PageKey } from "@/lib/permissions";
+import logoUrl from "@assets/Logo_1764382033313.png";
 
 interface NavItem {
   title: string;
@@ -141,9 +142,7 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border px-6 py-4">
         <Link href="/" className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-            <span className="text-sm font-bold text-primary-foreground">M</span>
-          </div>
+          <img src={logoUrl} alt="Mirae Connext" className="h-8 w-8 object-contain" />
           <div className="flex flex-col">
             <span className="text-base font-semibold text-sidebar-foreground">Mirae Connext</span>
             <span className="text-xs text-muted-foreground">Expert Network</span>
