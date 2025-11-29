@@ -5,6 +5,7 @@ import {
   projectExperts,
   usageRecords,
   users,
+  clients,
   clientOrganizations,
   clientPocs,
   callRecords,
@@ -21,6 +22,8 @@ import {
   type InsertUsageRecord,
   type User,
   type InsertUser,
+  type Client,
+  type InsertClient,
   type ClientOrganization,
   type InsertClientOrganization,
   type ClientPoc,
@@ -35,13 +38,21 @@ import { db } from "./db";
 import { eq, desc, ilike, or, and, sql } from "drizzle-orm";
 
 export interface IStorage {
-  // Users
+  // Users (Employees)
   getUsers(): Promise<User[]>;
   getUser(id: number): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined>;
   deleteUser(id: number): Promise<boolean>;
+
+  // Clients (CRM)
+  getClients(): Promise<Client[]>;
+  getClient(id: number): Promise<Client | undefined>;
+  searchClients(params: { query?: string; industry?: string; status?: string }): Promise<Client[]>;
+  createClient(client: InsertClient): Promise<Client>;
+  updateClient(id: number, client: Partial<InsertClient>): Promise<Client | undefined>;
+  deleteClient(id: number): Promise<boolean>;
 
   // Client Organizations
   getClientOrganizations(): Promise<ClientOrganization[]>;
@@ -147,6 +158,61 @@ export class DatabaseStorage implements IStorage {
 
   async deleteUser(id: number): Promise<boolean> {
     const result = await db.delete(users).where(eq(users.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // Clients (CRM)
+  async getClients(): Promise<Client[]> {
+    return db.select().from(clients).orderBy(desc(clients.createdAt));
+  }
+
+  async getClient(id: number): Promise<Client | undefined> {
+    const [client] = await db.select().from(clients).where(eq(clients.id, id));
+    return client || undefined;
+  }
+
+  async searchClients(params: { query?: string; industry?: string; status?: string }): Promise<Client[]> {
+    const conditions = [];
+    
+    if (params.query) {
+      const searchPattern = `%${params.query}%`;
+      conditions.push(
+        or(
+          ilike(clients.clientName, searchPattern),
+          ilike(clients.mainContactName, searchPattern),
+          ilike(clients.mainContactEmail, searchPattern),
+          ilike(clients.country, searchPattern)
+        )
+      );
+    }
+    
+    if (params.industry) {
+      conditions.push(ilike(clients.industry, `%${params.industry}%`));
+    }
+    
+    if (params.status) {
+      conditions.push(eq(clients.status, params.status));
+    }
+    
+    if (conditions.length === 0) {
+      return db.select().from(clients).orderBy(desc(clients.createdAt));
+    }
+    
+    return db.select().from(clients).where(and(...conditions)).orderBy(desc(clients.createdAt));
+  }
+
+  async createClient(client: InsertClient): Promise<Client> {
+    const [newClient] = await db.insert(clients).values(client).returning();
+    return newClient;
+  }
+
+  async updateClient(id: number, client: Partial<InsertClient>): Promise<Client | undefined> {
+    const [updated] = await db.update(clients).set(client).where(eq(clients.id, id)).returning();
+    return updated || undefined;
+  }
+
+  async deleteClient(id: number): Promise<boolean> {
+    const result = await db.delete(clients).where(eq(clients.id, id)).returning();
     return result.length > 0;
   }
 

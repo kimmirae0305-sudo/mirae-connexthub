@@ -4,13 +4,29 @@ import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Users table (Admin, PM, RA, Finance, Client, Expert roles)
+// Users table (Admin, PM, RA, Finance roles - internal employees only)
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   fullName: text("full_name").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash"),
-  role: text("role").notNull().default("pm"), // admin, pm, ra, finance, client, expert
+  role: text("role").notNull().default("pm"), // admin, pm, ra, finance
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Clients table (Internal CRM - managed by employees)
+export const clients = pgTable("clients", {
+  id: serial("id").primaryKey(),
+  clientName: text("client_name").notNull(),
+  country: text("country"),
+  region: text("region"),
+  industry: text("industry"),
+  mainContactName: text("main_contact_name"),
+  mainContactEmail: text("main_contact_email"),
+  mainContactPhone: text("main_contact_phone"),
+  notes: text("notes"),
+  status: text("status").notNull().default("prospect"), // active, inactive, prospect
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -273,6 +289,11 @@ export const insertUserSchema = createInsertSchema(users).omit({
   createdAt: true,
 });
 
+export const insertClientSchema = createInsertSchema(clients).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertClientOrganizationSchema = createInsertSchema(clientOrganizations).omit({
   id: true,
   createdAt: true,
@@ -339,6 +360,9 @@ export const insertUsageRecordSchema = createInsertSchema(usageRecords).omit({
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 
+export type Client = typeof clients.$inferSelect;
+export type InsertClient = z.infer<typeof insertClientSchema>;
+
 export type ClientOrganization = typeof clientOrganizations.$inferSelect;
 export type InsertClientOrganization = z.infer<typeof insertClientOrganizationSchema>;
 
@@ -404,11 +428,16 @@ export const CALL_STATUSES = [
   "no_show",
 ] as const;
 
+// Internal employee roles only (no client/expert login)
 export const USER_ROLES = [
   "admin",
   "pm",
   "ra",
   "finance",
-  "client",
-  "expert",
+] as const;
+
+export const CLIENT_STATUSES = [
+  "active",
+  "inactive", 
+  "prospect",
 ] as const;
