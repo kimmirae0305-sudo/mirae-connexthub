@@ -184,6 +184,7 @@ export const expertInvitationLinks = pgTable("expert_invitation_links", {
   projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }),
   raId: integer("ra_id").references(() => users.id), // RA user ID for RA-specific links
   expertId: integer("expert_id").references(() => experts.id), // For existing expert invites
+  angleIds: integer("angle_ids").array(), // Angles this expert is being invited for
   inviteType: text("invite_type").notNull().default("general"), // general, ra, existing
   recruitedBy: text("recruited_by").notNull(),
   isActive: boolean("is_active").notNull().default(true),

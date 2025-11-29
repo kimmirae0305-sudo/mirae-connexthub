@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import {
@@ -9,9 +9,9 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  Check,
   Loader2,
   AlertCircle,
+  Layers,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,21 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+
+interface VettingQuestion {
+  id: number;
+  question: string;
+  orderIndex: number;
+  isRequired: boolean;
+  angleId: number | null;
+  questionType?: string;
+}
+
+interface ProjectAngle {
+  id: number;
+  title: string;
+  description?: string;
+}
 
 interface ProjectInviteData {
   project: {
@@ -36,12 +51,8 @@ interface ProjectInviteData {
     name: string;
     email: string;
   };
-  vettingQuestions: {
-    id: number;
-    question: string;
-    orderIndex: number;
-    isRequired: boolean;
-  }[];
+  angles?: ProjectAngle[];
+  vettingQuestions: VettingQuestion[];
   currentStatus: string;
   hasResponded: boolean;
 }
@@ -299,31 +310,116 @@ export default function ExpertProjectInvite() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {data.vettingQuestions
-                .sort((a, b) => a.orderIndex - b.orderIndex)
-                .map((q, index) => (
-                  <div key={q.id} className="space-y-2">
-                    <div className="flex gap-2 items-start">
-                      <span className="font-mono text-sm text-muted-foreground w-6 flex-shrink-0">
-                        {index + 1}.
-                      </span>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">
-                          {q.question}
-                          {q.isRequired && <span className="text-destructive ml-1">*</span>}
-                        </p>
-                        <Textarea
-                          placeholder="Your answer..."
-                          value={vqAnswers[q.id] || ""}
-                          onChange={(e) => handleVqAnswerChange(q.id, e.target.value)}
-                          className="mt-2"
-                          rows={3}
-                          data-testid={`input-vq-answer-${q.id}`}
-                        />
+              {/* Group questions by angle */}
+              {(() => {
+                const generalQuestions = data.vettingQuestions.filter(q => !q.angleId);
+                const angleQuestions = data.angles?.map(angle => ({
+                  angle,
+                  questions: data.vettingQuestions.filter(q => q.angleId === angle.id),
+                })).filter(group => group.questions.length > 0) || [];
+
+                let questionIndex = 0;
+
+                return (
+                  <>
+                    {/* General Questions (not assigned to any angle) */}
+                    {generalQuestions.length > 0 && (
+                      <div className="space-y-4">
+                        {angleQuestions.length > 0 && (
+                          <div className="flex items-center gap-2 mb-2">
+                            <FileText className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium text-muted-foreground">General Questions</span>
+                          </div>
+                        )}
+                        {generalQuestions
+                          .sort((a, b) => a.orderIndex - b.orderIndex)
+                          .map((q) => {
+                            questionIndex++;
+                            return (
+                              <div key={q.id} className="space-y-2">
+                                <div className="flex gap-2 items-start">
+                                  <span className="font-mono text-sm text-muted-foreground w-6 flex-shrink-0">
+                                    {questionIndex}.
+                                  </span>
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className="text-sm font-medium">
+                                        {q.question}
+                                        {q.isRequired && <span className="text-destructive ml-1">*</span>}
+                                      </p>
+                                      {q.questionType && (
+                                        <Badge variant="outline" className="text-xs">
+                                          {q.questionType}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <Textarea
+                                      placeholder="Your answer..."
+                                      value={vqAnswers[q.id] || ""}
+                                      onChange={(e) => handleVqAnswerChange(q.id, e.target.value)}
+                                      className="mt-2"
+                                      rows={3}
+                                      data-testid={`input-vq-answer-${q.id}`}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                       </div>
-                    </div>
-                  </div>
-                ))}
+                    )}
+
+                    {/* Questions grouped by angle */}
+                    {angleQuestions.map(({ angle, questions }) => (
+                      <div key={angle.id} className="space-y-4">
+                        {generalQuestions.length > 0 && <Separator />}
+                        <div className="flex items-center gap-2 mb-2">
+                          <Layers className="h-4 w-4 text-primary" />
+                          <span className="text-sm font-medium">{angle.title}</span>
+                          {angle.description && (
+                            <span className="text-xs text-muted-foreground">- {angle.description}</span>
+                          )}
+                        </div>
+                        {questions
+                          .sort((a, b) => a.orderIndex - b.orderIndex)
+                          .map((q) => {
+                            questionIndex++;
+                            return (
+                              <div key={q.id} className="space-y-2 pl-4 border-l-2 border-primary/20">
+                                <div className="flex gap-2 items-start">
+                                  <span className="font-mono text-sm text-muted-foreground w-6 flex-shrink-0">
+                                    {questionIndex}.
+                                  </span>
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className="text-sm font-medium">
+                                        {q.question}
+                                        {q.isRequired && <span className="text-destructive ml-1">*</span>}
+                                      </p>
+                                      {q.questionType && (
+                                        <Badge variant="outline" className="text-xs">
+                                          {q.questionType}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <Textarea
+                                      placeholder="Your answer..."
+                                      value={vqAnswers[q.id] || ""}
+                                      onChange={(e) => handleVqAnswerChange(q.id, e.target.value)}
+                                      className="mt-2"
+                                      rows={3}
+                                      data-testid={`input-vq-answer-${q.id}`}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
             </CardContent>
           </Card>
         )}

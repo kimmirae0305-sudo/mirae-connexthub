@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
@@ -130,6 +130,9 @@ export default function ProjectDetail() {
   const [vqQuestion, setVQQuestion] = useState("");
   const [vqQuestionType, setVQQuestionType] = useState<"screening" | "insight" | "general">("insight");
   const [vqIsRequired, setVQIsRequired] = useState(false);
+  
+  // Internal Experts angle filter state
+  const [internalExpertsAngleFilter, setInternalExpertsAngleFilter] = useState<string>("all");
 
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
@@ -467,6 +470,26 @@ export default function ProjectDetail() {
       .filter(vq => vq.angleId === angleId)
       .sort((a, b) => a.orderIndex - b.orderIndex);
   };
+
+  // Get angle names for display based on expert's angleIds
+  const getAngleBadges = (pe: EnrichedExpert) => {
+    if (!pe.angleIds || pe.angleIds.length === 0) return null;
+    const angleNames = pe.angleIds
+      .map(id => projectDetail?.angles?.find(a => a.id === id)?.title)
+      .filter(Boolean);
+    return angleNames;
+  };
+
+  // Filter internal experts by angle
+  const filteredInternalExperts = useMemo(() => {
+    const experts = projectDetail?.internalExperts || [];
+    if (internalExpertsAngleFilter === "all") return experts;
+    if (internalExpertsAngleFilter === "none") {
+      return experts.filter(pe => !pe.angleIds || pe.angleIds.length === 0);
+    }
+    const angleId = parseInt(internalExpertsAngleFilter);
+    return experts.filter(pe => pe.angleIds?.includes(angleId));
+  }, [projectDetail?.internalExperts, internalExpertsAngleFilter]);
 
   const handleSelectExpert = (expertId: number, checked: boolean) => {
     const newSelected = new Set(selectedExperts);
@@ -1207,20 +1230,40 @@ export default function ProjectDetail() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Internal Experts Pipeline
-              </CardTitle>
-              <CardDescription>
-                Experts from internal database assigned to this project
-              </CardDescription>
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Internal Experts Pipeline
+                  </CardTitle>
+                  <CardDescription>
+                    Experts from internal database assigned to this project
+                  </CardDescription>
+                </div>
+                {projectDetail?.angles && projectDetail.angles.length > 0 && (
+                  <Select value={internalExpertsAngleFilter} onValueChange={setInternalExpertsAngleFilter}>
+                    <SelectTrigger className="w-[180px]" data-testid="select-angle-filter">
+                      <SelectValue placeholder="Filter by Angle" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Angles</SelectItem>
+                      <SelectItem value="none">No Angle Assigned</SelectItem>
+                      {projectDetail.angles.map((angle) => (
+                        <SelectItem key={angle.id} value={angle.id.toString()}>
+                          {angle.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
-              {!projectDetail.internalExperts || projectDetail.internalExperts.length === 0 ? (
+              {filteredInternalExperts.length === 0 ? (
                 <EmptyState
                   icon={Users}
-                  title="No internal experts yet"
-                  description="Use the search above to add experts from your database."
+                  title={internalExpertsAngleFilter !== "all" ? "No experts match this filter" : "No internal experts yet"}
+                  description={internalExpertsAngleFilter !== "all" ? "Try selecting a different angle filter." : "Use the search above to add experts from your database."}
                 />
               ) : (
                 <div className="overflow-x-auto">
@@ -1228,6 +1271,7 @@ export default function ProjectDetail() {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
+                        <TableHead className="text-xs font-semibold uppercase">Angles</TableHead>
                         <TableHead className="text-xs font-semibold uppercase">Invitation Status</TableHead>
                         <TableHead className="text-xs font-semibold uppercase">Pipeline</TableHead>
                         <TableHead className="text-xs font-semibold uppercase">VQ Answers</TableHead>
@@ -1236,80 +1280,97 @@ export default function ProjectDetail() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {projectDetail.internalExperts.map((pe) => (
-                        <TableRow key={pe.id} data-testid={`row-internal-expert-${pe.id}`}>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {pe.expert?.email} {pe.expert?.jobTitle ? `• ${pe.expert.jobTitle}` : ""}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {getInvitationStatusIcon(pe.invitationStatus)}
-                              {getInvitationStatusBadge(pe.invitationStatus)}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {getPipelineStatusBadge(pe.pipelineStatus)}
-                          </TableCell>
-                          <TableCell>
-                            {pe.vqAnswers && Array.isArray(pe.vqAnswers) && pe.vqAnswers.length > 0 ? (
-                              <Badge variant="outline" className="text-xs">
-                                <Check className="h-3 w-3 mr-1" />
-                                {pe.vqAnswers.length} answers
-                              </Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {pe.lastActivityAt
-                              ? formatDistanceToNow(new Date(pe.lastActivityAt), { addSuffix: true })
-                              : pe.invitedAt
-                              ? formatDistanceToNow(new Date(pe.invitedAt), { addSuffix: true })
-                              : "-"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {pe.invitationStatus !== "accepted" && pe.invitationStatus !== "declined" && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => generateInviteLinkMutation.mutate({ expertId: pe.expertId })}
-                                  disabled={generateInviteLinkMutation.isPending}
-                                  title="Generate and copy invite link"
-                                  data-testid={`button-invite-link-${pe.id}`}
-                                >
-                                  {copiedLink?.includes(String(pe.expertId)) ? (
-                                    <Check className="h-4 w-4 text-green-500" />
-                                  ) : (
-                                    <Link2 className="h-4 w-4" />
-                                  )}
-                                </Button>
+                      {filteredInternalExperts.map((pe) => {
+                        const angleNames = getAngleBadges(pe);
+                        return (
+                          <TableRow key={pe.id} data-testid={`row-internal-expert-${pe.id}`}>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {pe.expert?.email} {pe.expert?.jobTitle ? `• ${pe.expert.jobTitle}` : ""}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {angleNames && angleNames.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {angleNames.map((name, idx) => (
+                                    <Badge key={idx} variant="outline" className="text-xs">
+                                      <Layers className="h-3 w-3 mr-1" />
+                                      {name}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">-</span>
                               )}
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
-                                    onClick={() => removeExpertMutation.mutate(pe.id)}
-                                    className="text-destructive"
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {getInvitationStatusIcon(pe.invitationStatus)}
+                                {getInvitationStatusBadge(pe.invitationStatus)}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {getPipelineStatusBadge(pe.pipelineStatus)}
+                            </TableCell>
+                            <TableCell>
+                              {pe.vqAnswers && Array.isArray(pe.vqAnswers) && pe.vqAnswers.length > 0 ? (
+                                <Badge variant="outline" className="text-xs">
+                                  <Check className="h-3 w-3 mr-1" />
+                                  {pe.vqAnswers.length} answers
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-muted-foreground">
+                              {pe.lastActivityAt
+                                ? formatDistanceToNow(new Date(pe.lastActivityAt), { addSuffix: true })
+                                : pe.invitedAt
+                                ? formatDistanceToNow(new Date(pe.invitedAt), { addSuffix: true })
+                                : "-"}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                {pe.invitationStatus !== "accepted" && pe.invitationStatus !== "declined" && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => generateInviteLinkMutation.mutate({ expertId: pe.expertId })}
+                                    disabled={generateInviteLinkMutation.isPending}
+                                    title="Generate and copy invite link"
+                                    data-testid={`button-invite-link-${pe.id}`}
                                   >
-                                    <X className="h-4 w-4 mr-2" />
-                                    Remove from project
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                                    {copiedLink?.includes(String(pe.expertId)) ? (
+                                      <Check className="h-4 w-4 text-green-500" />
+                                    ) : (
+                                      <Link2 className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                )}
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon">
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={() => removeExpertMutation.mutate(pe.id)}
+                                      className="text-destructive"
+                                    >
+                                      <X className="h-4 w-4 mr-2" />
+                                      Remove from project
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>

@@ -692,6 +692,7 @@ export async function registerRoutes(
     try {
       const projectId = parseInt(req.params.projectId);
       const expertId = parseInt(req.params.expertId);
+      const { angleIds } = req.body; // Optional: specific angles to invite for
 
       const project = await storage.getProject(projectId);
       if (!project) {
@@ -714,13 +715,14 @@ export async function registerRoutes(
           token,
           projectId,
           expertId,
+          angleIds: angleIds || null, // Store angle IDs if provided
           inviteType: "existing",
           recruitedBy: user?.email || "system",
           isActive: true,
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
         });
 
-        // Update project expert status
+        // Update project expert status with angle IDs
         const projectExperts = await storage.getProjectExpertsByProject(projectId);
         const pe = projectExperts.find(p => p.expertId === expertId);
         if (pe) {
@@ -728,6 +730,7 @@ export async function registerRoutes(
             invitationStatus: "invited",
             invitedAt: new Date(),
             invitationToken: token,
+            angleIds: angleIds || pe.angleIds, // Preserve or update angle IDs
           });
         }
 
@@ -739,6 +742,10 @@ export async function registerRoutes(
           activityType: "expert_invited",
           description: `Invited expert ${expert.name} to project`,
         });
+      } else if (angleIds && angleIds.length > 0) {
+        // Update existing link with new angle IDs if provided
+        await storage.updateExpertInvitationLink(link.id, { angleIds });
+        link = { ...link, angleIds };
       }
 
       const inviteUrl = `/expert/project-invite/${link.token}`;
@@ -1965,7 +1972,26 @@ export async function registerRoutes(
       }
       
       // Get vetting questions
-      const vettingQuestions = await storage.getVettingQuestionsByProject(link.projectId);
+      const allVettingQuestions = await storage.getVettingQuestionsByProject(link.projectId);
+      
+      // Get project angles for context
+      const angles = await storage.getProjectAngles(link.projectId);
+      
+      // Filter VQs based on angleIds if specified in the link
+      let vettingQuestions = allVettingQuestions;
+      let relevantAngles: typeof angles = [];
+      
+      if (link.angleIds && link.angleIds.length > 0) {
+        // Include VQs that belong to the specified angles or have no angle (general)
+        vettingQuestions = allVettingQuestions.filter(q => 
+          q.angleId === null || link.angleIds!.includes(q.angleId)
+        );
+        // Only include relevant angles
+        relevantAngles = angles.filter(a => link.angleIds!.includes(a.id));
+      } else {
+        // No angle filter - include all VQs
+        relevantAngles = angles;
+      }
       
       // Get project-expert assignment
       const projectExperts = await storage.getProjectExpertsByProject(link.projectId);
@@ -2004,11 +2030,18 @@ export async function registerRoutes(
           name: expert.name,
           email: expert.email,
         },
+        angles: relevantAngles.map(a => ({
+          id: a.id,
+          title: a.title,
+          description: a.description,
+        })),
         vettingQuestions: vettingQuestions.map(q => ({
           id: q.id,
           question: q.question,
           orderIndex: q.orderIndex,
           isRequired: q.isRequired,
+          angleId: q.angleId,
+          questionType: q.questionType,
         })),
         currentStatus: assignment?.invitationStatus || "not_invited",
         hasResponded: assignment?.invitationStatus === "accepted" || assignment?.invitationStatus === "declined",
