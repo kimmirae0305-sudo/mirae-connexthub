@@ -51,12 +51,13 @@ Preferred communication style: Simple, everyday language.
     - **RA Sourcing**: Assign RAs, track RA-sourced experts pipeline, and view vetting answers.
     - **Activity**: Chronological activity log for project events and manual notes.
 - **Existing Expert Project Invite Flow**: Public endpoint (`/expert/project-invite/:token`) allows existing experts to accept/decline project invitations, submit vetting answers, and provide availability notes.
-- **Expert Search Modal**: Advanced search capability in project detail page ("Existing Experts" tab) with comprehensive filters:
-    - **Filters**: Keywords/expertise, country/location, years of experience (min/max), job title, industry, language, prior project involvement, minimum acceptance rate.
+- **Expert Search Modal**: Advanced search capability in project detail page ("Existing Experts" tab) with 10 comprehensive filters in a 2-column layout:
+    - **Filters**: Keywords/expertise, current employer, past employers, country/location, years of experience (min/max), job title, industry, language, available now toggle, min hours worked, min acceptance rate, prior project involvement.
+    - **New Expert Fields**: `city` (text), `pastEmployers` (text array), `availableNow` (boolean), `nextAvailableDate` (timestamp), `totalHoursWorked` (decimal) for enhanced filtering.
     - **Metrics**: Computes `priorProjectCount` (number of previous project assignments) and `acceptanceRate` (percentage of accepted vs. declined invitations) from `projectExperts` table.
     - **Schema**: `experts.languages` (text array) for filtering by spoken languages.
-    - **API**: `GET /api/experts/search` with query params for all filters, returns experts with computed metrics.
-    - **UI**: Modal with scrollable results showing expert cards with metric badges, "Attach" button to add to project.
+    - **API**: `GET /api/experts/search` with query params for all 10+ filters, returns experts with computed metrics.
+    - **UI**: Modal with 2-column filter layout, scrollable results showing expert cards with metric badges, and "Attach" button to add to project.
 
 ## External Dependencies
 
