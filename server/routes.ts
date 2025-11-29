@@ -537,11 +537,12 @@ export async function registerRoutes(
       }
 
       // Fetch related data
-      const [projectExperts, vettingQuestions, activities, inviteLinks] = await Promise.all([
+      const [projectExperts, vettingQuestions, activities, inviteLinks, angles] = await Promise.all([
         storage.getProjectExpertsByProject(id),
         storage.getVettingQuestionsByProject(id),
         storage.getProjectActivities(id),
         storage.getExpertInvitationLinksByProject(id),
+        storage.getProjectAngles(id),
       ]);
 
       // Enrich project experts with expert details
@@ -595,6 +596,7 @@ export async function registerRoutes(
         raSourcedExperts,
         activities,
         raInviteLinks,
+        angles,
       });
     } catch (error) {
       console.error("Error fetching project detail:", error);

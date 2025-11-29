@@ -28,6 +28,13 @@ import {
   ExternalLink,
   MoreHorizontal,
   Eye,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  Trash2,
+  GripVertical,
+  Pencil,
+  Layers,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -71,7 +78,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
-import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity } from "@shared/schema";
+import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle } from "@shared/schema";
 
 interface EnrichedExpert extends ProjectExpert {
   expert?: Expert;
@@ -86,6 +93,7 @@ interface ProjectDetailData extends Project {
   raSourcedExperts?: EnrichedExpert[];
   activities?: ProjectActivity[];
   raInviteLinks?: any[];
+  angles?: ProjectAngle[];
 }
 
 interface RAUser {
@@ -109,6 +117,19 @@ export default function ProjectDetail() {
   const [isAssignRaModalOpen, setIsAssignRaModalOpen] = useState(false);
   const [activityNote, setActivityNote] = useState("");
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  
+  // Angles & VQ state
+  const [expandedAngles, setExpandedAngles] = useState<Set<number>>(new Set());
+  const [isAngleModalOpen, setIsAngleModalOpen] = useState(false);
+  const [editingAngle, setEditingAngle] = useState<ProjectAngle | null>(null);
+  const [angleTitle, setAngleTitle] = useState("");
+  const [angleDescription, setAngleDescription] = useState("");
+  const [isVQModalOpen, setIsVQModalOpen] = useState(false);
+  const [editingVQ, setEditingVQ] = useState<VettingQuestion | null>(null);
+  const [vqAngleId, setVQAngleId] = useState<number | null>(null);
+  const [vqQuestion, setVQQuestion] = useState("");
+  const [vqQuestionType, setVQQuestionType] = useState<"screening" | "insight" | "general">("insight");
+  const [vqIsRequired, setVQIsRequired] = useState(false);
 
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
@@ -255,6 +276,198 @@ export default function ProjectDetail() {
     },
   });
 
+  // Angles mutations
+  const createAngleMutation = useMutation({
+    mutationFn: async (data: { title: string; description?: string }) => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/angles`, {
+        ...data,
+        orderIndex: (projectDetail?.angles?.length || 0),
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      setIsAngleModalOpen(false);
+      setAngleTitle("");
+      setAngleDescription("");
+      toast({ title: "Angle created successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to create angle", variant: "destructive" });
+    },
+  });
+
+  const updateAngleMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: { title?: string; description?: string } }) => {
+      const res = await apiRequest("PATCH", `/api/angles/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      setIsAngleModalOpen(false);
+      setEditingAngle(null);
+      setAngleTitle("");
+      setAngleDescription("");
+      toast({ title: "Angle updated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update angle", variant: "destructive" });
+    },
+  });
+
+  const deleteAngleMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/angles/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      toast({ title: "Angle deleted successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to delete angle", variant: "destructive" });
+    },
+  });
+
+  // Vetting Questions mutations
+  const createVQMutation = useMutation({
+    mutationFn: async (data: { question: string; angleId: number | null; questionType: string; isRequired: boolean }) => {
+      const existingVQs = projectDetail?.vettingQuestions?.filter(vq => vq.angleId === data.angleId) || [];
+      const res = await apiRequest("POST", `/api/vetting-questions`, {
+        ...data,
+        projectId,
+        orderIndex: existingVQs.length,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      setIsVQModalOpen(false);
+      setVQQuestion("");
+      setVQAngleId(null);
+      setVQQuestionType("insight");
+      setVQIsRequired(false);
+      toast({ title: "Vetting question created successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to create vetting question", variant: "destructive" });
+    },
+  });
+
+  const updateVQMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: Partial<VettingQuestion> }) => {
+      const res = await apiRequest("PATCH", `/api/vetting-questions/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      setIsVQModalOpen(false);
+      setEditingVQ(null);
+      setVQQuestion("");
+      setVQAngleId(null);
+      setVQQuestionType("insight");
+      setVQIsRequired(false);
+      toast({ title: "Vetting question updated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update vetting question", variant: "destructive" });
+    },
+  });
+
+  const deleteVQMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/vetting-questions/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      toast({ title: "Vetting question deleted successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to delete vetting question", variant: "destructive" });
+    },
+  });
+
+  // Helper functions for Angles
+  const toggleAngleExpanded = (angleId: number) => {
+    const newExpanded = new Set(expandedAngles);
+    if (newExpanded.has(angleId)) {
+      newExpanded.delete(angleId);
+    } else {
+      newExpanded.add(angleId);
+    }
+    setExpandedAngles(newExpanded);
+  };
+
+  const openAddAngleModal = () => {
+    setEditingAngle(null);
+    setAngleTitle("");
+    setAngleDescription("");
+    setIsAngleModalOpen(true);
+  };
+
+  const openEditAngleModal = (angle: ProjectAngle) => {
+    setEditingAngle(angle);
+    setAngleTitle(angle.title);
+    setAngleDescription(angle.description || "");
+    setIsAngleModalOpen(true);
+  };
+
+  const handleSaveAngle = () => {
+    if (!angleTitle.trim()) return;
+    if (editingAngle) {
+      updateAngleMutation.mutate({ 
+        id: editingAngle.id, 
+        data: { title: angleTitle, description: angleDescription || undefined } 
+      });
+    } else {
+      createAngleMutation.mutate({ 
+        title: angleTitle, 
+        description: angleDescription || undefined 
+      });
+    }
+  };
+
+  const openAddVQModal = (angleId: number | null) => {
+    setEditingVQ(null);
+    setVQAngleId(angleId);
+    setVQQuestion("");
+    setVQQuestionType("insight");
+    setVQIsRequired(false);
+    setIsVQModalOpen(true);
+  };
+
+  const openEditVQModal = (vq: VettingQuestion) => {
+    setEditingVQ(vq);
+    setVQAngleId(vq.angleId || null);
+    setVQQuestion(vq.question);
+    setVQQuestionType((vq.questionType as "screening" | "insight" | "general") || "insight");
+    setVQIsRequired(vq.isRequired || false);
+    setIsVQModalOpen(true);
+  };
+
+  const handleSaveVQ = () => {
+    if (!vqQuestion.trim()) return;
+    if (editingVQ) {
+      updateVQMutation.mutate({
+        id: editingVQ.id,
+        data: { 
+          question: vqQuestion, 
+          angleId: vqAngleId, 
+          questionType: vqQuestionType,
+          isRequired: vqIsRequired 
+        },
+      });
+    } else {
+      createVQMutation.mutate({
+        question: vqQuestion,
+        angleId: vqAngleId,
+        questionType: vqQuestionType,
+        isRequired: vqIsRequired,
+      });
+    }
+  };
+
+  const getVQsForAngle = (angleId: number | null) => {
+    return (projectDetail?.vettingQuestions || [])
+      .filter(vq => vq.angleId === angleId)
+      .sort((a, b) => a.orderIndex - b.orderIndex);
+  };
+
   const handleSelectExpert = (expertId: number, checked: boolean) => {
     const newSelected = new Set(selectedExperts);
     if (checked) {
@@ -394,8 +607,11 @@ export default function ProjectDetail() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
+        <TabsList className="flex-wrap">
           <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
+          <TabsTrigger value="angles-vq" data-testid="tab-angles-vq">
+            Angles & VQ {projectDetail.angles?.length ? `(${projectDetail.angles.length})` : ""}
+          </TabsTrigger>
           <TabsTrigger value="existing-experts" data-testid="tab-existing-experts">
             Existing Experts {projectDetail.internalExperts?.length ? `(${projectDetail.internalExperts.length})` : ""}
           </TabsTrigger>
@@ -603,6 +819,260 @@ export default function ProjectDetail() {
               </Button>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Angles & VQ Tab */}
+        <TabsContent value="angles-vq" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Layers className="h-4 w-4" />
+                    Expert Angles
+                  </CardTitle>
+                  <CardDescription>
+                    Define angles (expert profiles) and their vetting questions
+                  </CardDescription>
+                </div>
+                <Button size="sm" onClick={openAddAngleModal} data-testid="button-add-angle">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Angle
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {(!projectDetail.angles || projectDetail.angles.length === 0) ? (
+                <EmptyState
+                  icon={Layers}
+                  title="No angles defined"
+                  description="Create angles to organize experts by profile type and define specific vetting questions for each"
+                  action={
+                    <Button size="sm" onClick={openAddAngleModal} data-testid="button-add-angle-empty">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add First Angle
+                    </Button>
+                  }
+                />
+              ) : (
+                <div className="space-y-4">
+                  {projectDetail.angles
+                    .sort((a, b) => a.orderIndex - b.orderIndex)
+                    .map((angle) => {
+                      const isExpanded = expandedAngles.has(angle.id);
+                      const vqs = getVQsForAngle(angle.id);
+                      return (
+                        <div key={angle.id} className="border rounded-lg">
+                          <div
+                            className="flex items-center justify-between p-4 cursor-pointer hover-elevate"
+                            onClick={() => toggleAngleExpanded(angle.id)}
+                            data-testid={`angle-header-${angle.id}`}
+                          >
+                            <div className="flex items-center gap-3">
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                              <div>
+                                <h3 className="font-medium">{angle.title}</h3>
+                                {angle.description && (
+                                  <p className="text-sm text-muted-foreground">{angle.description}</p>
+                                )}
+                              </div>
+                              <Badge variant="secondary" className="ml-2">
+                                {vqs.length} question{vqs.length !== 1 ? "s" : ""}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openEditAngleModal(angle)}
+                                data-testid={`button-edit-angle-${angle.id}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  if (confirm(`Delete angle "${angle.title}" and all its vetting questions?`)) {
+                                    deleteAngleMutation.mutate(angle.id);
+                                  }
+                                }}
+                                data-testid={`button-delete-angle-${angle.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          </div>
+                          {isExpanded && (
+                            <div className="border-t p-4 bg-muted/30">
+                              <div className="flex items-center justify-between mb-3">
+                                <h4 className="text-sm font-medium text-muted-foreground">Vetting Questions</h4>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openAddVQModal(angle.id)}
+                                  data-testid={`button-add-vq-${angle.id}`}
+                                >
+                                  <Plus className="h-4 w-4 mr-2" />
+                                  Add Question
+                                </Button>
+                              </div>
+                              {vqs.length === 0 ? (
+                                <p className="text-sm text-muted-foreground italic">No questions yet</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {vqs.map((vq, index) => (
+                                    <div
+                                      key={vq.id}
+                                      className="flex items-start gap-3 p-3 rounded-lg bg-background border"
+                                      data-testid={`vq-item-${vq.id}`}
+                                    >
+                                      <span className="font-mono text-sm text-muted-foreground w-6 flex-shrink-0">
+                                        {index + 1}.
+                                      </span>
+                                      <div className="flex-1">
+                                        <p className="text-sm">{vq.question}</p>
+                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                          {vq.questionType && (
+                                            <Badge
+                                              variant="outline"
+                                              className={
+                                                vq.questionType === "screening"
+                                                  ? "bg-orange-500/10 text-orange-600 border-orange-500/20"
+                                                  : vq.questionType === "insight"
+                                                  ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                                                  : ""
+                                              }
+                                            >
+                                              {vq.questionType}
+                                            </Badge>
+                                          )}
+                                          {vq.isRequired && (
+                                            <Badge variant="secondary" className="text-xs">Required</Badge>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => openEditVQModal(vq)}
+                                          data-testid={`button-edit-vq-${vq.id}`}
+                                        >
+                                          <Pencil className="h-3 w-3" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => {
+                                            if (confirm("Delete this vetting question?")) {
+                                              deleteVQMutation.mutate(vq.id);
+                                            }
+                                          }}
+                                          data-testid={`button-delete-vq-${vq.id}`}
+                                        >
+                                          <Trash2 className="h-3 w-3 text-destructive" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Unassigned VQs (legacy or general questions) */}
+          {getVQsForAngle(null).length > 0 && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <ClipboardList className="h-4 w-4" />
+                      General Vetting Questions
+                    </CardTitle>
+                    <CardDescription>
+                      Questions not assigned to any specific angle
+                    </CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => openAddVQModal(null)} data-testid="button-add-general-vq">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Question
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {getVQsForAngle(null).map((vq, index) => (
+                    <div
+                      key={vq.id}
+                      className="flex items-start gap-3 p-3 rounded-lg bg-muted/50"
+                      data-testid={`general-vq-item-${vq.id}`}
+                    >
+                      <span className="font-mono text-sm text-muted-foreground w-6 flex-shrink-0">
+                        {index + 1}.
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-sm">{vq.question}</p>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {vq.questionType && (
+                            <Badge
+                              variant="outline"
+                              className={
+                                vq.questionType === "screening"
+                                  ? "bg-orange-500/10 text-orange-600 border-orange-500/20"
+                                  : vq.questionType === "insight"
+                                  ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                                  : ""
+                              }
+                            >
+                              {vq.questionType}
+                            </Badge>
+                          )}
+                          {vq.isRequired && (
+                            <Badge variant="secondary" className="text-xs">Required</Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openEditVQModal(vq)}
+                          data-testid={`button-edit-general-vq-${vq.id}`}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            if (confirm("Delete this vetting question?")) {
+                              deleteVQMutation.mutate(vq.id);
+                            }
+                          }}
+                          data-testid={`button-delete-general-vq-${vq.id}`}
+                        >
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="existing-experts" className="space-y-4">
@@ -1139,6 +1609,156 @@ export default function ProjectDetail() {
               data-testid="button-confirm-assign-ra"
             >
               {assignRasMutation.isPending ? "Saving..." : "Save Assignments"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Angle Modal */}
+      <Dialog open={isAngleModalOpen} onOpenChange={setIsAngleModalOpen}>
+        <DialogContent className="max-w-md" aria-describedby="angle-modal-description">
+          <DialogHeader>
+            <DialogTitle>{editingAngle ? "Edit Angle" : "Add Angle"}</DialogTitle>
+            <DialogDescription id="angle-modal-description">
+              {editingAngle
+                ? "Update the angle details"
+                : "Create a new angle to organize experts by profile type"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Title</label>
+              <Input
+                placeholder="e.g., Battery Cell Engineers"
+                value={angleTitle}
+                onChange={(e) => setAngleTitle(e.target.value)}
+                data-testid="input-angle-title"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Description (optional)</label>
+              <Textarea
+                placeholder="Brief description of this expert profile type..."
+                value={angleDescription}
+                onChange={(e) => setAngleDescription(e.target.value)}
+                rows={3}
+                data-testid="input-angle-description"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsAngleModalOpen(false);
+                setEditingAngle(null);
+                setAngleTitle("");
+                setAngleDescription("");
+              }}
+              data-testid="button-cancel-angle"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveAngle}
+              disabled={!angleTitle.trim() || createAngleMutation.isPending || updateAngleMutation.isPending}
+              data-testid="button-save-angle"
+            >
+              {createAngleMutation.isPending || updateAngleMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* VQ Modal */}
+      <Dialog open={isVQModalOpen} onOpenChange={setIsVQModalOpen}>
+        <DialogContent className="max-w-lg" aria-describedby="vq-modal-description">
+          <DialogHeader>
+            <DialogTitle>{editingVQ ? "Edit Vetting Question" : "Add Vetting Question"}</DialogTitle>
+            <DialogDescription id="vq-modal-description">
+              {editingVQ
+                ? "Update the vetting question details"
+                : "Add a new question for experts to answer"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Question</label>
+              <Textarea
+                placeholder="Enter your vetting question..."
+                value={vqQuestion}
+                onChange={(e) => setVQQuestion(e.target.value)}
+                rows={3}
+                data-testid="input-vq-question"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Question Type</label>
+                <Select value={vqQuestionType} onValueChange={(v) => setVQQuestionType(v as "screening" | "insight" | "general")}>
+                  <SelectTrigger data-testid="select-vq-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="screening">Screening</SelectItem>
+                    <SelectItem value="insight">Insight</SelectItem>
+                    <SelectItem value="general">General</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Angle</label>
+                <Select 
+                  value={vqAngleId?.toString() || "none"} 
+                  onValueChange={(v) => setVQAngleId(v === "none" ? null : parseInt(v))}
+                >
+                  <SelectTrigger data-testid="select-vq-angle">
+                    <SelectValue placeholder="Select angle" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">General (No Angle)</SelectItem>
+                    {projectDetail?.angles?.map((angle) => (
+                      <SelectItem key={angle.id} value={angle.id.toString()}>
+                        {angle.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="vq-required"
+                checked={vqIsRequired}
+                onCheckedChange={(checked) => setVQIsRequired(!!checked)}
+                data-testid="checkbox-vq-required"
+              />
+              <label htmlFor="vq-required" className="text-sm font-medium cursor-pointer">
+                Required question
+              </label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsVQModalOpen(false);
+                setEditingVQ(null);
+                setVQQuestion("");
+                setVQAngleId(null);
+                setVQQuestionType("insight");
+                setVQIsRequired(false);
+              }}
+              data-testid="button-cancel-vq"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveVQ}
+              disabled={!vqQuestion.trim() || createVQMutation.isPending || updateVQMutation.isPending}
+              data-testid="button-save-vq"
+            >
+              {createVQMutation.isPending || updateVQMutation.isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
