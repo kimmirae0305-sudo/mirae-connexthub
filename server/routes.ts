@@ -1307,6 +1307,224 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== EXPERT ONBOARDING (NEW FLOW) ====================
+  // GET /api/invite/:projectId/:inviteType/:token - Validate invitation and get project/vetting questions
+  app.get("/api/invite/:projectId/:inviteType/:token", async (req, res) => {
+    try {
+      const { projectId, inviteType, token } = req.params;
+      const projectIdNum = parseInt(projectId);
+      
+      // Validate the invitation link
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      
+      if (!link) {
+        return res.status(404).json({ error: "Invitation link not found" });
+      }
+      if (link.usedAt) {
+        return res.status(400).json({ error: "Invitation link already used" });
+      }
+      if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+        return res.status(400).json({ error: "Invitation link expired" });
+      }
+      
+      // Verify project ID matches
+      if (link.projectId !== projectIdNum) {
+        return res.status(400).json({ error: "Invalid invitation link for this project" });
+      }
+      
+      // Get project details
+      const project = await storage.getProject(projectIdNum);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+      
+      // Get vetting questions
+      const vettingQuestions = await storage.getVettingQuestionsByProject(projectIdNum);
+      
+      // Get RA information if recruited by specific RA
+      let recruitedByRaId: number | null = null;
+      if (link.recruitedBy) {
+        const raUser = await storage.getUserByEmail(link.recruitedBy);
+        if (raUser && raUser.role === "ra") {
+          recruitedByRaId = raUser.id;
+        }
+      }
+      
+      res.json({
+        project: {
+          id: project.id,
+          name: project.name,
+          clientName: project.clientName,
+          industry: project.industry,
+          projectOverview: project.projectOverview,
+          description: project.description,
+        },
+        vettingQuestions: vettingQuestions.map(q => ({
+          id: q.id,
+          question: q.question,
+          orderIndex: q.orderIndex,
+          isRequired: q.isRequired,
+        })),
+        recruitedBy: link.recruitedBy,
+        recruitedByRaId,
+      });
+    } catch (error) {
+      console.error("Get invitation error:", error);
+      res.status(500).json({ error: "Failed to fetch invitation details" });
+    }
+  });
+
+  // POST /api/invite/:projectId/:inviteType/:token/submit - Submit expert registration
+  app.post("/api/invite/:projectId/:inviteType/:token/submit", async (req, res) => {
+    try {
+      const { projectId, inviteType, token } = req.params;
+      const projectIdNum = parseInt(projectId);
+      
+      // Validate the invitation link again
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      
+      if (!link) {
+        return res.status(404).json({ error: "Invitation link not found" });
+      }
+      if (link.usedAt) {
+        return res.status(400).json({ error: "Invitation link already used" });
+      }
+      if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+        return res.status(400).json({ error: "Invitation link expired" });
+      }
+      if (link.projectId !== projectIdNum) {
+        return res.status(400).json({ error: "Invalid invitation link for this project" });
+      }
+      
+      const {
+        email,
+        password,
+        firstName,
+        lastName,
+        country,
+        region,
+        countryCode,
+        phoneNumber,
+        linkedinUrl,
+        city,
+        canConsultInEnglish,
+        timezone,
+        experiences,
+        biography,
+        hourlyRate,
+        currency,
+        vqAnswers,
+      } = req.body;
+      
+      // Check if expert with email already exists
+      const existingExpert = await storage.getExpertByEmail(email);
+      if (existingExpert) {
+        return res.status(400).json({ error: "An expert with this email already exists" });
+      }
+      
+      // Hash password for expert login (future use)
+      const passwordHash = await hashPassword(password);
+      
+      // Get RA ID for sourcedByRaId
+      let sourcedByRaId: number | null = null;
+      if (link.recruitedBy) {
+        const raUser = await storage.getUserByEmail(link.recruitedBy);
+        if (raUser && raUser.role === "ra") {
+          sourcedByRaId = raUser.id;
+        }
+      }
+      
+      // Format phone number
+      const fullPhone = `${countryCode} ${phoneNumber}`.trim();
+      
+      // Format experience for bio/company/job title
+      const currentExperience = experiences.find((e: any) => e.isCurrent) || experiences[0];
+      const experienceText = experiences.map((e: any) => {
+        const period = e.isCurrent 
+          ? `${e.fromMonth}/${e.fromYear} - Present`
+          : `${e.fromMonth}/${e.fromYear} - ${e.toMonth}/${e.toYear}`;
+        return `${e.title} at ${e.company} (${period})`;
+      }).join("\n");
+      
+      // Calculate years of experience from earliest date
+      const earliestYear = Math.min(...experiences.map((e: any) => parseInt(e.fromYear)));
+      const currentYear = new Date().getFullYear();
+      const yearsOfExperience = currentYear - earliestYear;
+      
+      // Create expert record
+      const expertData = {
+        name: `${firstName} ${lastName}`,
+        email,
+        phone: fullPhone,
+        linkedinUrl: linkedinUrl || null,
+        country,
+        timezone,
+        whatsapp: fullPhone,
+        expertise: currentExperience?.title || "Expert",
+        areasOfExpertise: [canConsultInEnglish === "yes" ? "English consultations available" : ""],
+        industry: "Consulting",
+        company: currentExperience?.company || "",
+        jobTitle: currentExperience?.title || "",
+        yearsOfExperience,
+        hourlyRate: hourlyRate,
+        bio: `${biography}\n\nExperience:\n${experienceText}`,
+        status: "available" as const,
+        recruitedBy: link.recruitedBy,
+        sourcedByRaId,
+        sourcedAt: new Date(),
+        termsAccepted: true,
+        lgpdAccepted: true,
+        billingInfo: `Currency: ${currency}, Region: ${region || ""}, City: ${city || ""}`,
+      };
+      
+      const result = insertExpertSchema.safeParse(expertData);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      
+      const expert = await storage.createExpert(result.data);
+      
+      // Mark invitation link as used
+      await storage.markInvitationLinkUsed(token);
+      
+      // Get project for vetting question mapping
+      const project = await storage.getProject(projectIdNum);
+      const vettingQuestions = await storage.getVettingQuestionsByProject(projectIdNum);
+      
+      // Format VQ answers for storage
+      const formattedVqAnswers = vqAnswers.map((answer: { questionId: number; answer: string }) => {
+        const question = vettingQuestions.find(q => q.id === answer.questionId);
+        return {
+          questionId: answer.questionId,
+          questionText: question?.question || "",
+          answerText: answer.answer,
+        };
+      });
+      
+      // Create project-expert assignment with status "interested"
+      const invitationToken = crypto.randomBytes(32).toString("hex");
+      await storage.createProjectExpert({
+        projectId: projectIdNum,
+        expertId: expert.id,
+        status: "accepted",
+        invitedAt: new Date(),
+        respondedAt: new Date(),
+        invitationToken,
+        vqAnswers: formattedVqAnswers,
+        notes: `Self-registered via invitation link. Invite type: ${inviteType}`,
+      });
+      
+      res.status(201).json({ 
+        success: true, 
+        expertId: expert.id,
+        message: "Expert registered successfully" 
+      });
+    } catch (error) {
+      console.error("Expert registration error:", error);
+      res.status(500).json({ error: "Failed to register expert" });
+    }
+  });
+
   // ==================== USAGE RECORDS (LEGACY) ====================
   app.get("/api/usage", authMiddleware, async (req, res) => {
     try {
