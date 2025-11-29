@@ -30,6 +30,8 @@ PostgreSQL (Neon serverless) is used as the database, managed with Drizzle ORM f
 - **Existing Expert Project Invite Flow**: Experts can accept/decline invitations, submit vetting answers, and provide availability notes via a public link without logging in.
 - **Expert Search Modal**: An advanced search feature within the project detail page allows filtering experts by numerous criteria including keywords, employer history, location, experience, and availability, with computed metrics like `priorProjectCount` and `acceptanceRate`. New expert fields like `city`, `pastEmployers`, `availableNow`, and `totalHoursWorked` enhance filtering capabilities.
 - **Token-Based Expert Invite Flow**: A frictionless process where experts can respond to project invitations via a public, time-limited tokenized link.
+- **Quick Invite Generator**: Lightweight invite flow in the RA-Sourced Experts Pipeline allowing RAs to quickly generate unique invite links by entering only candidate name + one contact method (LinkedIn, Email, or Phone).
+- **In-Project Expert Registration**: RAs can register new experts directly from the RA Sourcing tab via the "Register Expert" modal with full profile form, multi-language support, and unique token generation.
 - **RA Scoped Views**: RAs have restricted views, seeing only projects and consultations they are assigned to, with limited UI actions and financial data visibility.
 - **Unique Invite Tokens & History**: Each invitation generates a new unique token for better tracking. A centralized `/invites` page allows Admin, PM, and RA roles to view and manage invitation links with filtering and statistics.
 

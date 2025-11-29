@@ -79,6 +79,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { RegisterExpertForm } from "@/components/experts/RegisterExpertForm";
+import { QuickInviteForm } from "@/components/experts/QuickInviteForm";
 import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle } from "@shared/schema";
 
 interface EnrichedExpert extends ProjectExpert {
@@ -114,6 +115,7 @@ export default function ProjectDetail() {
   const [isAssignRaModalOpen, setIsAssignRaModalOpen] = useState(false);
   const [activityNote, setActivityNote] = useState("");
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  const [isQuickInviteModalOpen, setIsQuickInviteModalOpen] = useState(false);
   
   // Angles & VQ state
   const [expandedAngles, setExpandedAngles] = useState<Set<number>>(new Set());
@@ -1518,12 +1520,12 @@ export default function ProjectDetail() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setIsRegisterExpertModalOpen(true)}
+                  onClick={() => setIsQuickInviteModalOpen(true)}
                   className="gap-2"
-                  data-testid="button-register-expert"
+                  data-testid="button-quick-invite"
                 >
                   <Plus className="h-4 w-4" />
-                  Register Expert
+                  Invite New Expert
                 </Button>
               </div>
             </CardHeader>
@@ -2214,19 +2216,19 @@ export default function ProjectDetail() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isRegisterExpertModalOpen} onOpenChange={setIsRegisterExpertModalOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden" aria-describedby="register-expert-description">
-          <DialogDescription id="register-expert-description" className="sr-only">
-            Fill in the form to register a new expert for this project
+      <Dialog open={isQuickInviteModalOpen} onOpenChange={setIsQuickInviteModalOpen}>
+        <DialogContent className="max-w-md" aria-describedby="quick-invite-description">
+          <DialogDescription id="quick-invite-description" className="sr-only">
+            Generate a quick invite link for a new candidate
           </DialogDescription>
-          <RegisterExpertForm
+          <QuickInviteForm
             projectId={projectId}
             onSuccess={() => {
+              setIsQuickInviteModalOpen(false);
               refetchProject();
               queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
             }}
-            onCancel={() => setIsRegisterExpertModalOpen(false)}
-            minimalMode={true}
+            onCancel={() => setIsQuickInviteModalOpen(false)}
           />
         </DialogContent>
       </Dialog>

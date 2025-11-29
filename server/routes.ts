@@ -916,6 +916,57 @@ export async function registerRoutes(
     }
   });
 
+  // Quick invite - generate invite link with minimal info (just name + one contact method)
+  app.post("/api/projects/:projectId/quick-invite", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const user = (req as any).user;
+      const { candidateName, linkedinUrl, email, phoneNumber } = req.body;
+
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      if (!candidateName) {
+        return res.status(400).json({ error: "Candidate name is required" });
+      }
+
+      // Generate unique invite token
+      const token = crypto.randomBytes(32).toString("hex");
+      const link = await storage.createExpertInvitationLink({
+        token,
+        projectId,
+        inviteType: "quick",
+        candidateName,
+        candidateEmail: email || null,
+        status: "pending",
+        recruitedBy: user?.email || "system",
+        raId: user?.role === "ra" || user?.role === "Research Associate" ? user.id : null,
+        isActive: true,
+        expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
+      });
+
+      // Log activity
+      await storage.createProjectActivity({
+        projectId,
+        userId: user?.id,
+        activityType: "quick_invite_created",
+        description: `Generated quick invite link for ${candidateName}`,
+      });
+
+      const inviteUrl = `/expert/project-invite/${token}`;
+      res.status(201).json({
+        link,
+        inviteUrl,
+        message: "Quick invite link generated successfully",
+      });
+    } catch (error) {
+      console.error("Error generating quick invite:", error);
+      res.status(500).json({ error: "Failed to generate quick invite link" });
+    }
+  });
+
   // Generate existing expert project invite link (always creates a NEW unique token)
   app.post("/api/projects/:projectId/experts/:expertId/invite-link", authMiddleware, async (req, res) => {
     try {
