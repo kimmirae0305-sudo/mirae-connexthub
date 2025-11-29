@@ -674,8 +674,8 @@ export async function registerRoutes(
       const internalExperts = enrichedExperts.filter(e => e.sourceType === "internal_db");
       const raSourcedExperts = enrichedExperts.filter(e => e.sourceType === "ra_external");
 
-      // Get RA invite links
-      const raInviteLinks = inviteLinks.filter(l => l.inviteType === "ra" && l.isActive);
+      // Get RA invite links (including quick invites)
+      const raInviteLinks = inviteLinks.filter(l => (l.inviteType === "ra" || l.inviteType === "quick") && l.isActive);
 
       res.json({
         ...project,

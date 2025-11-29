@@ -1530,90 +1530,181 @@ export default function ProjectDetail() {
               </div>
             </CardHeader>
             <CardContent>
-              {!projectDetail.raSourcedExperts || projectDetail.raSourcedExperts.length === 0 ? (
-                <EmptyState
-                  icon={ExternalLink}
-                  title="No RA-sourced experts yet"
-                  description="Experts onboarded through RA invite links will appear here."
-                />
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Sourced By</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Pipeline Status</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">VQ Answers</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Onboarded</TableHead>
-                        <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {projectDetail.raSourcedExperts.map((pe) => (
-                        <TableRow key={pe.id} data-testid={`row-ra-expert-${pe.id}`}>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {pe.expert?.email} {pe.expert?.jobTitle ? `• ${pe.expert.jobTitle}` : ""}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {pe.sourcedByRa ? (
-                              <Badge variant="outline" className="gap-1">
-                                <UserCheck className="h-3 w-3" />
-                                {pe.sourcedByRa.fullName}
-                              </Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {getPipelineStatusBadge(pe.pipelineStatus)}
-                          </TableCell>
-                          <TableCell>
-                            {pe.vqAnswers && Array.isArray(pe.vqAnswers) && pe.vqAnswers.length > 0 ? (
-                              <Badge variant="outline" className="text-xs">
-                                <Check className="h-3 w-3 mr-1" />
-                                {pe.vqAnswers.length} answers
-                              </Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {pe.respondedAt
-                              ? formatDistanceToNow(new Date(pe.respondedAt), { addSuffix: true })
-                              : pe.invitedAt
-                              ? formatDistanceToNow(new Date(pe.invitedAt), { addSuffix: true })
-                              : "-"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={() => removeExpertMutation.mutate(pe.id)}
-                                  className="text-destructive"
-                                >
-                                  <X className="h-4 w-4 mr-2" />
-                                  Remove from project
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+              {(() => {
+                const pendingInvites = projectDetail.raInviteLinks?.filter(
+                  (link: any) => link.status === "pending_onboarding" || link.status === "onboarded"
+                ) || [];
+                
+                const hasExperts = projectDetail.raSourcedExperts && projectDetail.raSourcedExperts.length > 0;
+                const hasPending = pendingInvites.length > 0;
+                
+                if (!hasExperts && !hasPending) {
+                  return (
+                    <EmptyState
+                      icon={ExternalLink}
+                      title="No RA-sourced experts yet"
+                      description="Click 'Invite New Expert' to generate an invite link."
+                    />
+                  );
+                }
+                
+                return (
+                  <div className="space-y-6">
+                    {hasPending && (
+                      <div>
+                        <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                          <Clock className="h-4 w-4 text-amber-500" />
+                          Pending Invites ({pendingInvites.length})
+                        </h4>
+                        <div className="overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="text-xs font-semibold uppercase">Candidate</TableHead>
+                                <TableHead className="text-xs font-semibold uppercase">Contact</TableHead>
+                                <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
+                                <TableHead className="text-xs font-semibold uppercase">Created</TableHead>
+                                <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {pendingInvites.map((invite: any) => (
+                                <TableRow key={invite.id} data-testid={`row-pending-invite-${invite.id}`}>
+                                  <TableCell>
+                                    <p className="font-medium">{invite.candidateName || "Unknown"}</p>
+                                  </TableCell>
+                                  <TableCell>
+                                    <p className="text-xs text-muted-foreground truncate max-w-[150px]">
+                                      {invite.candidateEmail || "-"}
+                                    </p>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                                      <Clock className="h-3 w-3 mr-1" />
+                                      {invite.status === "pending_onboarding" ? "Awaiting Onboarding" : "Awaiting Decision"}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="font-mono text-xs text-muted-foreground">
+                                    {invite.createdAt
+                                      ? formatDistanceToNow(new Date(invite.createdAt), { addSuffix: true })
+                                      : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="gap-1"
+                                      onClick={async () => {
+                                        const fullUrl = `${window.location.origin}/invite/onboarding/${invite.token}`;
+                                        await navigator.clipboard.writeText(fullUrl);
+                                        toast({
+                                          title: "Link copied",
+                                          description: "Invite link copied to clipboard",
+                                        });
+                                      }}
+                                      data-testid={`button-copy-invite-${invite.id}`}
+                                    >
+                                      <Copy className="h-3 w-3" />
+                                      Copy Link
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {hasExperts && (
+                      <div>
+                        {hasPending && (
+                          <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                            Onboarded Experts ({projectDetail.raSourcedExperts?.length || 0})
+                          </h4>
+                        )}
+                        <div className="overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
+                                <TableHead className="text-xs font-semibold uppercase">Sourced By</TableHead>
+                                <TableHead className="text-xs font-semibold uppercase">Pipeline Status</TableHead>
+                                <TableHead className="text-xs font-semibold uppercase">VQ Answers</TableHead>
+                                <TableHead className="text-xs font-semibold uppercase">Onboarded</TableHead>
+                                <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {projectDetail.raSourcedExperts?.map((pe) => (
+                                <TableRow key={pe.id} data-testid={`row-ra-expert-${pe.id}`}>
+                                  <TableCell>
+                                    <div>
+                                      <p className="font-medium">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {pe.expert?.email} {pe.expert?.jobTitle ? `• ${pe.expert.jobTitle}` : ""}
+                                      </p>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    {pe.sourcedByRa ? (
+                                      <Badge variant="outline" className="gap-1">
+                                        <UserCheck className="h-3 w-3" />
+                                        {pe.sourcedByRa.fullName}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">-</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {getPipelineStatusBadge(pe.pipelineStatus)}
+                                  </TableCell>
+                                  <TableCell>
+                                    {pe.vqAnswers && Array.isArray(pe.vqAnswers) && pe.vqAnswers.length > 0 ? (
+                                      <Badge variant="outline" className="text-xs">
+                                        <Check className="h-3 w-3 mr-1" />
+                                        {pe.vqAnswers.length} answers
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">-</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="font-mono text-xs text-muted-foreground">
+                                    {pe.respondedAt
+                                      ? formatDistanceToNow(new Date(pe.respondedAt), { addSuffix: true })
+                                      : pe.invitedAt
+                                      ? formatDistanceToNow(new Date(pe.invitedAt), { addSuffix: true })
+                                      : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="icon">
+                                          <MoreHorizontal className="h-4 w-4" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem
+                                          onClick={() => removeExpertMutation.mutate(pe.id)}
+                                          className="text-destructive"
+                                        >
+                                          <X className="h-4 w-4 mr-2" />
+                                          Remove from project
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </TabsContent>
@@ -2224,7 +2315,6 @@ export default function ProjectDetail() {
           <QuickInviteForm
             projectId={projectId}
             onSuccess={() => {
-              setIsQuickInviteModalOpen(false);
               refetchProject();
               queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
             }}
