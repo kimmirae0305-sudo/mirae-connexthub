@@ -2,6 +2,7 @@ import type { Express, Router } from "express";
 import { createServer, type Server } from "http";
 import { Router as ExpressRouter } from "express";
 import { storage } from "./storage";
+import { db } from "./db";
 import {
   insertProjectSchema,
   insertExpertSchema,
@@ -14,11 +15,17 @@ import {
   insertCallRecordSchema,
   insertExpertInvitationLinkSchema,
   calculateCU,
+  callRecords,
+  experts,
+  projects,
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
 import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles, hashPassword, type AuthRequest } from "./auth";
 import { insertClientSchema } from "@shared/schema";
+import { eq, and, gte, lt, sql } from "drizzle-orm";
+import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
+import { startOfMonth, endOfMonth } from "date-fns";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -1116,7 +1123,7 @@ export async function registerRoutes(
   });
 
   // Complete consultation
-  app.post("/api/call-records/:id/complete", authMiddleware, async (req, res) => {
+  app.post("/api/call-records/:id/complete", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const id = parseInt(req.params.id);
       const { actualDurationMinutes, recordingUrl, notes } = req.body;
@@ -1128,6 +1135,7 @@ export async function registerRoutes(
         durationMinutes: actualDurationMinutes,
         recordingUrl,
         notes,
+        completedAt: new Date(),
       });
       if (!record) {
         return res.status(404).json({ error: "Call record not found" });
@@ -1303,6 +1311,153 @@ export async function registerRoutes(
       res.json({ minutes, cu });
     } catch (error) {
       res.status(500).json({ error: "Failed to calculate CU" });
+    }
+  });
+
+  // ==================== KPI & INCENTIVE DASHBOARD ====================
+  /**
+   * GET /api/kpi/my-monthly
+   * 
+   * Returns monthly KPI data and incentive calculations for the authenticated user.
+   * All date filtering is done in America/Sao_Paulo timezone.
+   * 
+   * Incentive Rules:
+   * - RA: R$250 per completed call (expert must be sourced by RA and call within 60 days of sourcing). Cap: R$2,500/month.
+   * - PM: R$70 per CU (Credit Unit = 1 hour). No cap.
+   * - Admin/Finance: See global totals for all calls.
+   */
+  app.get("/api/kpi/my-monthly", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // Get current month boundaries in Brazil timezone (America/Sao_Paulo)
+      // Using date-fns-tz for proper DST handling
+      const BRAZIL_TZ = "America/Sao_Paulo";
+      const now = new Date();
+      
+      // Convert current UTC time to Brazil timezone
+      const brazilNow = toZonedTime(now, BRAZIL_TZ);
+      
+      const year = brazilNow.getFullYear();
+      const month = brazilNow.getMonth(); // 0-indexed
+      
+      // Get month boundaries in Brazil timezone
+      const monthStartInBrazil = startOfMonth(brazilNow);
+      const monthEndInBrazil = endOfMonth(brazilNow);
+      
+      // Convert back to UTC for database queries (DST-safe)
+      const monthStartUTC = fromZonedTime(monthStartInBrazil, BRAZIL_TZ);
+      const monthEndUTC = fromZonedTime(new Date(monthEndInBrazil.getTime() + 24 * 60 * 60 * 1000 - 1), BRAZIL_TZ);
+
+      // Base query: get all completed call records for this month with joins
+      const baseQuery = await db
+        .select({
+          id: callRecords.id,
+          projectId: callRecords.projectId,
+          expertId: callRecords.expertId,
+          pmId: callRecords.pmId,
+          raId: callRecords.raId,
+          durationMinutes: callRecords.durationMinutes,
+          cuUsed: callRecords.cuUsed,
+          completedAt: callRecords.completedAt,
+          callDate: callRecords.callDate,
+          status: callRecords.status,
+          projectName: projects.name,
+          expertName: experts.name,
+          expertSourcedByRaId: experts.sourcedByRaId,
+          expertSourcedAt: experts.sourcedAt,
+        })
+        .from(callRecords)
+        .innerJoin(projects, eq(callRecords.projectId, projects.id))
+        .innerJoin(experts, eq(callRecords.expertId, experts.id))
+        .where(
+          and(
+            eq(callRecords.status, "completed"),
+            gte(sql`COALESCE(${callRecords.completedAt}, ${callRecords.callDate})`, monthStartUTC),
+            lt(sql`COALESCE(${callRecords.completedAt}, ${callRecords.callDate})`, monthEndUTC)
+          )
+        );
+
+      let filteredCalls: typeof baseQuery = [];
+      let totals = {
+        totalCalls: 0,
+        totalCU: 0,
+        incentive: 0,
+      };
+
+      const role = user.role;
+      const userId = user.id;
+
+      if (role === "ra") {
+        // RA: Only calls where expert was sourced by this RA AND call is within 60 days of sourcing
+        filteredCalls = baseQuery.filter((call) => {
+          if (call.expertSourcedByRaId !== userId) return false;
+          if (!call.expertSourcedAt) return false;
+          
+          const sourcedAt = new Date(call.expertSourcedAt);
+          const callDate = call.completedAt ? new Date(call.completedAt) : new Date(call.callDate);
+          const daysDiff = (callDate.getTime() - sourcedAt.getTime()) / (1000 * 60 * 60 * 24);
+          
+          return daysDiff <= 60;
+        });
+
+        totals.totalCalls = filteredCalls.length;
+        totals.totalCU = filteredCalls.reduce((sum, call) => sum + parseFloat(call.cuUsed || "0"), 0);
+        const rawIncentive = totals.totalCalls * 250;
+        totals.incentive = Math.min(rawIncentive, 2500); // Cap at R$2,500
+
+      } else if (role === "pm") {
+        // PM: Calls where pmId = current user
+        filteredCalls = baseQuery.filter((call) => call.pmId === userId);
+
+        totals.totalCalls = filteredCalls.length;
+        totals.totalCU = filteredCalls.reduce((sum, call) => sum + parseFloat(call.cuUsed || "0"), 0);
+        totals.incentive = Math.round(totals.totalCU * 70 * 100) / 100; // R$70 per CU, no cap
+
+      } else if (role === "admin" || role === "finance") {
+        // Admin/Finance: See all calls (global totals)
+        filteredCalls = baseQuery;
+
+        totals.totalCalls = filteredCalls.length;
+        totals.totalCU = filteredCalls.reduce((sum, call) => sum + parseFloat(call.cuUsed || "0"), 0);
+        // For admin/finance, show total potential incentives (PM rate for reference)
+        totals.incentive = Math.round(totals.totalCU * 70 * 100) / 100;
+      }
+
+      // Format calls for response
+      const calls = filteredCalls.map((call) => {
+        const callDate = call.completedAt || call.callDate;
+        // Convert to Brazil timezone for display using date-fns-tz
+        const brazilTime = toZonedTime(new Date(callDate), BRAZIL_TZ);
+        
+        return {
+          id: call.id,
+          interviewDate: format(brazilTime, "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone: BRAZIL_TZ }),
+          expertName: call.expertName,
+          projectName: call.projectName,
+          cuUsed: parseFloat(call.cuUsed || "0"),
+        };
+      });
+
+      // Round totals
+      totals.totalCU = Math.round(totals.totalCU * 100) / 100;
+
+      res.json({
+        role,
+        period: {
+          month: month + 1, // 1-indexed for display
+          year,
+          timezone: "America/Sao_Paulo",
+        },
+        totals,
+        calls,
+      });
+    } catch (error) {
+      console.error("KPI endpoint error:", error);
+      res.status(500).json({ error: "Failed to fetch KPI data" });
     }
   });
 

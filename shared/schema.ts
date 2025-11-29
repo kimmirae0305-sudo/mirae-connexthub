@@ -93,6 +93,8 @@ export const experts = pgTable("experts", {
   bio: text("bio"),
   status: text("status").notNull().default("available"), // available, busy, inactive
   recruitedBy: text("recruited_by"),
+  sourcedByRaId: integer("sourced_by_ra_id").references(() => users.id),
+  sourcedAt: timestamp("sourced_at"),
   termsAccepted: boolean("terms_accepted").default(false),
   lgpdAccepted: boolean("lgpd_accepted").default(false),
   billingInfo: text("billing_info"),
@@ -130,6 +132,8 @@ export const callRecords = pgTable("call_records", {
   projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   expertId: integer("expert_id").notNull().references(() => experts.id, { onDelete: "cascade" }),
   projectExpertId: integer("project_expert_id").references(() => projectExperts.id),
+  pmId: integer("pm_id").references(() => users.id),
+  raId: integer("ra_id").references(() => users.id),
   callDate: timestamp("call_date").notNull(),
   scheduledStartTime: timestamp("scheduled_start_time"),
   scheduledEndTime: timestamp("scheduled_end_time"),
@@ -137,6 +141,7 @@ export const callRecords = pgTable("call_records", {
   durationMinutes: integer("duration_minutes").notNull(),
   cuUsed: decimal("cu_used", { precision: 10, scale: 2 }).notNull(),
   status: text("status").notNull().default("pending"), // pending, scheduled, completed, cancelled, no_show
+  completedAt: timestamp("completed_at"),
   zoomLink: text("zoom_link"),
   recordingUrl: text("recording_url"),
   notes: text("notes"),
@@ -211,7 +216,12 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   invitationLinks: many(expertInvitationLinks),
 }));
 
-export const expertsRelations = relations(experts, ({ many }) => ({
+export const expertsRelations = relations(experts, ({ one, many }) => ({
+  sourcedByRa: one(users, {
+    fields: [experts.sourcedByRaId],
+    references: [users.id],
+    relationName: "sourcedExperts",
+  }),
   projectExperts: many(projectExperts),
   callRecords: many(callRecords),
   usageRecords: many(usageRecords),
@@ -248,6 +258,16 @@ export const callRecordsRelations = relations(callRecords, ({ one }) => ({
   projectExpert: one(projectExperts, {
     fields: [callRecords.projectExpertId],
     references: [projectExperts.id],
+  }),
+  pm: one(users, {
+    fields: [callRecords.pmId],
+    references: [users.id],
+    relationName: "pmCalls",
+  }),
+  ra: one(users, {
+    fields: [callRecords.raId],
+    references: [users.id],
+    relationName: "raCalls",
   }),
 }));
 
@@ -317,6 +337,8 @@ export const insertProjectSchema = createInsertSchema(projects).omit({
 export const insertExpertSchema = createInsertSchema(experts).omit({
   id: true,
   createdAt: true,
+}).extend({
+  sourcedAt: coerceDate.optional(),
 });
 
 export const insertVettingQuestionSchema = createInsertSchema(vettingQuestions).omit({
@@ -339,6 +361,7 @@ export const insertCallRecordSchema = createInsertSchema(callRecords).omit({
   callDate: coerceDateRequired,
   scheduledStartTime: coerceDate.optional(),
   scheduledEndTime: coerceDate.optional(),
+  completedAt: coerceDate.optional(),
 });
 
 export const insertExpertInvitationLinkSchema = createInsertSchema(expertInvitationLinks).omit({

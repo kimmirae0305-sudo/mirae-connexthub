@@ -1,0 +1,162 @@
+I want to implement a CU based KPI and incentive dashboard for the Mirae Connext app, following this incentive scheme:
+
+1) Research Associate (RA) – Expert Sourcing
+- Incentive is only triggered when an expert sourced by the RA completes a client call.
+- The expert must complete the first consultation within 60 days of being sourced to count for RA performance.
+- Rate: R$250 per completed call (via RA sourced expert).
+- Cap: R$2,500 per month.
+
+2) Project Manager (PM) – Credit Unit Delivery
+- Incentive is only triggered when a client call is successfully completed and logged in the system.
+- Rate: R$70 per Credit Unit (CU).
+- 1 CU = 1 hour of completed client call.
+- Partial hours are calculated proportionally, e.g. 30 minutes = 0.5 CU = R$35.
+- No cap.
+
+All KPIs and incentives should be calculated monthly, using Brazil time (timezone: America/Sao_Paulo).
+
+-------------------------------------------------
+1) DATA MODEL ASSUMPTIONS
+-------------------------------------------------
+If needed, please make sure we have the following data available for each completed consultation (“call”):
+
+Consultation / Call model:
+- id
+- projectId
+- expertId
+- pmId
+- raId (RA responsible for sourcing this expert, nullable if sourced directly by PM or database)
+- durationMinutes
+- cuUsed (durationMinutes / 60)
+- status (Completed, Canceled, etc.)
+- completedAt (stored in UTC but always converted to America/Sao_Paulo for reporting)
+
+Expert model should include:
+- sourcedByRaId (user id of the RA who recruited the expert)
+- sourcedAt (date the RA sourced the expert)
+
+If any of these fields do not exist, please add them and wire them into the creation flows so that new calls and experts store the correct data.
+
+-------------------------------------------------
+2) BACKEND – KPI & INCENTIVE ENDPOINTS
+-------------------------------------------------
+
+Create a new endpoint:
+
+GET /api/kpi/my-monthly
+
+Behavior:
+- Uses the authenticated user (req.user.id and req.user.role).
+- Determines the current month in timezone "America/Sao_Paulo".
+- Filters consultations where completedAt falls within the start and end of the current month (in Brazil time) and status = "Completed".
+
+If role = "ra":
+- Consider only calls where:
+  - the expert’s sourcedByRaId = current user id, AND
+  - the completed call happens within 60 days of expert.sourcedAt.
+- Metrics:
+  - totalCalls = number of such completed calls this month.
+  - totalCU = sum of cuUsed for these calls.
+  - rawIncentive = totalCalls * 250.
+  - incentive = min(rawIncentive, 2500).
+- Also return a detailed list:
+  - For each call:
+    - interviewDate (Brazil time)
+    - expertName
+    - projectName
+    - cuUsed
+
+If role = "pm":
+- Consider calls where pmId = current user id.
+- Metrics:
+  - totalCalls = number of completed calls this month.
+  - totalCU = sum of cuUsed.
+  - incentive = totalCU * 70.
+- Also return a detailed list:
+  - interviewDate (Brazil time)
+  - expertName
+  - projectName
+  - cuUsed
+
+If role = "admin" or "finance":
+- For now, return global totals for all calls this month, but keep the same structure (totals + list of calls).
+  Later we can add filters by user.
+
+Response shape example:
+
+{
+  "role": "ra",
+  "period": {
+    "month": 11,
+    "year": 2025,
+    "timezone": "America/Sao_Paulo"
+  },
+  "totals": {
+    "totalCalls": 4,
+    "totalCU": 3.5,
+    "incentive": 1000
+  },
+  "calls": [
+    {
+      "id": "call_123",
+      "interviewDate": "2025-11-10T15:00:00-03:00",
+      "expertName": "Dr. James Chen",
+      "projectName": "Semiconductor Supply Chain Due Diligence",
+      "cuUsed": 1.0
+    },
+    ...
+  ]
+}
+
+Make sure the endpoint is protected by auth and uses the logged-in user and role.
+
+-------------------------------------------------
+3) FRONTEND – KPI DASHBOARD SECTION
+-------------------------------------------------
+
+On the Dashboard page, add a new section called “My CU Performance” above the Recent Projects table.
+
+UI requirements:
+
+1. Summary cards:
+   - Show at least three cards:
+     - Total CU this month
+     - Completed calls this month
+     - Incentive this month (R$)
+   - Values should come from /api/kpi/my-monthly.
+
+2. KPI table:
+   - Below the summary cards, add a table listing this month’s completed calls for the logged-in user.
+   - Columns:
+     - Interview Date (formatted in Brazil time, DD/MM/YYYY HH:mm)
+     - Expert Name
+     - Project Name
+     - CU
+   - The table should be automatically filtered for the current month.
+
+3. Loading and error states:
+   - While the KPI data is loading, show a simple loading skeleton or spinner.
+   - If there is an error, show a small message but keep the dashboard usable.
+
+4. Role behavior:
+   - For RA and PM, show the KPIs and incentives as per the rules above.
+   - For admin and finance, show the global CU totals and calls list.
+   - If needed, display the role in the subtitle, for example: “My CU Performance – RA” or “Company CU Performance – Admin”.
+
+-------------------------------------------------
+4) TIMEZONE HANDLING
+-------------------------------------------------
+
+- All monthly filtering must be based on "America/Sao_Paulo".
+- Even if timestamps are stored in UTC, convert completedAt into Brazil time before checking if it belongs to the current month.
+- Please document how this timezone conversion is done.
+
+-------------------------------------------------
+5) DOCUMENTATION
+-------------------------------------------------
+
+After implementation, please:
+- Describe how RA and PM incentives are calculated step by step.
+- Confirm the 60-day rule for RA-sourced experts is enforced.
+- Confirm that KPI data is monthly, based on Brazil time.
+- Explain how to adjust the period (e.g., previous month) if needed in the future.

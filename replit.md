@@ -62,10 +62,28 @@ Preferred communication style: Simple, everyday language.
 
 **Data Model**
 - **Projects**: Client projects with status tracking, budget, timeline, and industry categorization
-- **Experts**: Professional profiles with expertise, rates, availability status, and contact information
-- **Vetting Questions**: Project-specific screening questions with ordering and required flags
+- **Experts**: Professional profiles with expertise, rates, availability status, sourcedByRaId, and sourcedAt for RA attribution
+- **Vetting Questions**: Project-specific screening questions with ordering and required flags (displayed as "Insight Hub" in UI)
 - **Project Experts**: Many-to-many assignments linking projects to experts with notes and status
-- **Usage Records**: Time tracking with duration, credits, and billing information
+- **Call Records**: Consultation tracking with pmId, raId, durationMinutes, cuUsed, completedAt for KPI calculations
+- **Usage Records**: Legacy time tracking with duration, credits, and billing information
+
+### KPI & Incentive System
+
+**Credit Unit (CU) Calculation**
+- 1 CU = 1 hour of completed consultation
+- Partial hours calculated proportionally (30 min = 0.5 CU)
+- All monthly calculations use Brazil timezone (America/Sao_Paulo)
+
+**Incentive Rules by Role**
+- **RA (Research Associate)**: R$250 per completed call where expert was sourced by RA within 60 days. Monthly cap: R$2,500
+- **PM (Project Manager)**: R$70 per CU with no monthly cap
+- **Admin/Finance**: View global company totals
+
+**KPI Endpoint**: GET /api/kpi/my-monthly
+- Returns monthly KPI data filtered by authenticated user's role
+- Includes total CU, total calls, calculated incentive, and detailed call list
+- All dates filtered and displayed in America/Sao_Paulo timezone
 
 **Migration Strategy**
 - Drizzle Kit for schema migrations with push-based deployments
