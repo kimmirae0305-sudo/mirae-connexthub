@@ -14,6 +14,7 @@ import {
   insertClientPocSchema,
   insertCallRecordSchema,
   insertExpertInvitationLinkSchema,
+  insertProjectAngleSchema,
   calculateCU,
   callRecords,
   experts,
@@ -894,13 +895,118 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== PROJECT ANGLES ====================
+  app.get("/api/projects/:projectId/angles", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const angles = await storage.getProjectAngles(projectId);
+      res.json(angles);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch project angles" });
+    }
+  });
+
+  app.get("/api/angles/:id", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const angle = await storage.getProjectAngle(id);
+      if (!angle) {
+        return res.status(404).json({ error: "Angle not found" });
+      }
+      res.json(angle);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch angle" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/angles", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const result = insertProjectAngleSchema.safeParse({
+        ...req.body,
+        projectId,
+      });
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const angle = await storage.createProjectAngle(result.data);
+      res.status(201).json(angle);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create angle" });
+    }
+  });
+
+  app.patch("/api/angles/:id", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const result = insertProjectAngleSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const angle = await storage.updateProjectAngle(id, result.data);
+      if (!angle) {
+        return res.status(404).json({ error: "Angle not found" });
+      }
+      res.json(angle);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update angle" });
+    }
+  });
+
+  app.delete("/api/angles/:id", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      // Also delete VQs for this angle
+      await storage.deleteVettingQuestionsByAngle(id);
+      const deleted = await storage.deleteProjectAngle(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Angle not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete angle" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/angles/reorder", authMiddleware, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const { angleIds } = req.body;
+      if (!Array.isArray(angleIds)) {
+        return res.status(400).json({ error: "angleIds must be an array" });
+      }
+      const angles = await storage.reorderProjectAngles(projectId, angleIds);
+      res.json(angles);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to reorder angles" });
+    }
+  });
+
+  // Get VQs by angle
+  app.get("/api/angles/:angleId/vetting-questions", authMiddleware, async (req, res) => {
+    try {
+      const angleId = parseInt(req.params.angleId);
+      const questions = await storage.getVettingQuestionsByAngle(angleId);
+      res.json(questions);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch vetting questions for angle" });
+    }
+  });
+
   // ==================== VETTING QUESTIONS ====================
   app.get("/api/vetting-questions", authMiddleware, async (req, res) => {
     try {
       const projectId = req.query.projectId ? parseInt(req.query.projectId as string) : null;
-      const questions = projectId
-        ? await storage.getVettingQuestionsByProject(projectId)
-        : await storage.getVettingQuestions();
+      const angleId = req.query.angleId ? parseInt(req.query.angleId as string) : null;
+      
+      let questions;
+      if (angleId) {
+        questions = await storage.getVettingQuestionsByAngle(angleId);
+      } else if (projectId) {
+        questions = await storage.getVettingQuestionsByProject(projectId);
+      } else {
+        questions = await storage.getVettingQuestions();
+      }
       res.json(questions);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch vetting questions" });

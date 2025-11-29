@@ -11,6 +11,7 @@ import {
   callRecords,
   expertInvitationLinks,
   projectActivities,
+  projectAngles,
   type Project,
   type InsertProject,
   type Expert,
@@ -35,6 +36,8 @@ import {
   type InsertExpertInvitationLink,
   type ProjectActivity,
   type InsertProjectActivity,
+  type ProjectAngle,
+  type InsertProjectAngle,
   calculateCU,
 } from "@shared/schema";
 import { db } from "./db";
@@ -96,12 +99,22 @@ export interface IStorage {
   updateExpert(id: number, expert: Partial<InsertExpert>): Promise<Expert | undefined>;
   deleteExpert(id: number): Promise<boolean>;
 
+  // Project Angles
+  getProjectAngles(projectId: number): Promise<ProjectAngle[]>;
+  getProjectAngle(id: number): Promise<ProjectAngle | undefined>;
+  createProjectAngle(angle: InsertProjectAngle): Promise<ProjectAngle>;
+  updateProjectAngle(id: number, angle: Partial<InsertProjectAngle>): Promise<ProjectAngle | undefined>;
+  deleteProjectAngle(id: number): Promise<boolean>;
+  reorderProjectAngles(projectId: number, angleIds: number[]): Promise<ProjectAngle[]>;
+
   // Vetting Questions
   getVettingQuestions(): Promise<VettingQuestion[]>;
   getVettingQuestionsByProject(projectId: number): Promise<VettingQuestion[]>;
+  getVettingQuestionsByAngle(angleId: number): Promise<VettingQuestion[]>;
   createVettingQuestion(question: InsertVettingQuestion): Promise<VettingQuestion>;
   updateVettingQuestion(id: number, question: Partial<InsertVettingQuestion>): Promise<VettingQuestion | undefined>;
   deleteVettingQuestion(id: number): Promise<boolean>;
+  deleteVettingQuestionsByAngle(angleId: number): Promise<boolean>;
 
   // Project Experts
   getProjectExperts(): Promise<ProjectExpert[]>;
@@ -431,6 +444,50 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
+  // Project Angles
+  async getProjectAngles(projectId: number): Promise<ProjectAngle[]> {
+    return db
+      .select()
+      .from(projectAngles)
+      .where(eq(projectAngles.projectId, projectId))
+      .orderBy(projectAngles.orderIndex);
+  }
+
+  async getProjectAngle(id: number): Promise<ProjectAngle | undefined> {
+    const [angle] = await db.select().from(projectAngles).where(eq(projectAngles.id, id));
+    return angle || undefined;
+  }
+
+  async createProjectAngle(angle: InsertProjectAngle): Promise<ProjectAngle> {
+    const [newAngle] = await db.insert(projectAngles).values(angle).returning();
+    return newAngle;
+  }
+
+  async updateProjectAngle(id: number, angle: Partial<InsertProjectAngle>): Promise<ProjectAngle | undefined> {
+    const [updated] = await db
+      .update(projectAngles)
+      .set({ ...angle, updatedAt: new Date() })
+      .where(eq(projectAngles.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deleteProjectAngle(id: number): Promise<boolean> {
+    const result = await db.delete(projectAngles).where(eq(projectAngles.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async reorderProjectAngles(projectId: number, angleIds: number[]): Promise<ProjectAngle[]> {
+    const updates = angleIds.map((id, index) =>
+      db.update(projectAngles)
+        .set({ orderIndex: index, updatedAt: new Date() })
+        .where(and(eq(projectAngles.id, id), eq(projectAngles.projectId, projectId)))
+        .returning()
+    );
+    const results = await Promise.all(updates);
+    return results.flat();
+  }
+
   // Vetting Questions
   async getVettingQuestions(): Promise<VettingQuestion[]> {
     return db.select().from(vettingQuestions).orderBy(vettingQuestions.orderIndex);
@@ -441,6 +498,14 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(vettingQuestions)
       .where(eq(vettingQuestions.projectId, projectId))
+      .orderBy(vettingQuestions.orderIndex);
+  }
+
+  async getVettingQuestionsByAngle(angleId: number): Promise<VettingQuestion[]> {
+    return db
+      .select()
+      .from(vettingQuestions)
+      .where(eq(vettingQuestions.angleId, angleId))
       .orderBy(vettingQuestions.orderIndex);
   }
 
@@ -464,6 +529,11 @@ export class DatabaseStorage implements IStorage {
   async deleteVettingQuestion(id: number): Promise<boolean> {
     const result = await db.delete(vettingQuestions).where(eq(vettingQuestions.id, id)).returning();
     return result.length > 0;
+  }
+
+  async deleteVettingQuestionsByAngle(angleId: number): Promise<boolean> {
+    const result = await db.delete(vettingQuestions).where(eq(vettingQuestions.angleId, angleId)).returning();
+    return result.length >= 0;
   }
 
   // Project Experts
