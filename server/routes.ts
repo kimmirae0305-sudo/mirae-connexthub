@@ -1368,6 +1368,8 @@ export async function registerRoutes(
       const projectId = parseInt(req.params.projectId);
       const { projectExpertIds, channel } = req.body; // channel: 'email' | 'whatsapp' | 'both'
       
+      console.log("[Bulk Invite] Starting bulk invitation send from Project Existing Experts tab");
+      
       if (!Array.isArray(projectExpertIds) || projectExpertIds.length === 0) {
         return res.status(400).json({ error: "projectExpertIds must be a non-empty array" });
       }
@@ -1390,6 +1392,8 @@ export async function registerRoutes(
         const expert = await storage.getExpert(pe.expertId);
         if (!expert) continue;
         
+        console.log(`[Bulk Invite] Processing expert: ${expert.name} (${expert.email})`);
+        
         // Create or get invitation link using expertInvitationLinks table
         let link = await storage.getExpertInvitationLinkByProjectAndExpert(projectId, expert.id);
         
@@ -1405,6 +1409,7 @@ export async function registerRoutes(
             isActive: true,
             expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
           });
+          console.log(`[Bulk Invite] Created new invitation token for ${expert.email}`);
         }
         
         // Update project-expert with token and status
@@ -1423,6 +1428,7 @@ export async function registerRoutes(
         let emailSent = false;
         if (channel === 'email' || channel === 'both' || !channel) {
           try {
+            console.log(`[Bulk Invite] Sending email to ${expert.email}...`);
             emailSent = await sendExpertInvitationEmail({
               expertName: expert.name,
               expertEmail: expert.email,
@@ -1432,16 +1438,16 @@ export async function registerRoutes(
               invitationUrl,
               vettingQuestionsCount: vettingQuestions.length,
             });
-            console.log(`Email invitation ${emailSent ? 'sent' : 'failed'} to ${expert.name} (${expert.email})`);
+            console.log(`[Bulk Invite] Email ${emailSent ? 'SENT' : 'FAILED'} to ${expert.name} (${expert.email})`);
           } catch (emailError) {
-            console.error(`Email error for ${expert.email}:`, emailError);
+            console.error(`[Bulk Invite] Email error for ${expert.email}:`, emailError);
           }
         }
         
         // Log WhatsApp info (manual follow-up for now)
         if (channel === 'whatsapp' || channel === 'both') {
-          console.log(`[WhatsApp] Manual follow-up needed for ${expert.name} (${expert.phone || expert.whatsapp || 'no phone'})`);
-          console.log(`  Invitation URL: ${invitationUrl}`);
+          console.log(`[Bulk Invite] [WhatsApp] Manual follow-up needed for ${expert.name} (${expert.phone || expert.whatsapp || 'no phone'})`);
+          console.log(`[Bulk Invite]   Invitation URL: ${invitationUrl}`);
         }
         
         results.push({
@@ -1457,6 +1463,8 @@ export async function registerRoutes(
       const successCount = results.filter(r => r.emailSent).length;
       const failedCount = results.filter(r => !r.emailSent).length;
       
+      console.log(`[Bulk Invite] Complete: ${successCount} sent, ${failedCount} failed`);
+      
       res.json({
         message: `Invitations: ${successCount} sent, ${failedCount} failed`,
         channel: channel || 'email',
@@ -1468,7 +1476,7 @@ export async function registerRoutes(
         }
       });
     } catch (error) {
-      console.error("Send invitations error:", error);
+      console.error("[Bulk Invite] Send invitations error:", error);
       res.status(500).json({ error: "Failed to send invitations" });
     }
   });

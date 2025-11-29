@@ -318,17 +318,27 @@ export default function ProjectDetail() {
 
   const bulkInviteMutation = useMutation({
     mutationFn: async (data: { projectExpertIds: number[]; angleIds: number[]; channel?: string }) => {
+      console.log("[Frontend] Sending bulk invitations from Project Existing Experts tab");
       const res = await apiRequest("POST", `/api/projects/${projectId}/invitations/bulk-send`, data);
-      return res.json();
+      const result = await res.json();
+      console.log("[Frontend] Bulk invitations response:", result);
+      return result;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log("[Frontend] Bulk invitations sent successfully");
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
       setSelectedInternalExpertIds(new Set());
       setBulkInviteAngleIds([]);
       setIsBulkInviteModalOpen(false);
-      toast({ title: "Invitations sent successfully" });
+      const sent = data?.summary?.sent || 0;
+      const failed = data?.summary?.failed || 0;
+      toast({ 
+        title: sent > 0 ? `${sent} invitation${sent !== 1 ? 's' : ''} sent${failed > 0 ? `, ${failed} failed` : ''}` : "No invitations sent",
+        variant: failed > 0 ? "destructive" : "default"
+      });
     },
-    onError: () => {
+    onError: (error) => {
+      console.error("[Frontend] Bulk invitations error:", error);
       toast({ title: "Failed to send invitations", variant: "destructive" });
     },
   });

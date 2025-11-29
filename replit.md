@@ -87,6 +87,17 @@ Preferred communication style: Simple, everyday language.
     - ✅ Stat cards show only 2 columns for RAs (Scheduled, Completed) - no CU card
   - **Implementation**: Uses `useAuth()` hook to detect RA role and conditionally render UI
 
+- **Fixed Bulk Invitation Email Bug**: Internal Experts Pipeline now correctly sends emails
+  - **Issue**: Project page → Existing Experts tab → Send Invite was updating DB status but NOT sending emails
+  - **Root Cause**: Bulk invite endpoint was only updating project-experts status without calling email function
+  - **Fix Applied**:
+    - ✅ Enhanced `/api/projects/:projectId/invitations/send` to directly call `sendExpertInvitationEmail()` (same as single invite)
+    - ✅ Added comprehensive logging `[Bulk Invite]` tag to track email sending through entire pipeline
+    - ✅ Added frontend logging `[Frontend]` to show bulk invite initiation and response
+    - ✅ Improved error reporting with success/failed count summary
+  - **Result**: Bulk invites from Project tab now use identical email logic as Assignments section
+  - **Testing**: Check server logs for `[Bulk Invite]` entries to verify email sending
+
 ### Core Features
 
 - **Force Password Change on First Login**: New users must change a temporary password. Implemented via a `mustChangePassword` flag in the user model, frontend redirection, and a dedicated `/api/auth/change-password` endpoint.

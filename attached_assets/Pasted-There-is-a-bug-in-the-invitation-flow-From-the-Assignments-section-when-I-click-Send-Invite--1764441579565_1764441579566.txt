@@ -1,0 +1,39 @@
+There is a bug in the invitation flow.
+
+From the Assignments section, when I click "Send Invite", the expert receives an email correctly (Zoho SMTP + Nodemailer is working).
+
+However, from the Project page:
+
+Projects → [Any Project] → Existing Experts → Internal Experts Pipeline
+
+When I send an invitation from there, the UI updates the status to "Invited", but the expert does NOT receive any email.
+
+So the Project-level invite is only updating the status in the database and is not triggering the email-sending logic.
+
+Please fix it as follows:
+
+1) Reuse the same backend endpoint and email logic that works in Assignments:
+   - Identify which API is used in Assignments (for example: POST /api/project-experts/:id/invite)
+   - Identify the function that calls Nodemailer (sendProjectInvitationEmail or similar).
+
+2) In the Internal Experts Pipeline (Project page):
+   - The "Send Invite" action for each expert must call this same endpoint.
+   - Do NOT just update the local status to "Invited" without calling the email API.
+
+3) Implementation details:
+   - Update the frontend code for the Project Experts tab so that:
+     - When I click "Send Invite" on an expert row, it sends a request to the invite endpoint.
+     - Waits for a successful response (HTTP 200).
+     - Only then updates the Invitation Status to "Invited".
+   - If the API fails, show an error message (e.g. "Failed to send invitation. Please try again.") and do not change the status.
+
+4) Logging:
+   - Add a console/server log when the Project-level invite is triggered, similar to Assignments:
+     - "Sending project invitation email from Project Experts view"
+   - This will help confirm that the same email code path is being used.
+
+The expected behavior:
+- Whether I send an invite from Assignments or from the Project → Existing Experts → Internal Experts Pipeline view, the system should:
+  1) Call the same invite endpoint.
+  2) Send the email to the expert.
+  3) Update the invitation status to "Invited" only after successful email sending.
