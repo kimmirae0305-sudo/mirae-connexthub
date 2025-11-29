@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,11 @@ interface Expert {
   id: number;
   name: string;
   email: string;
-  phone?: string;
-  linkedinUrl?: string;
-  workHistory: WorkExperience[];
-  biography?: string;
+  phone?: string | null;
+  linkedinUrl?: string | null;
+  workHistory?: WorkExperience[] | null;
+  biography?: string | null;
+  [key: string]: any;
 }
 
 interface ExpertProfileEditorProps {
@@ -47,10 +48,16 @@ export function ExpertProfileEditor({ expertId }: ExpertProfileEditorProps) {
       if (!res.ok) throw new Error("Failed to fetch expert");
       return res.json();
     },
-    onSuccess: (data) => {
-      setFormData(data);
-    },
   });
+
+  useEffect(() => {
+    if (expert) {
+      setFormData({
+        ...expert,
+        workHistory: expert.workHistory || [],
+      });
+    }
+  }, [expert]);
 
   // Mutation to save expert profile
   const saveMutation = useMutation({
@@ -91,7 +98,10 @@ export function ExpertProfileEditor({ expertId }: ExpertProfileEditorProps) {
     setIsEditing(false);
     // Reset to original data
     if (expert) {
-      setFormData(expert);
+      setFormData({
+        ...expert,
+        workHistory: expert.workHistory || [],
+      });
     }
   };
 
