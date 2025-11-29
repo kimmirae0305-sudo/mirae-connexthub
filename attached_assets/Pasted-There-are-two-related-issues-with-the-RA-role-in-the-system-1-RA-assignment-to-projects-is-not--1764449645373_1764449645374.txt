@@ -1,0 +1,99 @@
+There are two related issues with the RA role in the system:
+
+1) RA assignment to projects is not working.
+2) RA users cannot see the "Consultations" module in the sidebar.
+
+Important clarification:
+In the Employees module, the role name we use is **"Research Associate"**, not "RA".
+
+Please do ALL of the following.
+
+------------------------------------------------
+1) Fix RA detection for project assignment
+------------------------------------------------
+
+Current behavior:
+- In Projects → [Any Project] → RA Sourcing → “Assign RAs to Project”
+- The modal shows “No RAs available”, even though there are Employees with role = "Research Associate".
+
+Expected behavior:
+- All Employees with role = "Research Associate" should be treated as RAs and listed in this modal.
+- I should be able to assign them to the project.
+
+Required changes:
+
+a) Backend
+- Wherever the system queries for RA users (for example:
+  - the endpoint that populates the "Assign RAs" modal
+  - any RA-sourcing features),
+  update the filter so that it matches Employees whose role is exactly "Research Associate".
+
+- If you are using a role enum internally, please map:
+    role = "Research Associate"
+  to the RA capabilities.
+
+b) Frontend
+- Make sure the "Assign RAs" modal uses this updated endpoint and no longer shows “No RAs available” when there are employees with role "Research Associate".
+- After the fix, I should see my RA users in the list and be able to Save Assignments successfully.
+
+------------------------------------------------
+2) Consultations access for Research Associates
+------------------------------------------------
+
+Current behavior:
+- Users with role = "Research Associate" do NOT see the "Consultations" module in the left sidebar.
+- They cannot monitor calls for their projects.
+
+Expected behavior:
+- Research Associates should be able to access Consultations, but with limited scope.
+
+Required changes:
+
+a) Permissions model
+- Treat the "Research Associate" role as the RA role in the permission system.
+- For this role, grant:
+
+  Consultations permissions:
+  - canView: true
+  - restrictedToAssignedProjects: true
+  - canUpdateStatus: true (for basic call status only)
+
+b) Data filtering
+- When a Research Associate is logged in and opens Consultations:
+  - Show ONLY consultations that belong to projects where this RA is assigned.
+  - Admin / Manager roles still see all consultations (no change).
+
+- RAs must NOT see:
+  - any billing, CU usage, or financial fields
+  - consultations for projects they are not assigned to.
+
+c) Sidebar visibility
+- The "Consultations" menu item should be visible for users with role "Research Associate".
+- If there are no consultations for that RA yet, show a friendly empty state, e.g.:
+  "No consultations yet. Once your assigned projects have scheduled calls, they will appear here."
+
+------------------------------------------------
+3) Quick verification steps
+------------------------------------------------
+
+After implementing the changes, please verify:
+
+1) Employees:
+   - Create or confirm at least one Employee with role = "Research Associate".
+
+2) RA Assignment:
+   - Go to any Project → RA Sourcing → Assign RAs.
+   - The modal should now list the Research Associate users.
+   - Assign one RA to the project and save successfully.
+
+3) Consultations access:
+   - Log in as that Research Associate.
+   - Confirm that:
+     - The "Consultations" menu is visible in the sidebar.
+     - Only consultations for projects assigned to this RA are shown.
+     - No financial data is visible.
+
+In summary:
+- The system must recognize the role name "Research Associate" as the RA role.
+- Research Associates must be assignable to projects.
+- Research Associates must have scoped access to the Consultations module for the projects they are assigned to.

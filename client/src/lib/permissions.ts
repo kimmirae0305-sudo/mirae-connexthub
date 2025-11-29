@@ -12,6 +12,20 @@ export type PageKey =
   | "employees"
   | "settings";
 
+/**
+ * Normalize role names from database to internal system roles.
+ * Maps "Research Associate" to "ra" for backward compatibility.
+ */
+export function normalizeRole(dbRole: string | null | undefined): UserRole | undefined {
+  if (!dbRole) return undefined;
+  const normalized = dbRole.toLowerCase();
+  if (normalized === "research associate" || normalized === "ra") return "ra";
+  if (normalized === "pm" || normalized === "project manager") return "pm";
+  if (normalized === "admin" || normalized === "administrator") return "admin";
+  if (normalized === "finance") return "finance";
+  return undefined;
+}
+
 export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
   admin: [
     "dashboard",
@@ -78,7 +92,9 @@ export const ROUTE_TO_PAGE: Record<string, PageKey> = {
 
 export function canAccessPage(role: string | undefined, page: PageKey): boolean {
   if (!role) return false;
-  const permissions = ROLE_PERMISSIONS[role as UserRole];
+  const normalized = normalizeRole(role);
+  if (!normalized) return false;
+  const permissions = ROLE_PERMISSIONS[normalized];
   if (!permissions) return false;
   return permissions.includes(page);
 }
@@ -92,5 +108,7 @@ export function canAccessRoute(role: string | undefined, route: string): boolean
 
 export function getAllowedPages(role: string | undefined): PageKey[] {
   if (!role) return [];
-  return ROLE_PERMISSIONS[role as UserRole] || [];
+  const normalized = normalizeRole(role);
+  if (!normalized) return [];
+  return ROLE_PERMISSIONS[normalized] || [];
 }

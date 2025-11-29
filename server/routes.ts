@@ -658,7 +658,7 @@ export async function registerRoutes(
       }
 
       const ra = await storage.getUser(raId);
-      if (!ra || ra.role !== "ra") {
+      if (!ra || (ra.role !== "ra" && ra.role !== "Research Associate")) {
         return res.status(400).json({ error: "Invalid RA" });
       }
 
@@ -801,7 +801,7 @@ export async function registerRoutes(
         return acc;
       }, {}));
       
-      const ras = users.filter(u => u.role === "ra" && u.isActive);
+      const ras = users.filter(u => (u.role === "ra" || u.role === "Research Associate") && u.isActive);
       console.log(`[RAs] Filtered RAs: ${ras.length} active RAs found`);
       
       const result = ras.map(ra => ({ 
@@ -1756,7 +1756,7 @@ export async function registerRoutes(
       }
       
       // Filter by RA's assigned projects if user is RA
-      if (user?.role === "ra") {
+      if (user?.role === "ra" || user?.role === "Research Associate") {
         const allProjects = await storage.getProjects();
         const raProjectIds = new Set(
           allProjects
@@ -2018,7 +2018,7 @@ export async function registerRoutes(
       let recruitedByRaId: number | null = null;
       if (link.recruitedBy) {
         const raUser = await storage.getUserByEmail(link.recruitedBy);
-        if (raUser && raUser.role === "ra") {
+        if (raUser && (raUser.role === "ra" || raUser.role === "Research Associate")) {
           recruitedByRaId = raUser.id;
         }
       }
@@ -2103,7 +2103,7 @@ export async function registerRoutes(
       let sourcedByRaId: number | null = null;
       if (link.recruitedBy) {
         const raUser = await storage.getUserByEmail(link.recruitedBy);
-        if (raUser && raUser.role === "ra") {
+        if (raUser && (raUser.role === "ra" || raUser.role === "Research Associate")) {
           sourcedByRaId = raUser.id;
         }
       }
@@ -2556,7 +2556,7 @@ export async function registerRoutes(
       const role = user.role;
       const userId = user.id;
 
-      if (role === "ra") {
+      if (role === "ra" || role === "Research Associate") {
         // RA: Only calls where expert was sourced by this RA AND call completed within 60 days of sourcing
         filteredCalls = baseQuery.filter((call) => {
           if (call.expertSourcedByRaId !== userId) return false;
@@ -2724,7 +2724,7 @@ export async function registerRoutes(
       
       const role = employee.role;
 
-      if (role === "ra") {
+      if (role === "ra" || role === "Research Associate") {
         // RA: Calls where expert was sourced by this RA AND within 60 days
         filteredCalls = allCalls.filter((call) => {
           if (call.expertSourcedByRaId !== employeeId) return false;
