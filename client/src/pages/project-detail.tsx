@@ -143,6 +143,9 @@ export default function ProjectDetail() {
   const [searchMaxExp, setSearchMaxExp] = useState("");
   const [searchJobTitle, setSearchJobTitle] = useState("");
   const [searchIndustry, setSearchIndustry] = useState("");
+  const [searchLanguage, setSearchLanguage] = useState("");
+  const [searchHasPriorProjects, setSearchHasPriorProjects] = useState(false);
+  const [searchMinAcceptanceRate, setSearchMinAcceptanceRate] = useState("");
 
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
@@ -166,20 +169,30 @@ export default function ProjectDetail() {
     queryKey: ["/api/experts"],
   });
 
-  // Expert search results query
-  const { data: expertSearchResults, isLoading: expertSearchLoading } = useQuery<Expert[]>({
+  // Expert search results query with metrics
+  type ExpertWithMetrics = Expert & { priorProjectCount?: number; acceptanceRate?: number };
+  const { data: expertSearchResults, isLoading: expertSearchLoading } = useQuery<ExpertWithMetrics[]>({
     queryKey: [
       "/api/experts/search",
-      { query: searchQuery, country: searchCountry, minExp: searchMinExp, maxExp: searchMaxExp, jobTitle: searchJobTitle, industry: searchIndustry },
+      { 
+        query: searchQuery, country: searchCountry, minExp: searchMinExp, maxExp: searchMaxExp, 
+        jobTitle: searchJobTitle, industry: searchIndustry, language: searchLanguage,
+        hasPriorProjects: searchHasPriorProjects, minAcceptanceRate: searchMinAcceptanceRate,
+        excludeProjectId: projectId
+      },
     ],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (searchQuery) params.append("query", searchQuery);
+      if (searchQuery) params.append("q", searchQuery);
       if (searchCountry) params.append("country", searchCountry);
       if (searchMinExp) params.append("minYearsExperience", searchMinExp);
       if (searchMaxExp) params.append("maxYearsExperience", searchMaxExp);
       if (searchJobTitle) params.append("jobTitle", searchJobTitle);
       if (searchIndustry) params.append("industry", searchIndustry);
+      if (searchLanguage) params.append("language", searchLanguage);
+      if (searchHasPriorProjects) params.append("hasPriorProjects", "true");
+      if (searchMinAcceptanceRate) params.append("minAcceptanceRate", searchMinAcceptanceRate);
+      if (projectId) params.append("excludeProjectId", projectId);
       const res = await fetch(`/api/experts/search?${params}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
@@ -2012,6 +2025,36 @@ export default function ProjectDetail() {
                   data-testid="input-search-industry"
                 />
               </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Language</label>
+                <Input
+                  placeholder="e.g., English, Portuguese"
+                  value={searchLanguage}
+                  onChange={(e) => setSearchLanguage(e.target.value)}
+                  data-testid="input-search-language"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Min Acceptance Rate (%)</label>
+                <Input
+                  type="number"
+                  placeholder="e.g., 50"
+                  value={searchMinAcceptanceRate}
+                  onChange={(e) => setSearchMinAcceptanceRate(e.target.value)}
+                  data-testid="input-min-acceptance-rate"
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-4">
+                <Checkbox
+                  id="prior-projects"
+                  checked={searchHasPriorProjects}
+                  onCheckedChange={(checked) => setSearchHasPriorProjects(checked === true)}
+                  data-testid="checkbox-prior-projects"
+                />
+                <label htmlFor="prior-projects" className="text-sm font-medium cursor-pointer">
+                  Only show experts with prior project involvement
+                </label>
+              </div>
             </div>
 
             {/* Results */}
@@ -2023,14 +2066,14 @@ export default function ProjectDetail() {
                 <p className="text-sm text-muted-foreground text-center py-4">No experts match your filters</p>
               )}
               <div className="max-h-[400px] overflow-y-auto space-y-2">
-                {expertSearchResults?.map((expert: Expert) => {
+                {expertSearchResults?.map((expert: ExpertWithMetrics) => {
                   const isAssigned = assignedExpertIds.has(expert.id);
                   return (
                     <Card key={expert.id} className="p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-sm truncate" data-testid={`text-expert-name-${expert.id}`}>{expert.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">{expert.jobTitle || expert.expertise}</p>
+                          <p className="text-xs text-muted-foreground truncate">{expert.jobTitle || expert.expertise} {expert.company ? `at ${expert.company}` : ""}</p>
                           <div className="flex gap-2 mt-1 flex-wrap">
                             {expert.country && (
                               <Badge variant="secondary" className="text-xs">{expert.country}</Badge>
@@ -2040,6 +2083,16 @@ export default function ProjectDetail() {
                             )}
                             {expert.industry && (
                               <Badge variant="secondary" className="text-xs">{expert.industry}</Badge>
+                            )}
+                            {expert.priorProjectCount !== undefined && expert.priorProjectCount > 0 && (
+                              <Badge variant="outline" className="text-xs">
+                                {expert.priorProjectCount} prior project{expert.priorProjectCount !== 1 ? "s" : ""}
+                              </Badge>
+                            )}
+                            {expert.acceptanceRate !== undefined && (
+                              <Badge variant="outline" className="text-xs">
+                                {expert.acceptanceRate}% accept rate
+                              </Badge>
                             )}
                           </div>
                         </div>
@@ -2077,6 +2130,9 @@ export default function ProjectDetail() {
                 setSearchMaxExp("");
                 setSearchJobTitle("");
                 setSearchIndustry("");
+                setSearchLanguage("");
+                setSearchHasPriorProjects(false);
+                setSearchMinAcceptanceRate("");
               }}
               data-testid="button-close-search"
             >

@@ -2631,33 +2631,5 @@ export async function registerRoutes(
     }
   });
 
-  // Expert Search with Advanced Filters
-  app.get("/api/experts/search", authMiddleware, async (req, res) => {
-    try {
-      const {
-        query,
-        country,
-        minYearsExperience,
-        maxYearsExperience,
-        jobTitle,
-        industry,
-      } = req.query;
-
-      const results = await storage.searchExpertsAdvanced({
-        query: query ? String(query) : undefined,
-        country: country ? String(country) : undefined,
-        minYearsExperience: minYearsExperience ? parseInt(String(minYearsExperience)) : undefined,
-        maxYearsExperience: maxYearsExperience ? parseInt(String(maxYearsExperience)) : undefined,
-        jobTitle: jobTitle ? String(jobTitle) : undefined,
-        industry: industry ? String(industry) : undefined,
-      });
-
-      res.json(results);
-    } catch (error) {
-      console.error("Expert search error:", error);
-      res.status(500).json({ error: "Failed to search experts" });
-    }
-  });
-
   return httpServer;
 }
