@@ -379,6 +379,12 @@ export class DatabaseStorage implements IStorage {
     country?: string;
     minRate?: number;
     maxRate?: number;
+    minYearsExperience?: number;
+    maxYearsExperience?: number;
+    jobTitle?: string;
+    industry?: string;
+    minResponseRate?: number;
+    projectId?: number;
   }): Promise<Expert[]> {
     const conditions = [];
     
@@ -388,6 +394,7 @@ export class DatabaseStorage implements IStorage {
         or(
           ilike(experts.name, searchPattern),
           ilike(experts.expertise, searchPattern),
+          ilike(experts.areasOfExpertise, searchPattern),
           ilike(experts.industry, searchPattern),
           ilike(experts.company, searchPattern),
           ilike(experts.jobTitle, searchPattern),
@@ -412,6 +419,24 @@ export class DatabaseStorage implements IStorage {
     
     if (params.maxRate !== undefined) {
       conditions.push(sql`CAST(${experts.hourlyRate} AS DECIMAL) <= ${params.maxRate}`);
+    }
+
+    if (params.minYearsExperience !== undefined) {
+      conditions.push(sql`${experts.yearsOfExperience} >= ${params.minYearsExperience}`);
+    }
+
+    if (params.maxYearsExperience !== undefined) {
+      conditions.push(sql`${experts.yearsOfExperience} <= ${params.maxYearsExperience}`);
+    }
+
+    if (params.jobTitle) {
+      const titlePattern = `%${params.jobTitle}%`;
+      conditions.push(ilike(experts.jobTitle, titlePattern));
+    }
+
+    if (params.industry) {
+      const industryPattern = `%${params.industry}%`;
+      conditions.push(ilike(experts.industry, industryPattern));
     }
     
     if (conditions.length === 0) {

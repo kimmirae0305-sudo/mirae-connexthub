@@ -138,6 +138,15 @@ export default function ProjectDetail() {
   const [isBulkInviteModalOpen, setIsBulkInviteModalOpen] = useState(false);
   const [selectedInternalExpertIds, setSelectedInternalExpertIds] = useState<Set<number>>(new Set());
   const [bulkInviteAngleIds, setBulkInviteAngleIds] = useState<number[]>([]);
+  
+  // Expert Search modal state
+  const [isExpertSearchModalOpen, setIsExpertSearchModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCountry, setSearchCountry] = useState("");
+  const [searchMinExp, setSearchMinExp] = useState("");
+  const [searchMaxExp, setSearchMaxExp] = useState("");
+  const [searchJobTitle, setSearchJobTitle] = useState("");
+  const [searchIndustry, setSearchIndustry] = useState("");
 
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
@@ -161,28 +170,32 @@ export default function ProjectDetail() {
     queryKey: ["/api/experts"],
   });
 
-  const { data: searchResults, isLoading: searchLoading } = useQuery<Expert[]>({
+  // Expert search results query
+  const { data: expertSearchResults, isLoading: expertSearchLoading } = useQuery<Expert[]>({
     queryKey: [
       "/api/experts/search",
-      { q: expertSearchQuery, country: countryFilter, minRate, maxRate },
+      { query: searchQuery, country: searchCountry, minExp: searchMinExp, maxExp: searchMaxExp, jobTitle: searchJobTitle, industry: searchIndustry },
     ],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (expertSearchQuery) params.append("q", expertSearchQuery);
-      if (countryFilter) params.append("country", countryFilter);
-      if (minRate) params.append("minRate", minRate);
-      if (maxRate) params.append("maxRate", maxRate);
+      if (searchQuery) params.append("query", searchQuery);
+      if (searchCountry) params.append("country", searchCountry);
+      if (searchMinExp) params.append("minYearsExperience", searchMinExp);
+      if (searchMaxExp) params.append("maxYearsExperience", searchMaxExp);
+      if (searchJobTitle) params.append("jobTitle", searchJobTitle);
+      if (searchIndustry) params.append("industry", searchIndustry);
       const res = await fetch(`/api/experts/search?${params}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
       });
+      if (!res.ok) return [];
       return res.json();
     },
-    enabled: !!(expertSearchQuery || countryFilter || minRate || maxRate),
+    enabled: isExpertSearchModalOpen,
   });
 
-  const expertsToShow = (expertSearchQuery || countryFilter || minRate || maxRate) ? searchResults : allExperts;
+  const expertsToShow = allExperts;
 
   const assignedExpertIds = new Set([
     ...(projectDetail?.internalExperts?.map((pe) => pe.expertId) || []),
@@ -298,6 +311,22 @@ export default function ProjectDetail() {
     },
     onError: () => {
       toast({ title: "Failed to send invitations", variant: "destructive" });
+    },
+  });
+
+  const attachExpertMutation = useMutation({
+    mutationFn: async (expertId: number) => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/attach-experts`, {
+        expertIds: [expertId],
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      toast({ title: "Expert attached to project" });
+    },
+    onError: () => {
+      toast({ title: "Failed to attach expert", variant: "destructive" });
     },
   });
 
@@ -1262,22 +1291,33 @@ export default function ProjectDetail() {
                     Experts from internal database assigned to this project
                   </CardDescription>
                 </div>
-                {projectDetail?.angles && projectDetail.angles.length > 0 && (
-                  <Select value={internalExpertsAngleFilter} onValueChange={setInternalExpertsAngleFilter}>
-                    <SelectTrigger className="w-[180px]" data-testid="select-angle-filter">
-                      <SelectValue placeholder="Filter by Angle" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Angles</SelectItem>
-                      <SelectItem value="none">No Angle Assigned</SelectItem>
-                      {projectDetail.angles.map((angle) => (
-                        <SelectItem key={angle.id} value={angle.id.toString()}>
-                          {angle.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsExpertSearchModalOpen(true)}
+                    data-testid="button-search-experts"
+                  >
+                    <Search className="h-4 w-4 mr-2" />
+                    Search & Add
+                  </Button>
+                  {projectDetail?.angles && projectDetail.angles.length > 0 && (
+                    <Select value={internalExpertsAngleFilter} onValueChange={setInternalExpertsAngleFilter}>
+                      <SelectTrigger className="w-[180px]" data-testid="select-angle-filter">
+                        <SelectValue placeholder="Filter by Angle" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Angles</SelectItem>
+                        <SelectItem value="none">No Angle Assigned</SelectItem>
+                        {projectDetail.angles.map((angle) => (
+                          <SelectItem key={angle.id} value={angle.id.toString()}>
+                            {angle.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -1433,7 +1473,7 @@ export default function ProjectDetail() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="ra-sourcing" className="space-y-4">
+        <TabsContent value="ra-sourcing" className="space-y-4"> 
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -1943,6 +1983,146 @@ export default function ProjectDetail() {
               data-testid="button-send-bulk-invites"
             >
               {bulkInviteMutation.isPending ? "Sending..." : "Send Invitations"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Expert Search Modal */}
+      <Dialog open={isExpertSearchModalOpen} onOpenChange={setIsExpertSearchModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Search & Add Experts</DialogTitle>
+            <DialogDescription>
+              Find experts from your database with advanced filters
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4 overflow-y-auto flex-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Keywords / Expertise</label>
+                <Input
+                  placeholder="Search by name, expertise, role..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  data-testid="input-search-query"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Country / Location</label>
+                <Input
+                  placeholder="e.g., Brazil, São Paulo"
+                  value={searchCountry}
+                  onChange={(e) => setSearchCountry(e.target.value)}
+                  data-testid="input-search-country"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Years of Experience</label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    placeholder="Min"
+                    value={searchMinExp}
+                    onChange={(e) => setSearchMinExp(e.target.value)}
+                    data-testid="input-min-exp"
+                  />
+                  <Input
+                    type="number"
+                    placeholder="Max"
+                    value={searchMaxExp}
+                    onChange={(e) => setSearchMaxExp(e.target.value)}
+                    data-testid="input-max-exp"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Job Title</label>
+                <Input
+                  placeholder="e.g., Director, Manager"
+                  value={searchJobTitle}
+                  onChange={(e) => setSearchJobTitle(e.target.value)}
+                  data-testid="input-search-job-title"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Industry</label>
+                <Input
+                  placeholder="e.g., Finance, Healthcare"
+                  value={searchIndustry}
+                  onChange={(e) => setSearchIndustry(e.target.value)}
+                  data-testid="input-search-industry"
+                />
+              </div>
+            </div>
+
+            {/* Results */}
+            <div className="space-y-3 border-t pt-4">
+              {expertSearchLoading && (
+                <p className="text-sm text-muted-foreground text-center py-4">Loading results...</p>
+              )}
+              {!expertSearchLoading && expertSearchResults && expertSearchResults.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">No experts match your filters</p>
+              )}
+              <div className="max-h-[400px] overflow-y-auto space-y-2">
+                {expertSearchResults?.map((expert: Expert) => {
+                  const isAssigned = assignedExpertIds.has(expert.id);
+                  return (
+                    <Card key={expert.id} className="p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate" data-testid={`text-expert-name-${expert.id}`}>{expert.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">{expert.jobTitle || expert.expertise}</p>
+                          <div className="flex gap-2 mt-1 flex-wrap">
+                            {expert.country && (
+                              <Badge variant="secondary" className="text-xs">{expert.country}</Badge>
+                            )}
+                            {expert.yearsOfExperience && (
+                              <Badge variant="secondary" className="text-xs">{expert.yearsOfExperience}y exp</Badge>
+                            )}
+                            {expert.industry && (
+                              <Badge variant="secondary" className="text-xs">{expert.industry}</Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 flex-wrap justify-end">
+                          {!isAssigned && (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={() => attachExpertMutation.mutate(expert.id)}
+                              disabled={attachExpertMutation.isPending}
+                              data-testid={`button-attach-expert-${expert.id}`}
+                            >
+                              {attachExpertMutation.isPending ? "..." : "Attach"}
+                            </Button>
+                          )}
+                          {isAssigned && (
+                            <Badge variant="outline" className="text-xs">Already in Project</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsExpertSearchModalOpen(false);
+                setSearchQuery("");
+                setSearchCountry("");
+                setSearchMinExp("");
+                setSearchMaxExp("");
+                setSearchJobTitle("");
+                setSearchIndustry("");
+              }}
+              data-testid="button-close-search"
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
