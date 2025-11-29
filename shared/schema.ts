@@ -80,6 +80,7 @@ export const experts = pgTable("experts", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
+  passwordHash: text("password_hash"),
   phone: text("phone"),
   linkedinUrl: text("linkedin_url"),
   country: text("country"),

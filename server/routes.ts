@@ -1451,10 +1451,11 @@ export async function registerRoutes(
       const currentYear = new Date().getFullYear();
       const yearsOfExperience = currentYear - earliestYear;
       
-      // Create expert record
+      // Create expert record with hashed password
       const expertData = {
         name: `${firstName} ${lastName}`,
         email,
+        passwordHash,
         phone: fullPhone,
         linkedinUrl: linkedinUrl || null,
         country,
