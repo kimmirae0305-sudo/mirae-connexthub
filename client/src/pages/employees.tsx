@@ -682,6 +682,7 @@ function EmployeesContent() {
                 </div>
               </div>
 
+              {employeeOverview.employee.role === "pm" && (
               <div>
                 <h4 className="font-medium mb-3 flex items-center gap-2">
                   <Building className="h-4 w-4" />
@@ -730,6 +731,7 @@ function EmployeesContent() {
                   </div>
                 )}
               </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-12 text-muted-foreground">

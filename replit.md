@@ -95,16 +95,16 @@ Preferred communication style: Simple, everyday language.
 
 **Employee Overview Endpoint**: GET /api/employees/:id/overview
 - Only accessible by admin and finance roles
-- Returns detailed employee info, monthly KPIs, and accounts list
+- Returns detailed employee info, monthly KPIs, and (for PMs) accounts list
 - **KPI Calculation**:
   - RA: Counts calls where expert was sourced by this RA within 60 days; R$250 per call, R$2,500 monthly cap
   - PM: Counts calls where pmId = this employee; R$70 per CU, no cap
   - Admin/Finance: No personal KPIs (shows 0 for all metrics)
-- **Accounts List**: Aggregates clients from employee's completed calls for the month
-  - For PM: Clients with calls where pmId = employee
-  - For RA: Clients with calls using experts sourced by this RA
+- **Accounts List** (PM role only): 
+  - Aggregates clients from PM's completed calls for the month
   - Shows: clientName, totalCU, completedCalls, revenueUSD, lastActivityAt
   - contractedCU and usageRate return null (no contract model implemented yet)
+  - RAs do not have assigned client accounts - they focus solely on expert sourcing
 
 **Migration Strategy**
 - Drizzle Kit for schema migrations with push-based deployments
