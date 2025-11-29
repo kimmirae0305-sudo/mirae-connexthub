@@ -1600,61 +1600,65 @@ export async function registerRoutes(
       // Round totalCU
       kpi.totalCU = Math.round(kpi.totalCU * 100) / 100;
 
-      // Build accounts list based on role
-      const accountsMap = new Map<string, {
-        clientId: number | null;
-        clientName: string;
-        totalCUThisMonth: number;
-        completedCallsThisMonth: number;
-        revenueThisMonthUSD: number;
-        lastActivityAt: Date | null;
-      }>();
+      // Build accounts list - only for PM employees
+      let accounts: any[] = [];
+      
+      if (role === "pm") {
+        const accountsMap = new Map<string, {
+          clientId: number | null;
+          clientName: string;
+          totalCUThisMonth: number;
+          completedCallsThisMonth: number;
+          revenueThisMonthUSD: number;
+          lastActivityAt: Date | null;
+        }>();
 
-      // Process calls to build accounts
-      for (const call of filteredCalls) {
-        const clientKey = call.clientName;
-        const cuUsed = parseFloat(call.cuUsed || "0");
-        const cuRate = parseFloat(call.cuRatePerCU || "1150");
-        const revenueUSD = cuUsed * cuRate;
-        const completedAt = call.completedAt ? new Date(call.completedAt) : null;
+        // Process calls to build accounts
+        for (const call of filteredCalls) {
+          const clientKey = call.clientName;
+          const cuUsed = parseFloat(call.cuUsed || "0");
+          const cuRate = parseFloat(call.cuRatePerCU || "1150");
+          const revenueUSD = cuUsed * cuRate;
+          const completedAt = call.completedAt ? new Date(call.completedAt) : null;
 
-        if (!accountsMap.has(clientKey)) {
-          accountsMap.set(clientKey, {
-            clientId: call.clientOrganizationId,
-            clientName: call.clientName,
-            totalCUThisMonth: 0,
-            completedCallsThisMonth: 0,
-            revenueThisMonthUSD: 0,
-            lastActivityAt: null,
-          });
+          if (!accountsMap.has(clientKey)) {
+            accountsMap.set(clientKey, {
+              clientId: call.clientOrganizationId,
+              clientName: call.clientName,
+              totalCUThisMonth: 0,
+              completedCallsThisMonth: 0,
+              revenueThisMonthUSD: 0,
+              lastActivityAt: null,
+            });
+          }
+
+          const account = accountsMap.get(clientKey)!;
+          account.totalCUThisMonth += cuUsed;
+          account.completedCallsThisMonth += 1;
+          account.revenueThisMonthUSD += revenueUSD;
+          
+          if (completedAt && (!account.lastActivityAt || completedAt > account.lastActivityAt)) {
+            account.lastActivityAt = completedAt;
+          }
         }
 
-        const account = accountsMap.get(clientKey)!;
-        account.totalCUThisMonth += cuUsed;
-        account.completedCallsThisMonth += 1;
-        account.revenueThisMonthUSD += revenueUSD;
-        
-        if (completedAt && (!account.lastActivityAt || completedAt > account.lastActivityAt)) {
-          account.lastActivityAt = completedAt;
-        }
+        // Convert accounts map to array and format
+        accounts = Array.from(accountsMap.values()).map((account) => ({
+          clientId: account.clientId,
+          clientName: account.clientName,
+          totalCUThisMonth: Math.round(account.totalCUThisMonth * 100) / 100,
+          completedCallsThisMonth: account.completedCallsThisMonth,
+          revenueThisMonthUSD: Math.round(account.revenueThisMonthUSD * 100) / 100,
+          contractedCU: null, // No contractedCU field exists yet
+          usageRate: null, // Cannot calculate without contractedCU
+          lastActivityAt: account.lastActivityAt 
+            ? format(toZonedTime(account.lastActivityAt, BRAZIL_TZ), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone: BRAZIL_TZ })
+            : null,
+        }));
+
+        // Sort accounts by revenue descending
+        accounts.sort((a, b) => b.revenueThisMonthUSD - a.revenueThisMonthUSD);
       }
-
-      // Convert accounts map to array and format
-      const accounts = Array.from(accountsMap.values()).map((account) => ({
-        clientId: account.clientId,
-        clientName: account.clientName,
-        totalCUThisMonth: Math.round(account.totalCUThisMonth * 100) / 100,
-        completedCallsThisMonth: account.completedCallsThisMonth,
-        revenueThisMonthUSD: Math.round(account.revenueThisMonthUSD * 100) / 100,
-        contractedCU: null, // No contractedCU field exists yet
-        usageRate: null, // Cannot calculate without contractedCU
-        lastActivityAt: account.lastActivityAt 
-          ? format(toZonedTime(account.lastActivityAt, BRAZIL_TZ), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone: BRAZIL_TZ })
-          : null,
-      }));
-
-      // Sort accounts by revenue descending
-      accounts.sort((a, b) => b.revenueThisMonthUSD - a.revenueThisMonthUSD);
 
       res.json({
         employee: {
