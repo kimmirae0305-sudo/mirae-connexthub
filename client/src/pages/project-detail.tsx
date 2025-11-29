@@ -1856,13 +1856,13 @@ export default function ProjectDetail() {
           <DialogHeader>
             <DialogTitle>Create Invitations</DialogTitle>
             <DialogDescription>
-              Select angles to assign to {selectedInternalExpertIds.size} expert(s) and send invitations
+              Send invitations to {selectedInternalExpertIds.size} expert(s){projectDetail?.angles && projectDetail.angles.length > 0 ? " and optionally assign angles" : ""}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Assign Angles</label>
-              <p className="text-xs text-muted-foreground mb-2">Select which angles these experts should be invited for</p>
+              <label className="text-sm font-medium">Assign Angles (Optional)</label>
+              <p className="text-xs text-muted-foreground mb-2">Select which angles these experts should be invited for (leave empty to invite without angle assignment)</p>
               <div className="space-y-2 max-h-[200px] overflow-y-auto">
                 {projectDetail?.angles && projectDetail.angles.length > 0 ? (
                   projectDetail.angles.map((angle) => (

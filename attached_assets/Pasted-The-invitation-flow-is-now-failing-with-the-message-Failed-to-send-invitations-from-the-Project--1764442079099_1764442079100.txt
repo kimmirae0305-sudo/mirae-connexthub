@@ -1,0 +1,42 @@
+The invitation flow is now failing with the message "Failed to send invitations" from the Project → Existing Experts view.
+
+In the "Create Invitations" modal, it shows:
+- Assign Angles
+- "No angles available"
+
+For this test project, I have no angles defined yet, but I still need to send invitations to experts.
+
+Right now, it seems the backend requires at least one angle/angleId, so the request fails and no email is sent, even though SMTP is configured correctly.
+
+Please fix this behavior:
+
+1) Show me the backend code for the endpoint that handles invitations
+   (for example: POST /api/projects/:projectId/invitations or /api/project-experts/:id/invite-bulk).
+
+2) Make angles optional:
+   - If the request is sent with an empty array of angles (e.g. [] or undefined),
+     the API should STILL create the invitation and send the email.
+   - Do NOT throw an error just because there are no angles.
+   - Only validate angles if angleIds are actually provided.
+
+3) Frontend behavior:
+   - In the "Create Invitations" modal, allow sending invitations even when there are
+     “No angles available”.
+   - The "Send Invitations" button should not be blocked in that case.
+   - The frontend should call the same invite endpoint with either:
+       angleIds: []     // or simply omit the field
+     and handle a 200 success response.
+
+4) Logging and test:
+   - Add a log in the backend when invitations are created without angles:
+       console.log("[INVITES] Creating invitations with no angles for project", projectId);
+   - After this change, I should be able to:
+       - Select an expert in the Internal Experts Pipeline
+       - Click "Create Invitations" → "Send Invitations"
+       - See a 200 response in the logs
+       - Receive the email at kimmirae0305@gmail.com.
+
+In summary:
+- Angles must be OPTIONAL.
+- Lack of angles should NOT prevent invitations or email sending.
+- Please adjust validation and the frontend so invitations work even when a project has no angles yet.

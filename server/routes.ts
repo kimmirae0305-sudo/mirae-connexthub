@@ -1326,12 +1326,22 @@ export async function registerRoutes(
   app.post("/api/projects/:projectId/invitations/bulk-send", authMiddleware, async (req, res) => {
     try {
       const projectId = parseInt(req.params.projectId);
-      const { projectExpertIds, angleIds, channel } = req.body; // angleIds: array of angle IDs to assign
+      const { projectExpertIds, angleIds, channel } = req.body; // angleIds: array of angle IDs to assign (OPTIONAL)
       
       console.log("[API] Bulk-send endpoint triggered from Project Experts view");
+      console.log("[API] Request params - projectId:", projectId, "experts count:", projectExpertIds?.length, "angleIds:", angleIds, "channel:", channel);
       
       if (!Array.isArray(projectExpertIds) || projectExpertIds.length === 0) {
         return res.status(400).json({ error: "projectExpertIds must be a non-empty array" });
+      }
+      
+      // Angles are OPTIONAL - allow empty arrays
+      if (angleIds && !Array.isArray(angleIds)) {
+        return res.status(400).json({ error: "angleIds must be an array" });
+      }
+      
+      if (!angleIds || angleIds.length === 0) {
+        console.log("[INVITES] Creating invitations with no angles for project", projectId);
       }
       
       const project = await storage.getProject(projectId);
