@@ -15,6 +15,10 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
+localPort = 34187
+externalPort = 5000
+
+[[ports]]
 localPort = 38121
 externalPort = 3000
 
@@ -64,3 +68,11 @@ waitForPort = 5000
 
 [agent]
 integrations = ["javascript_database:1.0.0"]
+
+[userenv]
+
+[userenv.shared]
+SMTP_HOST = "smtp.zoho.com"
+SMTP_PORT = "587"
+SMTP_USER = "mirae@miraeconnext.com"
+SMTP_FROM = "mirae@miraeconnext.com"

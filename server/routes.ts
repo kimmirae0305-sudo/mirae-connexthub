@@ -26,6 +26,7 @@ import { insertClientSchema } from "@shared/schema";
 import { eq, and, gte, lt, sql } from "drizzle-orm";
 import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
 import { startOfMonth, addMonths } from "date-fns";
+import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -1180,25 +1181,53 @@ export async function registerRoutes(
           : "http://localhost:5000";
         const invitationUrl = `${baseUrl}/expert-invite/${token}`;
         
-        // Simulate sending email/whatsapp
-        console.log(`[${channel || 'email'}] Sending invitation to ${expert.name} (${expert.email})`);
-        console.log(`  Project: ${project.name}`);
-        console.log(`  Invitation URL: ${invitationUrl}`);
-        console.log(`  Vetting Questions: ${vettingQuestions.length}`);
+        // Send email invitation
+        let emailSent = false;
+        if (channel === 'email' || channel === 'both' || !channel) {
+          try {
+            emailSent = await sendExpertInvitationEmail({
+              expertName: expert.name,
+              expertEmail: expert.email,
+              projectName: project.name,
+              clientName: project.clientName || "Client",
+              industry: project.industry || undefined,
+              invitationUrl,
+              vettingQuestionsCount: vettingQuestions.length,
+            });
+            console.log(`Email invitation ${emailSent ? 'sent' : 'failed'} to ${expert.name} (${expert.email})`);
+          } catch (emailError) {
+            console.error(`Email error for ${expert.email}:`, emailError);
+          }
+        }
+        
+        // Log WhatsApp info (manual follow-up for now)
+        if (channel === 'whatsapp' || channel === 'both') {
+          console.log(`[WhatsApp] Manual follow-up needed for ${expert.name} (${expert.phone || expert.whatsapp || 'no phone'})`);
+          console.log(`  Invitation URL: ${invitationUrl}`);
+        }
         
         results.push({
           expertId: expert.id,
           expertName: expert.name,
           email: expert.email,
           invitationUrl,
-          status: "sent",
+          status: emailSent ? "sent" : "failed",
+          emailSent,
         });
       }
       
+      const successCount = results.filter(r => r.emailSent).length;
+      const failedCount = results.filter(r => !r.emailSent).length;
+      
       res.json({
-        message: `Invitations sent to ${results.length} experts`,
+        message: `Invitations: ${successCount} sent, ${failedCount} failed`,
         channel: channel || 'email',
         results,
+        summary: {
+          total: results.length,
+          sent: successCount,
+          failed: failedCount,
+        }
       });
     } catch (error) {
       console.error("Send invitations error:", error);
