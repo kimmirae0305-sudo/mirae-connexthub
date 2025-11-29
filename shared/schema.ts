@@ -12,6 +12,7 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash"),
   role: text("role").notNull().default("pm"), // admin, pm, ra, finance
   isActive: boolean("is_active").notNull().default(true),
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -308,6 +309,8 @@ const coerceDateRequired = z.preprocess((val) => {
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
+}).extend({
+  mustChangePassword: z.boolean().default(false),
 });
 
 export const insertClientSchema = createInsertSchema(clients).omit({

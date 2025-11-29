@@ -14,6 +14,7 @@ export interface AuthUser {
   fullName: string;
   email: string;
   role: string;
+  mustChangePassword?: boolean;
 }
 
 export interface AuthRequest extends Request {
@@ -113,6 +114,7 @@ export async function loginHandler(req: Request, res: Response) {
       fullName: user.fullName,
       email: user.email,
       role: user.role,
+      mustChangePassword: user.mustChangePassword || false,
     };
     
     const token = generateToken(authUser);

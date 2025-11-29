@@ -7,6 +7,7 @@ interface AuthUser {
   fullName: string;
   email: string;
   role: string;
+  mustChangePassword?: boolean;
 }
 
 interface AuthContextType {
@@ -76,7 +77,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("authToken", data.token);
     setToken(data.token);
     setUser(data.user);
-    setLocation("/");
+    
+    // Redirect based on mustChangePassword flag
+    if (data.user.mustChangePassword) {
+      setLocation("/change-password");
+    } else {
+      setLocation("/");
+    }
   }, [setLocation]);
 
   const logout = useCallback(() => {
@@ -110,8 +117,8 @@ export function useAuth() {
   return context;
 }
 
-export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+export function ProtectedRoute({ children, allowChangePassword = false }: { children: React.ReactNode, allowChangePassword?: boolean }) {
+  const { isAuthenticated, isLoading, user } = useAuth();
   const [, setLocation] = useLocation();
 
   useEffect(() => {
@@ -119,6 +126,13 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
       setLocation("/login");
     }
   }, [isAuthenticated, isLoading, setLocation]);
+
+  useEffect(() => {
+    // If user must change password and this route doesn't allow it, redirect
+    if (!isLoading && user && user.mustChangePassword && !allowChangePassword) {
+      setLocation("/change-password");
+    }
+  }, [user, isLoading, allowChangePassword, setLocation]);
 
   if (isLoading) {
     return (

@@ -21,7 +21,7 @@ import {
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
-import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles, hashPassword, type AuthRequest } from "./auth";
+import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles, hashPassword, comparePassword, type AuthRequest } from "./auth";
 import { insertClientSchema } from "@shared/schema";
 import { eq, and, gte, lt, sql } from "drizzle-orm";
 import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
@@ -34,6 +34,45 @@ export async function registerRoutes(
   // ==================== AUTH ROUTES (PUBLIC) ====================
   app.post("/api/auth/login", loginHandler);
   app.get("/api/auth/me", authMiddleware, getMeHandler);
+
+  // POST /api/auth/change-password - Change password on first login
+  app.post("/api/auth/change-password", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: "Current and new passwords are required" });
+      }
+
+      if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // Get user from database
+      const user = await storage.getUser(req.user.id);
+      if (!user || !user.passwordHash) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Verify current password
+      const isValid = await comparePassword(currentPassword, user.passwordHash);
+      if (!isValid) {
+        return res.status(400).json({ error: "Current password is incorrect" });
+      }
+
+      // Hash new password and update user
+      const hashedNewPassword = await hashPassword(newPassword);
+      await storage.updateUser(req.user.id, {
+        passwordHash: hashedNewPassword,
+        mustChangePassword: false,
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Change password error:", error);
+      res.status(500).json({ error: "Failed to change password" });
+    }
+  });
 
   // Note: Some routes need to be public for expert registration
   // Public routes: /api/auth/*, /api/register-expert/:token, /api/invitation-links/:token (GET only)
@@ -141,6 +180,7 @@ export async function registerRoutes(
         passwordHash,
         role,
         isActive: true,
+        mustChangePassword: true, // Force password change on first login
       });
       
       // Remove passwordHash from response

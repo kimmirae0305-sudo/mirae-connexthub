@@ -21,6 +21,7 @@ import Analytics from "@/pages/analytics";
 import Employees from "@/pages/employees";
 import ExpertRegister from "@/pages/expert-register";
 import ExpertInvite from "@/pages/expert-invite";
+import ChangePassword from "@/pages/change-password";
 import NotFound from "@/pages/not-found";
 
 function MainLayout({ children }: { children: React.ReactNode }) {
@@ -54,6 +55,11 @@ function Router() {
     <Switch>
       <Route path="/login">
         <Login />
+      </Route>
+      <Route path="/change-password">
+        <ProtectedRoute allowChangePassword={true}>
+          <ChangePassword />
+        </ProtectedRoute>
       </Route>
       <Route path="/register/:token">
         {(params) => <ExpertRegister token={params.token} />}

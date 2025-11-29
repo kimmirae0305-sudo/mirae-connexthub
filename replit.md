@@ -139,3 +139,73 @@ Preferred communication style: Simple, everyday language.
 **Session Management**
 - express-session: Session middleware (infrastructure present, not actively used in current implementation)
 - connect-pg-simple: PostgreSQL session store adapter
+
+## Force Password Change on First Login Feature
+
+### Overview
+New employees must change their password on first login before accessing the main application.
+
+### User Model Extension
+- **New Field**: `mustChangePassword: boolean` (defaults to false)
+- Set to `true` when admin creates a new employee via `/api/employees` endpoint
+- Set to `false` after user successfully changes password
+
+### Login Flow
+**POST /api/auth/login** now returns:
+```json
+{
+  "token": "...",
+  "user": {
+    "id": number,
+    "fullName": string,
+    "email": string,
+    "role": string,
+    "mustChangePassword": boolean
+  }
+}
+```
+
+### Frontend Routing
+- After login: If `mustChangePassword === true`, redirect to `/change-password`
+- Route Protection: Users with `mustChangePassword === true` are blocked from accessing any page except `/change-password` and `/logout`
+- ProtectedRoute component enforces this via new `allowChangePassword` prop
+
+### Change Password Endpoint
+**POST /api/auth/change-password** (requires auth)
+- Request body: `{ currentPassword, newPassword }`
+- Validates current password matches user's existing password
+- Updates password and sets `mustChangePassword = false` on success
+- Returns `{ success: true }`
+
+### New Pages
+- **GET /change-password**: Displays password change form
+  - Shows logged-in user's email
+  - Form validates: new password min 8 chars, passwords match
+  - Includes logout button for security
+  - On success, redirects to dashboard
+
+### Implementation Details
+1. **Schema**: Added `mustChangePassword` to users table in `shared/schema.ts`
+2. **Insert Schema**: Updated to include mustChangePassword with `.extend()` in zod
+3. **Backend**: 
+   - Login endpoint returns the flag
+   - New POST /api/auth/change-password endpoint with password verification
+   - Employee creation sets mustChangePassword = true by default
+4. **Frontend**:
+   - Auth context tracks the flag
+   - Login redirects based on flag value
+   - ProtectedRoute enforces route protection with new allowChangePassword parameter
+5. **UI**: New change-password page with professional design matching Mirae Connext styling
+
+### Database Migration
+Run `npm run db:push` to add the `must_change_password` column to the users table (defaults to false for existing users).
+
+### Employee Creation Workflow
+1. Admin creates employee via Employees page
+2. Employee logged as `mustChangePassword: true`
+3. Employee logs in with temporary password
+4. Frontend redirects to /change-password
+5. Employee enters current password (temporary) and new password
+6. Backend validates and updates user record
+7. On success, `mustChangePassword` becomes false
+8. Employee redirected to Dashboard with full access
