@@ -94,7 +94,15 @@ export interface IStorage {
     country?: string;
     minRate?: number;
     maxRate?: number;
-  }): Promise<Expert[]>;
+    minYearsExperience?: number;
+    maxYearsExperience?: number;
+    jobTitle?: string;
+    industry?: string;
+    language?: string;
+    hasPriorProjects?: boolean;
+    minAcceptanceRate?: number;
+    excludeProjectId?: number;
+  }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number })[]>;
   createExpert(expert: InsertExpert): Promise<Expert>;
   updateExpert(id: number, expert: Partial<InsertExpert>): Promise<Expert | undefined>;
   deleteExpert(id: number): Promise<boolean>;
@@ -383,9 +391,11 @@ export class DatabaseStorage implements IStorage {
     maxYearsExperience?: number;
     jobTitle?: string;
     industry?: string;
-    minResponseRate?: number;
-    projectId?: number;
-  }): Promise<Expert[]> {
+    language?: string;
+    hasPriorProjects?: boolean;
+    minAcceptanceRate?: number;
+    excludeProjectId?: number;
+  }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number })[]> {
     const conditions = [];
     
     if (params.query) {
@@ -438,16 +448,70 @@ export class DatabaseStorage implements IStorage {
       const industryPattern = `%${params.industry}%`;
       conditions.push(ilike(experts.industry, industryPattern));
     }
-    
-    if (conditions.length === 0) {
-      return db.select().from(experts).orderBy(experts.name);
+
+    if (params.language) {
+      const langPattern = `%${params.language.toLowerCase()}%`;
+      conditions.push(sql`array_to_string(${experts.languages}, ',') ILIKE ${langPattern}`);
     }
     
-    return db
-      .select()
-      .from(experts)
-      .where(and(...conditions))
-      .orderBy(experts.name);
+    // Get base experts
+    let baseExperts: Expert[];
+    if (conditions.length === 0) {
+      baseExperts = await db.select().from(experts).orderBy(experts.name);
+    } else {
+      baseExperts = await db
+        .select()
+        .from(experts)
+        .where(and(...conditions))
+        .orderBy(experts.name);
+    }
+
+    // Compute metrics for each expert (prior projects + acceptance rate)
+    const expertsWithMetrics = await Promise.all(
+      baseExperts.map(async (expert) => {
+        const projectAssignments = await db
+          .select()
+          .from(projectExperts)
+          .where(eq(projectExperts.expertId, expert.id));
+
+        // Filter out current project if excludeProjectId is set
+        const relevantAssignments = params.excludeProjectId
+          ? projectAssignments.filter(pa => pa.projectId !== params.excludeProjectId)
+          : projectAssignments;
+
+        const priorProjectCount = relevantAssignments.length;
+
+        // Calculate acceptance rate: accepted / (accepted + declined)
+        const invitedCount = relevantAssignments.filter(
+          pa => pa.invitationStatus === 'accepted' || pa.invitationStatus === 'declined'
+        ).length;
+        const acceptedCount = relevantAssignments.filter(
+          pa => pa.invitationStatus === 'accepted'
+        ).length;
+        const acceptanceRate = invitedCount > 0 ? Math.round((acceptedCount / invitedCount) * 100) : null;
+
+        return {
+          ...expert,
+          priorProjectCount,
+          acceptanceRate: acceptanceRate ?? undefined,
+        };
+      })
+    );
+
+    // Apply post-fetch filters
+    let filtered = expertsWithMetrics;
+
+    if (params.hasPriorProjects) {
+      filtered = filtered.filter(e => (e.priorProjectCount ?? 0) > 0);
+    }
+
+    if (params.minAcceptanceRate !== undefined) {
+      filtered = filtered.filter(
+        e => e.acceptanceRate !== undefined && e.acceptanceRate >= params.minAcceptanceRate!
+      );
+    }
+
+    return filtered;
   }
 
   async createExpert(expert: InsertExpert): Promise<Expert> {

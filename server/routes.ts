@@ -820,10 +820,19 @@ export async function registerRoutes(
         country: req.query.country as string | undefined,
         minRate: req.query.minRate ? parseFloat(req.query.minRate as string) : undefined,
         maxRate: req.query.maxRate ? parseFloat(req.query.maxRate as string) : undefined,
+        minYearsExperience: req.query.minYearsExperience ? parseInt(req.query.minYearsExperience as string) : undefined,
+        maxYearsExperience: req.query.maxYearsExperience ? parseInt(req.query.maxYearsExperience as string) : undefined,
+        jobTitle: req.query.jobTitle as string | undefined,
+        industry: req.query.industry as string | undefined,
+        language: req.query.language as string | undefined,
+        hasPriorProjects: req.query.hasPriorProjects === 'true',
+        minAcceptanceRate: req.query.minAcceptanceRate ? parseInt(req.query.minAcceptanceRate as string) : undefined,
+        excludeProjectId: req.query.excludeProjectId ? parseInt(req.query.excludeProjectId as string) : undefined,
       };
       const experts = await storage.searchExpertsAdvanced(params);
       res.json(experts);
     } catch (error) {
+      console.error("Expert search error:", error);
       res.status(500).json({ error: "Failed to search experts" });
     }
   });

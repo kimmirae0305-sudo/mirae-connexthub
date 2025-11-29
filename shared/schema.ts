@@ -107,6 +107,7 @@ export const experts = pgTable("experts", {
   termsAccepted: boolean("terms_accepted").default(false),
   lgpdAccepted: boolean("lgpd_accepted").default(false),
   billingInfo: text("billing_info"),
+  languages: text("languages").array(), // Languages spoken by expert (e.g., ["en", "pt", "es"])
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
