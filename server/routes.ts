@@ -1614,6 +1614,7 @@ export async function registerRoutes(
     try {
       const projectId = req.query.projectId ? parseInt(req.query.projectId as string) : null;
       const expertId = req.query.expertId ? parseInt(req.query.expertId as string) : null;
+      const user = (req as any).user;
       
       let records;
       if (projectId) {
@@ -1623,6 +1624,18 @@ export async function registerRoutes(
       } else {
         records = await storage.getCallRecords();
       }
+      
+      // Filter by RA's assigned projects if user is RA
+      if (user?.role === "ra") {
+        const allProjects = await storage.getProjects();
+        const raProjectIds = new Set(
+          allProjects
+            .filter((p: any) => p.assignedRaId === user.id || (p.assignedRaIds && p.assignedRaIds.includes(user.id)))
+            .map((p: any) => p.id)
+        );
+        records = records.filter((r: any) => raProjectIds.has(r.projectId));
+      }
+      
       res.json(records);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch call records" });

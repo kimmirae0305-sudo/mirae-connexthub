@@ -40,6 +40,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "experts",
     "clients",
     "insight-hub",
+    "consultations",
   ],
   finance: [
     "dashboard",

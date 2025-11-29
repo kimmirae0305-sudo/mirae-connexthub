@@ -75,6 +75,18 @@ Preferred communication style: Simple, everyday language.
   - ✅ All assignment functionality now in Project Detail page's "Existing Experts" tab
   - ✅ RA workflow is fully contained within project screens (no context switching)
 
+- **RA Consultations Access with Limited Scope**: RAs can now monitor calls for their assigned projects
+  - **Permissions**: Added "consultations" to RA role permissions in `client/src/lib/permissions.ts`
+  - **Backend Filtering** (`/api/call-records`): Filters consultations by RA's assigned projects (matches `assignedRaId` or `assignedRaIds` array)
+  - **RA UI Restrictions**:
+    - ✅ Can view "Consultations" menu item in sidebar
+    - ✅ Can see only consultations from projects assigned to them
+    - ✅ Can see: consultation date, project name, expert name, call status (scheduled/completed/cancelled)
+    - ✅ **Cannot see**: CU usage, billing/financial details, actions (Complete/Cancel buttons)
+    - ✅ Empty state message: "No consultations yet. Once your projects have scheduled calls, they will appear here."
+    - ✅ Stat cards show only 2 columns for RAs (Scheduled, Completed) - no CU card
+  - **Implementation**: Uses `useAuth()` hook to detect RA role and conditionally render UI
+
 ### Core Features
 
 - **Force Password Change on First Login**: New users must change a temporary password. Implemented via a `mustChangePassword` flag in the user model, frontend redirection, and a dedicated `/api/auth/change-password` endpoint.

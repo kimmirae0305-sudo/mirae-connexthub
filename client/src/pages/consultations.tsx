@@ -42,6 +42,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
@@ -96,6 +97,7 @@ function getStatusBadge(status: string) {
 
 export default function Consultations() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isCompleteDialogOpen, setIsCompleteDialogOpen] = useState(false);
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
@@ -104,6 +106,8 @@ export default function Consultations() {
   const { data: callRecords, isLoading } = useQuery<CallRecord[]>({
     queryKey: ["/api/call-records"],
   });
+  
+  const isRA = user?.role === "ra";
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
@@ -220,15 +224,17 @@ export default function Consultations() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Consultations</h1>
           <p className="text-sm text-muted-foreground">
-            Schedule and track expert consultations with CU usage.
+            {isRA ? "Monitor calls for your assigned projects." : "Schedule and track expert consultations with CU usage."}
           </p>
         </div>
-        <Button onClick={() => setIsDialogOpen(true)} className="gap-2" data-testid="button-schedule-call">
-          <Plus className="h-4 w-4" /> Schedule Call
-        </Button>
+        {!isRA && (
+          <Button onClick={() => setIsDialogOpen(true)} className="gap-2" data-testid="button-schedule-call">
+            <Plus className="h-4 w-4" /> Schedule Call
+          </Button>
+        )}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className={`grid gap-4 ${isRA ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
         <Card>
           <CardContent className="flex items-center gap-4 pt-6">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-500/10">
@@ -251,17 +257,19 @@ export default function Consultations() {
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="flex items-center gap-4 pt-6">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-              <Clock className="h-6 w-6 text-primary" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{totalCuUsed.toFixed(1)}</p>
-              <p className="text-sm text-muted-foreground">Total CU Used</p>
-            </div>
-          </CardContent>
-        </Card>
+        {!isRA && (
+          <Card>
+            <CardContent className="flex items-center gap-4 pt-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+                <Clock className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{totalCuUsed.toFixed(1)}</p>
+                <p className="text-sm text-muted-foreground">Total CU Used</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <Card>
@@ -284,17 +292,19 @@ export default function Consultations() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <DataTableSkeleton columns={7} rows={5} />
+            <DataTableSkeleton columns={isRA ? 6 : 7} rows={5} />
           ) : filteredRecords?.length === 0 ? (
             <EmptyState
               icon={Phone}
               title="No consultations found"
-              description="Schedule your first call to get started."
-              action={
+              description={isRA 
+                ? "No consultations yet. Once your projects have scheduled calls, they will appear here."
+                : "Schedule your first call to get started."}
+              action={!isRA && (
                 <Button onClick={() => setIsDialogOpen(true)} className="gap-2">
                   <Plus className="h-4 w-4" /> Schedule Call
                 </Button>
-              }
+              )}
             />
           ) : (
             <div className="overflow-x-auto">
@@ -305,9 +315,9 @@ export default function Consultations() {
                     <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Date</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Duration</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase">CU</TableHead>
+                    {!isRA && <TableHead className="text-xs font-semibold uppercase">CU</TableHead>}
                     <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
-                    <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
+                    {!isRA && <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -321,53 +331,57 @@ export default function Consultations() {
                       <TableCell className="text-muted-foreground">
                         {record.actualDurationMinutes || record.durationMinutes} min
                       </TableCell>
-                      <TableCell className="font-mono font-medium">
-                        {parseFloat(record.cuUsed || "0").toFixed(1)}
-                      </TableCell>
+                      {!isRA && (
+                        <TableCell className="font-mono font-medium">
+                          {parseFloat(record.cuUsed || "0").toFixed(1)}
+                        </TableCell>
+                      )}
                       <TableCell>{getStatusBadge(record.status)}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          {record.status === "scheduled" && (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedCall(record);
-                                  completeForm.reset({
-                                    actualDurationMinutes: record.durationMinutes,
-                                    notes: record.notes || "",
-                                  });
-                                  setIsCompleteDialogOpen(true);
-                                }}
-                                data-testid={`button-complete-call-${record.id}`}
-                              >
-                                <CheckCircle className="mr-1 h-3 w-3" /> Complete
-                              </Button>
+                      {!isRA && (
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            {record.status === "scheduled" && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedCall(record);
+                                    completeForm.reset({
+                                      actualDurationMinutes: record.durationMinutes,
+                                      notes: record.notes || "",
+                                    });
+                                    setIsCompleteDialogOpen(true);
+                                  }}
+                                  data-testid={`button-complete-call-${record.id}`}
+                                >
+                                  <CheckCircle className="mr-1 h-3 w-3" /> Complete
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => cancelMutation.mutate(record.id)}
+                                  className="text-destructive"
+                                  data-testid={`button-cancel-call-${record.id}`}
+                                >
+                                  <XCircle className="mr-1 h-3 w-3" /> Cancel
+                                </Button>
+                              </>
+                            )}
+                            {record.zoomLink && (
                               <Button
                                 variant="ghost"
-                                size="sm"
-                                onClick={() => cancelMutation.mutate(record.id)}
-                                className="text-destructive"
-                                data-testid={`button-cancel-call-${record.id}`}
+                                size="icon"
+                                asChild
                               >
-                                <XCircle className="mr-1 h-3 w-3" /> Cancel
+                                <a href={record.zoomLink} target="_blank" rel="noopener noreferrer">
+                                  <Video className="h-4 w-4" />
+                                </a>
                               </Button>
-                            </>
-                          )}
-                          {record.zoomLink && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              asChild
-                            >
-                              <a href={record.zoomLink} target="_blank" rel="noopener noreferrer">
-                                <Video className="h-4 w-4" />
-                              </a>
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
