@@ -60,19 +60,25 @@ export const projects = pgTable("projects", {
   projectOverview: text("project_overview"),
   clientOrganizationId: integer("client_organization_id").references(() => clientOrganizations.id),
   clientName: text("client_name").notNull(),
+  clientCompany: text("client_company"),
   clientPocName: text("client_poc_name"),
   clientPocEmail: text("client_poc_email"),
+  clientRequestNotes: text("client_request_notes"), // Free-text notes summarizing original email request
   description: text("description"),
   industry: text("industry").notNull(),
-  status: text("status").notNull().default("new"), // new, sourcing, pending_client_review, client_selected, scheduled, completed, cancelled
+  region: text("region"),
+  status: text("status").notNull().default("new"), // new, sourcing, shortlisted, confirmed, completed, cancelled
   budget: decimal("budget", { precision: 10, scale: 2 }),
   startDate: timestamp("start_date"),
   endDate: timestamp("end_date"),
+  dueDate: timestamp("due_date"),
   createdByPmId: integer("created_by_pm_id").references(() => users.id),
-  assignedRaId: integer("assigned_ra_id").references(() => users.id),
+  assignedRaId: integer("assigned_ra_id").references(() => users.id), // Legacy single RA
+  assignedRaIds: integer("assigned_ra_ids").array(), // Multiple RAs for sourcing
   totalCuUsed: decimal("total_cu_used", { precision: 10, scale: 2 }).default("0"),
   cuRatePerCU: decimal("cu_rate_per_cu", { precision: 10, scale: 2 }).default("1150"), // USD 1,150 default
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Experts table (Extended)
@@ -120,13 +126,19 @@ export const projectExperts = pgTable("project_experts", {
   projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   expertId: integer("expert_id").notNull().references(() => experts.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("assigned"), // assigned, invited, accepted, declined, client_selected, scheduled, completed
+  invitationStatus: text("invitation_status").notNull().default("not_invited"), // not_invited, invited, opened, accepted, declined
+  pipelineStatus: text("pipeline_status").notNull().default("interested"), // interested, shortlisted, accepted, declined, completed
+  sourceType: text("source_type").notNull().default("internal_db"), // internal_db, ra_external
+  sourcedByRaId: integer("sourced_by_ra_id").references(() => users.id), // RA who sourced this expert for this project
   assignedAt: timestamp("assigned_at").defaultNow().notNull(),
   invitedAt: timestamp("invited_at"),
+  openedAt: timestamp("opened_at"), // When expert opened the invite link
   respondedAt: timestamp("responded_at"),
   invitationToken: text("invitation_token").unique(),
   vqAnswers: jsonb("vq_answers").$type<{ questionId: number; questionText: string; answerText: string }[]>(),
   availabilityNote: text("availability_note"),
   notes: text("notes"),
+  lastActivityAt: timestamp("last_activity_at"),
 });
 
 // Call Records table (CU Usage with scheduling)
@@ -151,14 +163,31 @@ export const callRecords = pgTable("call_records", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Expert Invitation Links table
+// Expert Invitation Links table (Extended with types)
 export const expertInvitationLinks = pgTable("expert_invitation_links", {
   id: serial("id").primaryKey(),
   token: text("token").notNull().unique(),
   projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  raId: integer("ra_id").references(() => users.id), // RA user ID for RA-specific links
+  expertId: integer("expert_id").references(() => experts.id), // For existing expert invites
+  inviteType: text("invite_type").notNull().default("general"), // general, ra, existing
   recruitedBy: text("recruited_by").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
   expiresAt: timestamp("expires_at"),
   usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Project Activities table (for activity log)
+export const projectActivities = pgTable("project_activities", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id),
+  expertId: integer("expert_id").references(() => experts.id),
+  activityType: text("activity_type").notNull(), // expert_assigned, expert_invited, expert_accepted, expert_declined, ra_assigned, status_changed, note_added
+  description: text("description").notNull(),
+  metadata: jsonb("metadata").$type<Record<string, any>>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -246,6 +275,11 @@ export const projectExpertsRelations = relations(projectExperts, ({ one, many })
     fields: [projectExperts.expertId],
     references: [experts.id],
   }),
+  sourcedByRa: one(users, {
+    fields: [projectExperts.sourcedByRaId],
+    references: [users.id],
+    relationName: "sourcedProjectExperts",
+  }),
   callRecords: many(callRecords),
 }));
 
@@ -278,6 +312,30 @@ export const expertInvitationLinksRelations = relations(expertInvitationLinks, (
   project: one(projects, {
     fields: [expertInvitationLinks.projectId],
     references: [projects.id],
+  }),
+  ra: one(users, {
+    fields: [expertInvitationLinks.raId],
+    references: [users.id],
+    relationName: "raInviteLinks",
+  }),
+  expert: one(experts, {
+    fields: [expertInvitationLinks.expertId],
+    references: [experts.id],
+  }),
+}));
+
+export const projectActivitiesRelations = relations(projectActivities, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectActivities.projectId],
+    references: [projects.id],
+  }),
+  user: one(users, {
+    fields: [projectActivities.userId],
+    references: [users.id],
+  }),
+  expert: one(experts, {
+    fields: [projectActivities.expertId],
+    references: [experts.id],
   }),
 }));
 
@@ -333,10 +391,12 @@ export const insertClientPocSchema = createInsertSchema(clientPocs).omit({
 export const insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
   totalCuUsed: true,
 }).extend({
   startDate: coerceDate.optional(),
   endDate: coerceDate.optional(),
+  dueDate: coerceDate.optional(),
 });
 
 export const insertExpertSchema = createInsertSchema(experts).omit({
@@ -356,7 +416,9 @@ export const insertProjectExpertSchema = createInsertSchema(projectExperts).omit
   assignedAt: true,
 }).extend({
   invitedAt: coerceDate.optional(),
+  openedAt: coerceDate.optional(),
   respondedAt: coerceDate.optional(),
+  lastActivityAt: coerceDate.optional(),
 });
 
 export const insertCallRecordSchema = createInsertSchema(callRecords).omit({
@@ -372,9 +434,15 @@ export const insertCallRecordSchema = createInsertSchema(callRecords).omit({
 export const insertExpertInvitationLinkSchema = createInsertSchema(expertInvitationLinks).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
   usedAt: true,
 }).extend({
   expiresAt: coerceDate.optional(),
+});
+
+export const insertProjectActivitySchema = createInsertSchema(projectActivities).omit({
+  id: true,
+  createdAt: true,
 });
 
 export const insertUsageRecordSchema = createInsertSchema(usageRecords).omit({
@@ -418,6 +486,9 @@ export type InsertExpertInvitationLink = z.infer<typeof insertExpertInvitationLi
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type InsertUsageRecord = z.infer<typeof insertUsageRecordSchema>;
 
+export type ProjectActivity = typeof projectActivities.$inferSelect;
+export type InsertProjectActivity = z.infer<typeof insertProjectActivitySchema>;
+
 // CU Calculation Helper (1 CU = 60 minutes, 0.25 CU increments, min 1 CU if > 52 min)
 export function calculateCU(durationMinutes: number): number {
   if (durationMinutes <= 0) return 0;
@@ -431,8 +502,8 @@ export function calculateCU(durationMinutes: number): number {
 export const PROJECT_STATUSES = [
   "new",
   "sourcing",
-  "pending_client_review",
-  "client_selected",
+  "shortlisted",
+  "confirmed",
   "scheduled",
   "completed",
   "cancelled",
@@ -446,6 +517,50 @@ export const PROJECT_EXPERT_STATUSES = [
   "client_selected",
   "scheduled",
   "completed",
+] as const;
+
+// Expert invitation status for project participation
+export const INVITATION_STATUSES = [
+  "not_invited",
+  "invited",
+  "opened",
+  "accepted",
+  "declined",
+] as const;
+
+// Expert pipeline status within a project
+export const PIPELINE_STATUSES = [
+  "interested",
+  "shortlisted",
+  "accepted",
+  "declined",
+  "completed",
+] as const;
+
+// Source type for how expert was added to project
+export const SOURCE_TYPES = [
+  "internal_db",
+  "ra_external",
+] as const;
+
+// Invite link types
+export const INVITE_TYPES = [
+  "general",
+  "ra",
+  "existing",
+] as const;
+
+// Activity types for project activity log
+export const ACTIVITY_TYPES = [
+  "project_created",
+  "expert_assigned",
+  "expert_invited",
+  "expert_opened",
+  "expert_accepted",
+  "expert_declined",
+  "ra_assigned",
+  "status_changed",
+  "note_added",
 ] as const;
 
 export const CALL_STATUSES = [
