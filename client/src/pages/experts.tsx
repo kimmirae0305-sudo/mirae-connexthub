@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Plus, Pencil, Trash2, Search, Users, Mail, Phone, Briefcase, DollarSign, X } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +51,13 @@ import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import type { Expert, InsertExpert } from "@shared/schema";
 
+interface WorkExperience {
+  company: string;
+  jobTitle: string;
+  fromYear: number;
+  toYear: number;
+}
+
 const expertFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
   email: z.string().email("Valid email is required"),
@@ -63,6 +71,12 @@ const expertFormSchema = z.object({
   company: z.string().optional(),
   jobTitle: z.string().optional(),
   linkedinUrl: z.string().optional(),
+  workHistory: z.array(z.object({
+    company: z.string().min(1, "Company name required"),
+    jobTitle: z.string().min(1, "Job title required"),
+    fromYear: z.coerce.number(),
+    toYear: z.coerce.number(),
+  })).default([]),
 });
 
 type ExpertFormData = z.infer<typeof expertFormSchema>;
@@ -92,6 +106,7 @@ export default function Experts() {
   const [editingExpert, setEditingExpert] = useState<Expert | null>(null);
   const [deletingExpert, setDeletingExpert] = useState<Expert | null>(null);
   const [viewingExpert, setViewingExpert] = useState<Expert | null>(null);
+  const [workHistory, setWorkHistory] = useState<WorkExperience[]>([]);
 
   const { data: experts, isLoading } = useQuery<Expert[]>({
     queryKey: ["/api/experts"],
@@ -112,6 +127,7 @@ export default function Experts() {
       company: "",
       jobTitle: "",
       linkedinUrl: "",
+      workHistory: [],
     },
   });
 
@@ -187,6 +203,8 @@ export default function Experts() {
   const handleOpenDialog = (expert?: Expert) => {
     if (expert) {
       setEditingExpert(expert);
+      const expertWorkHistory = (expert.workHistory as WorkExperience[]) || [];
+      setWorkHistory(expertWorkHistory);
       form.reset({
         name: expert.name,
         email: expert.email,
@@ -200,9 +218,11 @@ export default function Experts() {
         company: expert.company || "",
         jobTitle: expert.jobTitle || "",
         linkedinUrl: expert.linkedinUrl || "",
+        workHistory: expertWorkHistory,
       });
     } else {
       setEditingExpert(null);
+      setWorkHistory([]);
       form.reset();
     }
     setIsDialogOpen(true);
@@ -216,6 +236,7 @@ export default function Experts() {
       company: data.company || null,
       jobTitle: data.jobTitle || null,
       linkedinUrl: data.linkedinUrl || null,
+      workHistory: workHistory,
     };
 
     if (editingExpert) {
@@ -657,6 +678,121 @@ export default function Experts() {
                   </FormItem>
                 )}
               />
+
+              <div className="space-y-4 border-t pt-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-base">Work History</h3>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setWorkHistory([
+                        ...workHistory,
+                        {
+                          company: "",
+                          jobTitle: "",
+                          fromYear: new Date().getFullYear(),
+                          toYear: new Date().getFullYear(),
+                        },
+                      ]);
+                    }}
+                    data-testid="button-add-work-history"
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add Experience
+                  </Button>
+                </div>
+
+                {workHistory.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">
+                    No work history added yet.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Company</TableHead>
+                        <TableHead>Job Title</TableHead>
+                        <TableHead>From</TableHead>
+                        <TableHead>To</TableHead>
+                        <TableHead className="w-10"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {workHistory.map((exp, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell>
+                            <Input
+                              value={exp.company}
+                              onChange={(e) => {
+                                const updated = [...workHistory];
+                                updated[idx].company = e.target.value;
+                                setWorkHistory(updated);
+                              }}
+                              placeholder="Company name"
+                              className="border-0 p-0 h-8"
+                              data-testid={`input-work-company-${idx}`}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={exp.jobTitle}
+                              onChange={(e) => {
+                                const updated = [...workHistory];
+                                updated[idx].jobTitle = e.target.value;
+                                setWorkHistory(updated);
+                              }}
+                              placeholder="Job title"
+                              className="border-0 p-0 h-8"
+                              data-testid={`input-work-jobtitle-${idx}`}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={exp.fromYear}
+                              onChange={(e) => {
+                                const updated = [...workHistory];
+                                updated[idx].fromYear = parseInt(e.target.value) || 0;
+                                setWorkHistory(updated);
+                              }}
+                              className="border-0 p-0 w-20 h-8"
+                              data-testid={`input-work-fromyear-${idx}`}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={exp.toYear}
+                              onChange={(e) => {
+                                const updated = [...workHistory];
+                                updated[idx].toYear = parseInt(e.target.value) || 0;
+                                setWorkHistory(updated);
+                              }}
+                              className="border-0 p-0 w-20 h-8"
+                              data-testid={`input-work-toyear-${idx}`}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setWorkHistory(workHistory.filter((_, i) => i !== idx));
+                              }}
+                              data-testid={`button-remove-work-history-${idx}`}
+                            >
+                              <Trash2 className="w-4 h-4 text-destructive" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
 
               <DialogFooter>
                 <Button
