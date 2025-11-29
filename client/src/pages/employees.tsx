@@ -100,7 +100,7 @@ function EmployeesContent() {
 
   const createMutation = useMutation({
     mutationFn: (data: typeof createForm) => 
-      apiRequest("/api/employees", { method: "POST", body: JSON.stringify(data) }),
+      apiRequest("POST", "/api/employees", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/employees"] });
       setIsCreateOpen(false);
@@ -114,7 +114,7 @@ function EmployeesContent() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<typeof editForm> }) =>
-      apiRequest(`/api/employees/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+      apiRequest("PUT", `/api/employees/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/employees"] });
       setIsEditOpen(false);
@@ -128,7 +128,7 @@ function EmployeesContent() {
 
   const resetPasswordMutation = useMutation({
     mutationFn: ({ id, tempPassword }: { id: number; tempPassword: string }) =>
-      apiRequest(`/api/employees/${id}/reset-password`, { method: "POST", body: JSON.stringify({ tempPassword }) }),
+      apiRequest("POST", `/api/employees/${id}/reset-password`, { tempPassword }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/employees"] });
       setIsResetPasswordOpen(false);
