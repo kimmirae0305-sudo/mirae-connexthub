@@ -138,11 +138,6 @@ export default function Login() {
               </Button>
             </form>
           </Form>
-          <div className="mt-6 text-center text-sm text-muted-foreground">
-            <p className="font-medium">Test Accounts:</p>
-            <p>admin@miraeconnext.com / Test1234!</p>
-            <p>pm@miraeconnext.com / Test1234!</p>
-          </div>
         </CardContent>
       </Card>
     </div>
