@@ -22,6 +22,7 @@ import Employees from "@/pages/employees";
 import ExpertRegister from "@/pages/expert-register";
 import ExpertInvite from "@/pages/expert-invite";
 import ExpertOnboarding from "@/pages/expert-onboarding";
+import ExpertProjectInvite from "@/pages/expert-project-invite";
 import ChangePassword from "@/pages/change-password";
 import NotFound from "@/pages/not-found";
 
@@ -76,6 +77,9 @@ function Router() {
             token={params.token} 
           />
         )}
+      </Route>
+      <Route path="/expert/project-invite/:token">
+        {(params) => <ExpertProjectInvite />}
       </Route>
       <Route path="/">
         <MainLayout><Dashboard /></MainLayout>
