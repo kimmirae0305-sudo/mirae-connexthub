@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreHorizontal, Key, Edit, ToggleLeft, ToggleRight, Shield, UserCheck, Users, Calculator, Phone, DollarSign, Clock, X, Building, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, MoreHorizontal, Key, Edit, ToggleLeft, ToggleRight, Shield, UserCheck, Users, Calculator, Phone, DollarSign, Clock, X, Building, ArrowUp, ArrowDown, Filter, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -116,7 +116,10 @@ function EmployeesContent() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<User | null>(null);
   const [detailEmployeeId, setDetailEmployeeId] = useState<number | null>(null);
+  const [sortColumn, setSortColumn] = useState<"name" | "email" | "role" | "status">("name");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
   
   const [createForm, setCreateForm] = useState({
     fullName: "",
@@ -237,16 +240,79 @@ function EmployeesContent() {
   const activeCount = employees?.filter(e => e.isActive !== false).length ?? 0;
   const inactiveCount = employees?.filter(e => e.isActive === false).length ?? 0;
 
-  const sortedEmployees = employees 
-    ? [...employees].sort((a, b) => {
-        const comparison = a.fullName.localeCompare(b.fullName);
-        return sortOrder === "asc" ? comparison : -comparison;
+  // Apply filters first
+  const filteredEmployees = employees
+    ? employees.filter(e => {
+        // Role filter
+        if (selectedRoles.length > 0 && !selectedRoles.includes(e.role)) {
+          return false;
+        }
+        // Status filter
+        if (selectedStatuses.length > 0) {
+          const status = e.isActive !== false ? "active" : "inactive";
+          if (!selectedStatuses.includes(status)) {
+            return false;
+          }
+        }
+        return true;
       })
     : employees;
 
-  const handleNameSort = () => {
-    setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+  // Apply sorting to filtered results
+  const sortedEmployees = filteredEmployees
+    ? [...filteredEmployees].sort((a, b) => {
+        let comparison = 0;
+        
+        switch (sortColumn) {
+          case "name":
+            comparison = a.fullName.localeCompare(b.fullName);
+            break;
+          case "email":
+            comparison = a.email.localeCompare(b.email);
+            break;
+          case "role":
+            comparison = a.role.localeCompare(b.role);
+            break;
+          case "status":
+            const statusA = a.isActive !== false ? "active" : "inactive";
+            const statusB = b.isActive !== false ? "active" : "inactive";
+            comparison = statusA.localeCompare(statusB);
+            break;
+          default:
+            comparison = 0;
+        }
+        
+        return sortOrder === "asc" ? comparison : -comparison;
+      })
+    : filteredEmployees;
+
+  const handleColumnSort = (column: "name" | "email" | "role" | "status") => {
+    if (sortColumn === column) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(column);
+      setSortOrder("asc");
+    }
   };
+
+  const handleToggleRoleFilter = (role: string) => {
+    setSelectedRoles(prev => 
+      prev.includes(role) ? prev.filter(r => r !== role) : [...prev, role]
+    );
+  };
+
+  const handleToggleStatusFilter = (status: string) => {
+    setSelectedStatuses(prev => 
+      prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
+    );
+  };
+
+  const handleClearFilters = () => {
+    setSelectedRoles([]);
+    setSelectedStatuses([]);
+  };
+
+  const hasActiveFilters = selectedRoles.length > 0 || selectedStatuses.length > 0;
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -304,26 +370,188 @@ function EmployeesContent() {
 
       <Card>
         <CardContent className="p-0">
+          {/* Filter Bar */}
+          <div className="border-b p-4 flex items-center gap-3 flex-wrap">
+            {/* Role Filter */}
+            <div className="relative group">
+              <button
+                className={`inline-flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${
+                  selectedRoles.length > 0
+                    ? "bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950 dark:border-blue-700 dark:text-blue-200"
+                    : "hover:bg-muted"
+                }`}
+                data-testid="button-filter-role"
+              >
+                <Filter className="h-4 w-4" />
+                Role
+                {selectedRoles.length > 0 && (
+                  <Badge variant="default" className="ml-1 h-5 w-5 p-0 flex items-center justify-center">
+                    {selectedRoles.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-4 w-4 ml-1" />
+              </button>
+              
+              {/* Role Dropdown */}
+              <div className="absolute left-0 top-full mt-1 w-48 bg-white dark:bg-slate-950 border rounded-md shadow-lg hidden group-hover:block z-50">
+                <div className="p-2 space-y-1">
+                  {ROLES.map(role => (
+                    <button
+                      key={role.value}
+                      onClick={() => handleToggleRoleFilter(role.value)}
+                      className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 transition-colors ${
+                        selectedRoles.includes(role.value)
+                          ? "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100"
+                          : "hover:bg-muted"
+                      }`}
+                      data-testid={`button-filter-role-${role.value}`}
+                    >
+                      <role.icon className="h-3 w-3" />
+                      {role.label}
+                      {selectedRoles.includes(role.value) && (
+                        <span className="ml-auto text-xs">✓</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Status Filter */}
+            <div className="relative group">
+              <button
+                className={`inline-flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors ${
+                  selectedStatuses.length > 0
+                    ? "bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950 dark:border-blue-700 dark:text-blue-200"
+                    : "hover:bg-muted"
+                }`}
+                data-testid="button-filter-status"
+              >
+                <Filter className="h-4 w-4" />
+                Status
+                {selectedStatuses.length > 0 && (
+                  <Badge variant="default" className="ml-1 h-5 w-5 p-0 flex items-center justify-center">
+                    {selectedStatuses.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-4 w-4 ml-1" />
+              </button>
+              
+              {/* Status Dropdown */}
+              <div className="absolute left-0 top-full mt-1 w-40 bg-white dark:bg-slate-950 border rounded-md shadow-lg hidden group-hover:block z-50">
+                <div className="p-2 space-y-1">
+                  {[
+                    { value: "active", label: "Active", icon: ToggleRight },
+                    { value: "inactive", label: "Inactive", icon: ToggleLeft },
+                  ].map(status => (
+                    <button
+                      key={status.value}
+                      onClick={() => handleToggleStatusFilter(status.value)}
+                      className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 transition-colors ${
+                        selectedStatuses.includes(status.value)
+                          ? "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100"
+                          : "hover:bg-muted"
+                      }`}
+                      data-testid={`button-filter-status-${status.value}`}
+                    >
+                      <status.icon className="h-3 w-3" />
+                      {status.label}
+                      {selectedStatuses.includes(status.value) && (
+                        <span className="ml-auto text-xs">✓</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Clear Filters Button */}
+            {hasActiveFilters && (
+              <button
+                onClick={handleClearFilters}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-md border text-sm hover:bg-muted transition-colors"
+                data-testid="button-clear-filters"
+              >
+                <X className="h-4 w-4" />
+                Clear Filters
+              </button>
+            )}
+          </div>
+
+          {/* Results Count */}
+          {hasActiveFilters && (
+            <div className="border-b px-4 py-2 text-xs text-muted-foreground bg-muted/30">
+              Showing {sortedEmployees?.length ?? 0} of {employees?.length ?? 0} employees
+            </div>
+          )}
+
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>
                   <button
-                    onClick={handleNameSort}
+                    onClick={() => handleColumnSort("name")}
                     className="flex items-center gap-2 hover:text-primary transition-colors"
                     data-testid="button-sort-name"
                   >
                     Name
-                    {sortOrder === "asc" ? (
-                      <ArrowUp className="h-4 w-4" />
-                    ) : (
-                      <ArrowDown className="h-4 w-4" />
+                    {sortColumn === "name" && (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="h-4 w-4" />
+                      ) : (
+                        <ArrowDown className="h-4 w-4" />
+                      )
                     )}
                   </button>
                 </TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>
+                  <button
+                    onClick={() => handleColumnSort("email")}
+                    className="flex items-center gap-2 hover:text-primary transition-colors"
+                    data-testid="button-sort-email"
+                  >
+                    Email
+                    {sortColumn === "email" && (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="h-4 w-4" />
+                      ) : (
+                        <ArrowDown className="h-4 w-4" />
+                      )
+                    )}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    onClick={() => handleColumnSort("role")}
+                    className="flex items-center gap-2 hover:text-primary transition-colors"
+                    data-testid="button-sort-role"
+                  >
+                    Role
+                    {sortColumn === "role" && (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="h-4 w-4" />
+                      ) : (
+                        <ArrowDown className="h-4 w-4" />
+                      )
+                    )}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    onClick={() => handleColumnSort("status")}
+                    className="flex items-center gap-2 hover:text-primary transition-colors"
+                    data-testid="button-sort-status"
+                  >
+                    Status
+                    {sortColumn === "status" && (
+                      sortOrder === "asc" ? (
+                        <ArrowUp className="h-4 w-4" />
+                      ) : (
+                        <ArrowDown className="h-4 w-4" />
+                      )
+                    )}
+                  </button>
+                </TableHead>
                 <TableHead className="w-12"></TableHead>
               </TableRow>
             </TableHeader>
