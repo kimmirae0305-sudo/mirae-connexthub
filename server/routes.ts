@@ -1160,10 +1160,26 @@ export async function registerRoutes(
       // Get vetting questions for this project
       const vqs = await storage.getVettingQuestionsByProject(assignment.projectId);
       
-      // Create or get invitation link
-      const token = crypto.randomBytes(16).toString("hex");
+      // Create or get invitation link using expertInvitationLinks table
+      let link = await storage.getExpertInvitationLinkByProjectAndExpert(assignment.projectId, assignment.expertId);
+      
+      if (!link) {
+        const token = crypto.randomBytes(32).toString("hex");
+        const user = (req as any).user;
+        link = await storage.createExpertInvitationLink({
+          token,
+          projectId: assignment.projectId,
+          expertId: assignment.expertId,
+          angleIds: assignment.angleIds,
+          inviteType: "existing",
+          recruitedBy: user?.email || "system",
+          isActive: true,
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+        });
+      }
+      
       const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
-      const invitationUrl = `${baseUrl}/expert/project-invite/${assignment.projectId}/ra/${token}`;
+      const invitationUrl = `${baseUrl}/expert/project-invite/${link.token}`;
       
       // Send email
       await sendExpertInvitationEmail({
@@ -1179,7 +1195,9 @@ export async function registerRoutes(
       // Update status to invited
       const updatedAssignment = await storage.updateProjectExpert(id, {
         status: "invited",
+        invitationStatus: "invited",
         invitedAt: new Date(),
+        invitationToken: link.token,
       });
       
       res.json(updatedAssignment);
@@ -1372,19 +1390,34 @@ export async function registerRoutes(
         const expert = await storage.getExpert(pe.expertId);
         if (!expert) continue;
         
-        // Generate unique invitation token
-        const token = crypto.randomBytes(32).toString("hex");
+        // Create or get invitation link using expertInvitationLinks table
+        let link = await storage.getExpertInvitationLinkByProjectAndExpert(projectId, expert.id);
+        
+        if (!link) {
+          const token = crypto.randomBytes(32).toString("hex");
+          link = await storage.createExpertInvitationLink({
+            token,
+            projectId,
+            expertId: expert.id,
+            angleIds: pe.angleIds,
+            inviteType: "existing",
+            recruitedBy: "system",
+            isActive: true,
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+          });
+        }
         
         // Update project-expert with token and status
         const updatedPe = await storage.updateProjectExpert(peId, {
           status: "invited",
+          invitationStatus: "invited",
           invitedAt: new Date(),
-          invitationToken: token,
+          invitationToken: link.token,
         });
         
         // Generate invitation URL
         const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
-        const invitationUrl = `${baseUrl}/expert-invite/${token}`;
+        const invitationUrl = `${baseUrl}/expert/project-invite/${link.token}`;
         
         // Send email invitation
         let emailSent = false;

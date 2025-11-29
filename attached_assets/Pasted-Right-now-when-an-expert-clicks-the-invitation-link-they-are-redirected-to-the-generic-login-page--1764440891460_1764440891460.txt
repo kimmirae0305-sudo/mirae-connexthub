@@ -1,0 +1,60 @@
+Right now, when an expert clicks the invitation link, they are redirected to the generic login page, which is not ideal.
+
+For invited experts, we want a frictionless flow:
+- They already exist in our database.
+- When they click the email link, they should see the project details immediately and be able to Accept or Decline without logging in.
+
+Please implement a token based invite flow for experts as follows.
+
+1) Public invite route (no login required)
+- The invite link in the email should point to:
+  /expert/project-invite/:token
+
+- This route must bypass the standard auth middleware.
+- It should:
+  - Look up the invitation by the token.
+  - Load the associated expert and project.
+  - If the token is valid and not expired:
+    - Render a dedicated "Project Invitation" page with:
+      - Project name
+      - Client name
+      - Industry
+      - Short project description
+      - Vetting questions count or preview
+      - Expert name (e.g. "Hi, Mirae")
+      - Two primary buttons: Accept and Decline
+
+2) Accept / Decline without login
+- On this page, experts must be able to click:
+  - "Accept invitation"
+  - "Decline invitation"
+
+- These buttons should call a backend API such as:
+  - POST /api/project-invites/:token/accept
+  - POST /api/project-invites/:token/decline
+
+- The API should:
+  - Validate the token again.
+  - Update the invitation status in the database (accepted or declined).
+  - Update the assignment record for this expert and project.
+  - Return a success response and a friendly confirmation message.
+
+- After the action, show a simple confirmation view:
+  - If accepted: "Thank you, your participation has been confirmed. The project team will contact you with next steps."
+  - If declined: "Thank you for your response. We have updated your availability."
+
+3) Security and edge cases
+- Tokens must be signed and time limited:
+  - Include expertId, projectId, and expiration in the token payload.
+  - If the token is invalid or expired:
+    - Show an error page: "This invitation link is no longer valid. Please contact the Mirae Connext team if you need a new link."
+- An expert who wants to access additional features (full profile, history, etc.) can still use the normal login page, but the invite link itself should not require login.
+
+4) Email template update
+- Update the invitation email so the "View Project & Respond" button uses this new invite URL with the token:
+  const inviteUrl = `${APP_BASE_URL}/expert/project-invite/${token}`
+
+Summary:
+- Invited experts should not be forced to log in.
+- The invite link should open a public invitation page where they can review the project and Accept or Decline in one click, using a secure token based flow.
+Please implement this behavior and show me the updated invite route, API handlers, and frontend page.
