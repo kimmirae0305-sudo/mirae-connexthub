@@ -70,6 +70,7 @@ export const projects = pgTable("projects", {
   createdByPmId: integer("created_by_pm_id").references(() => users.id),
   assignedRaId: integer("assigned_ra_id").references(() => users.id),
   totalCuUsed: decimal("total_cu_used", { precision: 10, scale: 2 }).default("0"),
+  cuRatePerCU: decimal("cu_rate_per_cu", { precision: 10, scale: 2 }).default("1150"), // USD 1,150 default
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

@@ -61,7 +61,7 @@ Preferred communication style: Simple, everyday language.
 - Schema-first approach with TypeScript types generated from Drizzle schema
 
 **Data Model**
-- **Projects**: Client projects with status tracking, budget, timeline, and industry categorization
+- **Projects**: Client projects with status tracking, budget, timeline, industry categorization, and cuRatePerCU (USD per CU, defaults to 1150)
 - **Experts**: Professional profiles with expertise, rates, availability status, sourcedByRaId, and sourcedAt for RA attribution
 - **Vetting Questions**: Project-specific screening questions with ordering and required flags (displayed as "Insight Hub" in UI)
 - **Project Experts**: Many-to-many assignments linking projects to experts with notes and status
@@ -78,12 +78,20 @@ Preferred communication style: Simple, everyday language.
 **Incentive Rules by Role**
 - **RA (Research Associate)**: R$250 per completed call where expert was sourced by RA within 60 days. Monthly cap: R$2,500
 - **PM (Project Manager)**: R$70 per CU with no monthly cap
-- **Admin/Finance**: View global company totals
+- **Admin/Finance**: NO personal incentives. Instead, view company-wide metrics: total CU, completed calls, and total revenue
+
+**Revenue Calculation for Admin/Finance**
+- Per Call: `revenueUSD = cuUsed * cuRatePerCU`
+- Where `cuRatePerCU` is project-specific (stored in projects table, defaults to USD 1,150)
+- Company Total Revenue: Sum of all call revenues for the month
+- Returns `companyTotals` object with `totalCompanyCU`, `totalCompanyCalls`, and `totalCompanyRevenueUSD`
 
 **KPI Endpoint**: GET /api/kpi/my-monthly
 - Returns monthly KPI data filtered by authenticated user's role
-- Includes total CU, total calls, calculated incentive, and detailed call list
+- **RA/PM**: Includes total CU, total calls, calculated incentive, and detailed call list
+- **Admin/Finance**: Includes company-wide totals (CU, calls, revenue in USD), detailed call list with per-call revenue
 - All dates filtered and displayed in America/Sao_Paulo timezone
+- Call list includes: interviewDate, expertName, projectName, clientName (admin only), cuUsed, cuRatePerCU, revenueUSD (admin only)
 
 **Migration Strategy**
 - Drizzle Kit for schema migrations with push-based deployments

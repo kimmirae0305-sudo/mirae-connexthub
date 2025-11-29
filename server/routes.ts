@@ -1367,6 +1367,8 @@ export async function registerRoutes(
           callDate: callRecords.callDate,
           status: callRecords.status,
           projectName: projects.name,
+          clientName: projects.clientName,
+          cuRatePerCU: projects.cuRatePerCU,
           expertName: experts.name,
           expertSourcedByRaId: experts.sourcedByRaId,
           expertSourcedAt: experts.sourcedAt,
@@ -1420,34 +1422,51 @@ export async function registerRoutes(
         totals.incentive = Math.round(totals.totalCU * 70 * 100) / 100; // R$70 per CU, no cap
 
       } else if (role === "admin" || role === "finance") {
-        // Admin/Finance: See all calls (global totals)
+        // Admin/Finance: See all calls (global totals) with company revenue
         filteredCalls = baseQuery;
 
         totals.totalCalls = filteredCalls.length;
         totals.totalCU = filteredCalls.reduce((sum, call) => sum + parseFloat(call.cuUsed || "0"), 0);
-        // For admin/finance, show total potential incentives (PM rate for reference)
-        totals.incentive = Math.round(totals.totalCU * 70 * 100) / 100;
+        // Admin/Finance do not have incentive calculations
+        totals.incentive = 0;
       }
 
+      // Calculate company revenue for admin/finance
+      let totalCompanyRevenueUSD = 0;
+      
       // Format calls for response
       const calls = filteredCalls.map((call) => {
         const callDate = call.completedAt || call.callDate;
         // Convert to Brazil timezone for display using date-fns-tz
         const brazilTime = toZonedTime(new Date(callDate), BRAZIL_TZ);
         
+        const cuUsed = parseFloat(call.cuUsed || "0");
+        const cuRate = parseFloat(call.cuRatePerCU || "1150");
+        const revenueUSD = cuUsed * cuRate;
+        
+        // Only add to company total if admin/finance role
+        if (role === "admin" || role === "finance") {
+          totalCompanyRevenueUSD += revenueUSD;
+        }
+        
         return {
           id: call.id,
           interviewDate: format(brazilTime, "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone: BRAZIL_TZ }),
           expertName: call.expertName,
           projectName: call.projectName,
-          cuUsed: parseFloat(call.cuUsed || "0"),
+          clientName: call.clientName,
+          cuUsed: cuUsed,
+          cuRatePerCU: cuRate,
+          revenueUSD: Math.round(revenueUSD * 100) / 100,
         };
       });
 
       // Round totals
       totals.totalCU = Math.round(totals.totalCU * 100) / 100;
+      totalCompanyRevenueUSD = Math.round(totalCompanyRevenueUSD * 100) / 100;
 
-      res.json({
+      // Add company revenue to response for admin/finance
+      const responseData: any = {
         role,
         period: {
           month: month + 1, // 1-indexed for display
@@ -1456,7 +1475,17 @@ export async function registerRoutes(
         },
         totals,
         calls,
-      });
+      };
+      
+      if (role === "admin" || role === "finance") {
+        responseData.companyTotals = {
+          totalCompanyCU: totals.totalCU,
+          totalCompanyCalls: totals.totalCalls,
+          totalCompanyRevenueUSD: totalCompanyRevenueUSD,
+        };
+      }
+
+      res.json(responseData);
     } catch (error) {
       console.error("KPI endpoint error:", error);
       res.status(500).json({ error: "Failed to fetch KPI data" });

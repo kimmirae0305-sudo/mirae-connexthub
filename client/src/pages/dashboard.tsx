@@ -22,7 +22,16 @@ interface KPICall {
   interviewDate: string;
   expertName: string;
   projectName: string;
+  clientName?: string;
   cuUsed: number;
+  cuRatePerCU?: number;
+  revenueUSD?: number;
+}
+
+interface CompanyTotals {
+  totalCompanyCU: number;
+  totalCompanyCalls: number;
+  totalCompanyRevenueUSD: number;
 }
 
 interface KPIResponse {
@@ -37,6 +46,7 @@ interface KPIResponse {
     totalCU: number;
     incentive: number;
   };
+  companyTotals?: CompanyTotals;
   calls: KPICall[];
 }
 
@@ -54,6 +64,13 @@ function formatCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
+  }).format(value);
+}
+
+function formatUSD(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
   }).format(value);
 }
 
@@ -162,10 +179,10 @@ function KPISection() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold" data-testid="text-total-cu">
-              {kpiData.totals.totalCU.toFixed(2)}
+              {(kpiData.companyTotals?.totalCompanyCU ?? kpiData.totals.totalCU).toFixed(2)}
             </div>
             <p className="text-xs text-muted-foreground">
-              Credit Units this month
+              {kpiData.role === "admin" || kpiData.role === "finance" ? "Company CU this month" : "Credit Units this month"}
             </p>
           </CardContent>
         </Card>
@@ -179,7 +196,7 @@ function KPISection() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold" data-testid="text-total-calls">
-              {kpiData.totals.totalCalls}
+              {kpiData.companyTotals?.totalCompanyCalls ?? kpiData.totals.totalCalls}
             </div>
             <p className="text-xs text-muted-foreground">
               Consultations completed
@@ -187,25 +204,44 @@ function KPISection() {
           </CardContent>
         </Card>
 
-        <Card data-testid="card-kpi-incentive">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Incentive
-            </CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600 dark:text-green-500" data-testid="text-incentive">
-              {formatCurrency(kpiData.totals.incentive)}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {kpiData.role === "ra" 
-                ? "R$250/call (max R$2,500)"
-                : "R$70 per CU"
-              }
-            </p>
-          </CardContent>
-        </Card>
+        {(kpiData.role === "admin" || kpiData.role === "finance") ? (
+          <Card data-testid="card-kpi-revenue">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Revenue
+              </CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600 dark:text-green-500" data-testid="text-revenue">
+                {formatUSD(kpiData.companyTotals?.totalCompanyRevenueUSD ?? 0)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Total revenue this month
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card data-testid="card-kpi-incentive">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Incentive
+              </CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600 dark:text-green-500" data-testid="text-incentive">
+                {formatCurrency(kpiData.totals.incentive)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {kpiData.role === "ra" 
+                  ? "R$250/call (max R$2,500)"
+                  : "R$70 per CU"
+                }
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <Card>
@@ -226,9 +262,15 @@ function KPISection() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-xs font-semibold uppercase">Interview Date</TableHead>
+                  {(kpiData.role === "admin" || kpiData.role === "finance") && (
+                    <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
+                  )}
                   <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
                   <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
                   <TableHead className="text-right text-xs font-semibold uppercase">CU</TableHead>
+                  {(kpiData.role === "admin" || kpiData.role === "finance") && (
+                    <TableHead className="text-right text-xs font-semibold uppercase">Revenue (USD)</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -237,11 +279,19 @@ function KPISection() {
                     <TableCell className="font-mono text-sm">
                       {formatBrazilDate(call.interviewDate)}
                     </TableCell>
+                    {(kpiData.role === "admin" || kpiData.role === "finance") && (
+                      <TableCell className="text-muted-foreground">{call.clientName}</TableCell>
+                    )}
                     <TableCell>{call.expertName}</TableCell>
                     <TableCell className="text-muted-foreground">{call.projectName}</TableCell>
                     <TableCell className="text-right font-medium">
                       {call.cuUsed.toFixed(2)}
                     </TableCell>
+                    {(kpiData.role === "admin" || kpiData.role === "finance") && (
+                      <TableCell className="text-right font-medium">
+                        {call.revenueUSD ? formatUSD(call.revenueUSD) : "-"}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>

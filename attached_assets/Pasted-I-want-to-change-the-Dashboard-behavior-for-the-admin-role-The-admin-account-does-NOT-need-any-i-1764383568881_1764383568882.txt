@@ -1,0 +1,106 @@
+I want to change the Dashboard behavior for the admin role.
+
+The admin account does NOT need any incentive calculation.  
+Instead, the admin dashboard should show company-wide CU and revenue at a glance.
+
+Please update the KPI logic and UI as follows:
+
+-------------------------------------------------
+1) BACKEND – COMPANY KPI FOR ADMIN
+-------------------------------------------------
+
+Currently we have a monthly CU KPI endpoint for the logged-in user.
+
+For users with role = "admin" (and optionally "finance"):
+
+- Do NOT calculate a personal incentive.
+- Instead, compute company-level metrics for the current month (timezone: America/Sao_Paulo):
+
+  - totalCompanyCU:
+    Sum of cuUsed for all completed calls this month.
+
+  - totalCompanyCalls:
+    Number of completed consultations this month.
+
+  - totalCompanyRevenue:
+    For each call:
+      - Determine the CU price (cuRatePerCU) from the client/project contract.
+      - If no specific rate is defined, use the default of USD 1,150 per CU.
+      - revenueForCall = cuUsed * cuRatePerCU
+    Then sum all revenueForCall for the month.
+
+Return something like:
+
+{
+  "role": "admin",
+  "period": {...},
+  "companyTotals": {
+    "totalCompanyCU": 23.5,
+    "totalCompanyCalls": 18,
+    "totalCompanyRevenueUSD": 27025,
+    "totalCompanyRevenueBRL": 135000   // optional if conversion is available
+  },
+  "calls": [
+    {
+      "id": "call_123",
+      "interviewDate": "...",
+      "clientName": "...",
+      "projectName": "...",
+      "expertName": "...",
+      "cuUsed": 1.5,
+      "cuRatePerCU": 1150,
+      "revenueUSD": 1725
+    },
+    ...
+  ]
+}
+
+For admin/finance users, incentive should always be 0 or omitted.
+
+-------------------------------------------------
+2) FRONTEND – ADMIN DASHBOARD UI
+-------------------------------------------------
+
+On the Dashboard, when the logged-in user has role = "admin":
+
+- Change the section title from “My CU Performance – Admin” to
+  “Company CU Performance – Admin”.
+
+- Replace the current summary cards with:
+
+  1) Total CU
+     - Title: "Total CU"
+     - Subtitle: "Company CU this month"
+     - Value: companyTotals.totalCompanyCU
+
+  2) Completed Calls
+     - Title: "Completed Calls"
+     - Subtitle: "Consultations completed"
+     - Value: companyTotals.totalCompanyCalls
+
+  3) Revenue
+     - Title: "Revenue"
+     - Subtitle: e.g. "Total revenue this month"
+     - Value: formatted companyTotals.totalCompanyRevenue (USD and/or BRL)
+
+- Remove the personal "Incentive" card for admin entirely.
+
+- Keep the “Completed Calls This Month” table, but show company-wide data:
+  Columns:
+    - Interview Date (Brazil time)
+    - Client
+    - Project
+    - Expert
+    - CU
+    - Revenue (per call)
+
+For non-admin roles (RA/PM), keep the existing personal KPI and incentive UI.
+
+-------------------------------------------------
+3) DOCUMENTATION
+-------------------------------------------------
+
+Please explain:
+- How companyTotals are calculated.
+- How CU price per client/project is resolved (and where the default USD 1,150 per CU is stored).
+- Confirm that admin accounts do not receive any incentive calculation.
