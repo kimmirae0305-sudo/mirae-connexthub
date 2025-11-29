@@ -209,3 +209,71 @@ Run `npm run db:push` to add the `must_change_password` column to the users tabl
 6. Backend validates and updates user record
 7. On success, `mustChangePassword` becomes false
 8. Employee redirected to Dashboard with full access
+
+## Multi-language Expert Onboarding Feature
+
+### Overview
+New expert registration flow allowing Research Associates (RAs) to send project-specific invitation links. Experts complete a comprehensive onboarding form in their preferred language (Portuguese, Spanish, or English).
+
+### Route Pattern
+- **URL Format**: `/invite/:projectId/:inviteType/:token`
+- **Example**: `/invite/5/project/abc123token456`
+- Parameters:
+  - `projectId`: Database ID of the project
+  - `inviteType`: Type of invitation (e.g., "project", "general")
+  - `token`: Unique invitation token from `expert_invitation_links` table
+
+### Multi-language Support
+- **Supported Languages**: Portuguese (pt), Spanish (es), English (en)
+- **Browser Detection**: Auto-detects preferred language from browser settings
+- **Language Toggle**: Users can switch languages at any time via dropdown
+- **Translation File**: `client/src/lib/translations/expert-onboarding.ts`
+
+### Form Sections
+1. **Login Information**: Email, password with confirmation
+2. **Basic Information**: Name, country, region, phone (with country code), LinkedIn, timezone
+3. **Professional Experience**: Repeatable experience entries with company, title, date ranges
+4. **Biography**: 50+ character professional bio
+5. **Hourly Rate**: Rate amount and currency selection
+6. **Vetting Questions**: Project-specific screening questions (from Insight Hub)
+7. **Terms & Privacy**: Required acceptance checkbox
+
+### Backend Endpoints
+**GET /api/invite/:projectId/:inviteType/:token**
+- Validates invitation link (not expired, not used)
+- Returns project details, vetting questions, RA information
+- Response includes: project, vettingQuestions[], recruitedBy, recruitedByRaId
+
+**POST /api/invite/:projectId/:inviteType/:token/submit**
+- Creates expert record with form data
+- Links expert to project (auto-accepts)
+- Stores vetting question answers
+- Marks invitation link as used
+- Sets sourcedByRaId and sourcedAt for RA attribution
+
+### Expert Record Mapping
+Form data is mapped to expert record:
+- `name`: firstName + lastName
+- `email`: From form
+- `phone`/`whatsapp`: countryCode + phoneNumber
+- `country`, `timezone`: From form selections
+- `company`, `jobTitle`: From first/current experience
+- `yearsOfExperience`: Calculated from earliest experience start year
+- `bio`: Biography + formatted experience list
+- `hourlyRate`: From form
+- `status`: "available"
+- `sourcedByRaId`: RA user ID (from invitation link)
+- `sourcedAt`: Registration timestamp
+
+### Project-Expert Assignment
+On successful registration:
+- Creates project_experts record with status "accepted"
+- Stores vqAnswers as structured JSON
+- Includes notes about invitation type
+- Sets invitedAt and respondedAt timestamps
+
+### Files
+- **Frontend**: `client/src/pages/expert-onboarding.tsx`
+- **Translations**: `client/src/lib/translations/expert-onboarding.ts`
+- **Backend Routes**: `server/routes.ts` (GET/POST /api/invite/:projectId/:inviteType/:token)
+- **App Router**: Route defined in `client/src/App.tsx`
