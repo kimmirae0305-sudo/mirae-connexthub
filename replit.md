@@ -93,6 +93,19 @@ Preferred communication style: Simple, everyday language.
 - All dates filtered and displayed in America/Sao_Paulo timezone
 - Call list includes: interviewDate, expertName, projectName, clientName (admin only), cuUsed, cuRatePerCU, revenueUSD (admin only)
 
+**Employee Overview Endpoint**: GET /api/employees/:id/overview
+- Only accessible by admin and finance roles
+- Returns detailed employee info, monthly KPIs, and accounts list
+- **KPI Calculation**:
+  - RA: Counts calls where expert was sourced by this RA within 60 days; R$250 per call, R$2,500 monthly cap
+  - PM: Counts calls where pmId = this employee; R$70 per CU, no cap
+  - Admin/Finance: No personal KPIs (shows 0 for all metrics)
+- **Accounts List**: Aggregates clients from employee's completed calls for the month
+  - For PM: Clients with calls where pmId = employee
+  - For RA: Clients with calls using experts sourced by this RA
+  - Shows: clientName, totalCU, completedCalls, revenueUSD, lastActivityAt
+  - contractedCU and usageRate return null (no contract model implemented yet)
+
 **Migration Strategy**
 - Drizzle Kit for schema migrations with push-based deployments
 - Schema definitions in shared/schema.ts accessible to both client and server

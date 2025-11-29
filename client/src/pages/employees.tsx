@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreHorizontal, Key, Edit, ToggleLeft, ToggleRight, Shield, UserCheck, Users, Calculator } from "lucide-react";
+import { Plus, MoreHorizontal, Key, Edit, ToggleLeft, ToggleRight, Shield, UserCheck, Users, Calculator, Phone, DollarSign, Clock, X, Building } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -36,10 +37,47 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { User } from "@shared/schema";
 import { RoleGuard } from "@/lib/auth";
+
+interface EmployeeOverview {
+  employee: {
+    id: number;
+    fullName: string;
+    email: string;
+    role: string;
+    status: string;
+    joinedAt: string;
+  };
+  kpi: {
+    period: {
+      month: number;
+      year: number;
+      timezone: string;
+    };
+    totalCU: number;
+    completedCalls: number;
+    incentive: number;
+  };
+  accounts: {
+    clientId: number | null;
+    clientName: string;
+    totalCUThisMonth: number;
+    completedCallsThisMonth: number;
+    revenueThisMonthUSD: number;
+    contractedCU: number | null;
+    usageRate: number | null;
+    lastActivityAt: string | null;
+  }[];
+}
 
 type UserRole = "admin" | "pm" | "ra" | "finance";
 
@@ -75,7 +113,9 @@ function EmployeesContent() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<User | null>(null);
+  const [detailEmployeeId, setDetailEmployeeId] = useState<number | null>(null);
   
   const [createForm, setCreateForm] = useState({
     fullName: "",
@@ -97,6 +137,16 @@ function EmployeesContent() {
   const { data: employees, isLoading } = useQuery<User[]>({
     queryKey: ["/api/employees"],
   });
+
+  const { data: employeeOverview, isLoading: isOverviewLoading } = useQuery<EmployeeOverview>({
+    queryKey: [`/api/employees/${detailEmployeeId}/overview`],
+    enabled: !!detailEmployeeId && isDetailOpen,
+  });
+
+  const handleEmployeeClick = (employee: User) => {
+    setDetailEmployeeId(employee.id);
+    setIsDetailOpen(true);
+  };
 
   const createMutation = useMutation({
     mutationFn: (data: typeof createForm) => 
@@ -273,7 +323,13 @@ function EmployeesContent() {
                   return (
                     <TableRow key={employee.id} data-testid={`row-employee-${employee.id}`}>
                       <TableCell className="font-medium" data-testid={`text-name-${employee.id}`}>
-                        {employee.fullName}
+                        <button
+                          onClick={() => handleEmployeeClick(employee)}
+                          className="text-left hover:text-primary hover:underline cursor-pointer"
+                          data-testid={`button-view-${employee.id}`}
+                        >
+                          {employee.fullName}
+                        </button>
                       </TableCell>
                       <TableCell className="text-muted-foreground" data-testid={`text-email-${employee.id}`}>
                         {employee.email}
@@ -525,6 +581,163 @@ function EmployeesContent() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <Sheet open={isDetailOpen} onOpenChange={(open) => {
+        setIsDetailOpen(open);
+        if (!open) setDetailEmployeeId(null);
+      }}>
+        <SheetContent className="w-full sm:max-w-xl overflow-y-auto" data-testid="sheet-employee-detail">
+          <SheetHeader>
+            <SheetTitle>Employee Details</SheetTitle>
+          </SheetHeader>
+          
+          {isOverviewLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          ) : employeeOverview ? (
+            <div className="space-y-6 py-4">
+              <div className="flex items-center gap-4">
+                <Avatar className="h-16 w-16">
+                  <AvatarFallback className="text-lg">
+                    {employeeOverview.employee.fullName.split(" ").map(n => n[0]).join("").toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1">
+                  <h3 className="text-xl font-semibold" data-testid="text-detail-name">
+                    {employeeOverview.employee.fullName}
+                  </h3>
+                  <p className="text-sm text-muted-foreground" data-testid="text-detail-email">
+                    {employeeOverview.employee.email}
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Badge variant={getRoleVariant(employeeOverview.employee.role)} className="gap-1">
+                      {(() => {
+                        const RoleIcon = getRoleIcon(employeeOverview.employee.role);
+                        return <RoleIcon className="h-3 w-3" />;
+                      })()}
+                      {getRoleLabel(employeeOverview.employee.role)}
+                    </Badge>
+                    <Badge 
+                      variant={employeeOverview.employee.status === "active" ? "default" : "secondary"}
+                      className={employeeOverview.employee.status === "active" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100" : ""}
+                    >
+                      {employeeOverview.employee.status === "active" ? "Active" : "Inactive"}
+                    </Badge>
+                  </div>
+                  {employeeOverview.employee.joinedAt && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Employee since {new Date(employeeOverview.employee.joinedAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-medium mb-3">
+                  Monthly Performance ({employeeOverview.kpi.period.month}/{employeeOverview.kpi.period.year})
+                </h4>
+                <div className="grid grid-cols-3 gap-3">
+                  <Card>
+                    <CardHeader className="p-3 pb-1">
+                      <CardTitle className="text-xs font-normal text-muted-foreground flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        Total CU
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      <div className="text-xl font-bold" data-testid="text-detail-cu">
+                        {employeeOverview.kpi.totalCU}
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="p-3 pb-1">
+                      <CardTitle className="text-xs font-normal text-muted-foreground flex items-center gap-1">
+                        <Phone className="h-3 w-3" />
+                        Calls
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      <div className="text-xl font-bold" data-testid="text-detail-calls">
+                        {employeeOverview.kpi.completedCalls}
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="p-3 pb-1">
+                      <CardTitle className="text-xs font-normal text-muted-foreground flex items-center gap-1">
+                        <DollarSign className="h-3 w-3" />
+                        Incentive
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      <div className="text-xl font-bold" data-testid="text-detail-incentive">
+                        {employeeOverview.employee.role === "admin" || employeeOverview.employee.role === "finance" 
+                          ? "N/A" 
+                          : `R$ ${employeeOverview.kpi.incentive.toLocaleString()}`}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-medium mb-3 flex items-center gap-2">
+                  <Building className="h-4 w-4" />
+                  Accounts ({employeeOverview.accounts.length})
+                </h4>
+                {employeeOverview.accounts.length === 0 ? (
+                  <div className="text-sm text-muted-foreground text-center py-6 border rounded-md">
+                    No accounts with activity this month
+                  </div>
+                ) : (
+                  <div className="border rounded-md overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Client</TableHead>
+                          <TableHead className="text-right">CU</TableHead>
+                          <TableHead className="text-right">Calls</TableHead>
+                          <TableHead className="text-right">Revenue</TableHead>
+                          <TableHead className="text-right">Last Activity</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {employeeOverview.accounts.map((account, index) => (
+                          <TableRow key={index} data-testid={`row-account-${index}`}>
+                            <TableCell className="font-medium">
+                              {account.clientName}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {account.totalCUThisMonth}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {account.completedCallsThisMonth}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              ${account.revenueThisMonthUSD.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground text-sm">
+                              {account.lastActivityAt 
+                                ? new Date(account.lastActivityAt).toLocaleDateString() 
+                                : "-"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              Failed to load employee details
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

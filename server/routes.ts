@@ -1492,5 +1492,196 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * GET /api/employees/:id/overview
+   * 
+   * Returns detailed employee overview including KPIs and accounts.
+   * Only accessible by admin and finance roles.
+   */
+  app.get("/api/employees/:id/overview", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      
+      // Get employee basic info
+      const employee = await storage.getUser(employeeId);
+      if (!employee) {
+        return res.status(404).json({ error: "Employee not found" });
+      }
+
+      // Get current month boundaries in Brazil timezone
+      const BRAZIL_TZ = "America/Sao_Paulo";
+      const now = new Date();
+      const brazilNow = toZonedTime(now, BRAZIL_TZ);
+      const year = brazilNow.getFullYear();
+      const month = brazilNow.getMonth();
+      const monthStartInBrazil = startOfMonth(brazilNow);
+      const nextMonthStartInBrazil = addMonths(monthStartInBrazil, 1);
+      const monthStartUTC = fromZonedTime(monthStartInBrazil, BRAZIL_TZ);
+      const monthEndUTC = fromZonedTime(nextMonthStartInBrazil, BRAZIL_TZ);
+
+      // Get all completed calls this month with full details
+      const allCalls = await db
+        .select({
+          id: callRecords.id,
+          projectId: callRecords.projectId,
+          expertId: callRecords.expertId,
+          pmId: callRecords.pmId,
+          raId: callRecords.raId,
+          durationMinutes: callRecords.durationMinutes,
+          cuUsed: callRecords.cuUsed,
+          completedAt: callRecords.completedAt,
+          callDate: callRecords.callDate,
+          status: callRecords.status,
+          projectName: projects.name,
+          clientName: projects.clientName,
+          clientOrganizationId: projects.clientOrganizationId,
+          cuRatePerCU: projects.cuRatePerCU,
+          projectPmId: projects.createdByPmId,
+          expertName: experts.name,
+          expertSourcedByRaId: experts.sourcedByRaId,
+          expertSourcedAt: experts.sourcedAt,
+        })
+        .from(callRecords)
+        .innerJoin(projects, eq(callRecords.projectId, projects.id))
+        .innerJoin(experts, eq(callRecords.expertId, experts.id))
+        .where(
+          and(
+            eq(callRecords.status, "completed"),
+            sql`${callRecords.completedAt} IS NOT NULL`,
+            gte(callRecords.completedAt, monthStartUTC),
+            lt(callRecords.completedAt, monthEndUTC)
+          )
+        );
+
+      // Filter calls based on employee role
+      let filteredCalls: typeof allCalls = [];
+      let kpi = {
+        totalCU: 0,
+        completedCalls: 0,
+        incentive: 0,
+      };
+      
+      const role = employee.role;
+
+      if (role === "ra") {
+        // RA: Calls where expert was sourced by this RA AND within 60 days
+        filteredCalls = allCalls.filter((call) => {
+          if (call.expertSourcedByRaId !== employeeId) return false;
+          if (!call.expertSourcedAt || !call.completedAt) return false;
+          
+          const sourcedAt = new Date(call.expertSourcedAt);
+          const completedAt = new Date(call.completedAt);
+          const daysDiff = (completedAt.getTime() - sourcedAt.getTime()) / (1000 * 60 * 60 * 24);
+          
+          return daysDiff <= 60;
+        });
+
+        kpi.completedCalls = filteredCalls.length;
+        kpi.totalCU = filteredCalls.reduce((sum, call) => sum + parseFloat(call.cuUsed || "0"), 0);
+        const rawIncentive = kpi.completedCalls * 250;
+        kpi.incentive = Math.min(rawIncentive, 2500); // Cap at R$2,500
+
+      } else if (role === "pm") {
+        // PM: Calls where pmId = this employee
+        filteredCalls = allCalls.filter((call) => call.pmId === employeeId);
+
+        kpi.completedCalls = filteredCalls.length;
+        kpi.totalCU = filteredCalls.reduce((sum, call) => sum + parseFloat(call.cuUsed || "0"), 0);
+        kpi.incentive = Math.round(kpi.totalCU * 70 * 100) / 100; // R$70 per CU
+
+      } else if (role === "admin" || role === "finance") {
+        // Admin/Finance: No personal calls, no incentive
+        filteredCalls = [];
+        kpi.completedCalls = 0;
+        kpi.totalCU = 0;
+        kpi.incentive = 0;
+      }
+
+      // Round totalCU
+      kpi.totalCU = Math.round(kpi.totalCU * 100) / 100;
+
+      // Build accounts list based on role
+      const accountsMap = new Map<string, {
+        clientId: number | null;
+        clientName: string;
+        totalCUThisMonth: number;
+        completedCallsThisMonth: number;
+        revenueThisMonthUSD: number;
+        lastActivityAt: Date | null;
+      }>();
+
+      // Process calls to build accounts
+      for (const call of filteredCalls) {
+        const clientKey = call.clientName;
+        const cuUsed = parseFloat(call.cuUsed || "0");
+        const cuRate = parseFloat(call.cuRatePerCU || "1150");
+        const revenueUSD = cuUsed * cuRate;
+        const completedAt = call.completedAt ? new Date(call.completedAt) : null;
+
+        if (!accountsMap.has(clientKey)) {
+          accountsMap.set(clientKey, {
+            clientId: call.clientOrganizationId,
+            clientName: call.clientName,
+            totalCUThisMonth: 0,
+            completedCallsThisMonth: 0,
+            revenueThisMonthUSD: 0,
+            lastActivityAt: null,
+          });
+        }
+
+        const account = accountsMap.get(clientKey)!;
+        account.totalCUThisMonth += cuUsed;
+        account.completedCallsThisMonth += 1;
+        account.revenueThisMonthUSD += revenueUSD;
+        
+        if (completedAt && (!account.lastActivityAt || completedAt > account.lastActivityAt)) {
+          account.lastActivityAt = completedAt;
+        }
+      }
+
+      // Convert accounts map to array and format
+      const accounts = Array.from(accountsMap.values()).map((account) => ({
+        clientId: account.clientId,
+        clientName: account.clientName,
+        totalCUThisMonth: Math.round(account.totalCUThisMonth * 100) / 100,
+        completedCallsThisMonth: account.completedCallsThisMonth,
+        revenueThisMonthUSD: Math.round(account.revenueThisMonthUSD * 100) / 100,
+        contractedCU: null, // No contractedCU field exists yet
+        usageRate: null, // Cannot calculate without contractedCU
+        lastActivityAt: account.lastActivityAt 
+          ? format(toZonedTime(account.lastActivityAt, BRAZIL_TZ), "yyyy-MM-dd'T'HH:mm:ssXXX", { timeZone: BRAZIL_TZ })
+          : null,
+      }));
+
+      // Sort accounts by revenue descending
+      accounts.sort((a, b) => b.revenueThisMonthUSD - a.revenueThisMonthUSD);
+
+      res.json({
+        employee: {
+          id: employee.id,
+          fullName: employee.fullName,
+          email: employee.email,
+          role: employee.role,
+          status: employee.isActive ? "active" : "inactive",
+          joinedAt: employee.createdAt,
+        },
+        kpi: {
+          period: {
+            month: month + 1,
+            year,
+            timezone: "America/Sao_Paulo",
+          },
+          totalCU: kpi.totalCU,
+          completedCalls: kpi.completedCalls,
+          incentive: kpi.incentive,
+        },
+        accounts,
+      });
+    } catch (error) {
+      console.error("Employee overview error:", error);
+      res.status(500).json({ error: "Failed to fetch employee overview" });
+    }
+  });
+
   return httpServer;
 }
