@@ -145,7 +145,7 @@ export function AppSidebar() {
           <img src={logoUrl} alt="Mirae Connext" className="h-8 w-8 object-contain" />
           <div className="flex flex-col">
             <span className="text-base font-semibold text-sidebar-foreground">Mirae Connext</span>
-            <span className="text-xs text-muted-foreground">LATAM Expertise. Global Impact</span>
+            <span className="text-xs text-muted-foreground">Knowledge Gateway</span>
           </div>
         </Link>
       </SidebarHeader>
