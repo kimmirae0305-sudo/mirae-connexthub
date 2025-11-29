@@ -4,9 +4,11 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Search, Briefcase, Filter, Eye, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Briefcase, Filter, Eye, X, FolderKanban } from "lucide-react";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/lib/auth";
+import { normalizeRole } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -111,12 +113,16 @@ const statuses = [
 
 export default function Projects() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  
+  // Check if user is RA (Research Associate)
+  const isRA = user && normalizeRole(user.role) === "ra";
 
   const { data: projects, isLoading } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
@@ -317,14 +323,21 @@ export default function Projects() {
     <div className="space-y-6 p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-foreground">Projects</h1>
+          <h1 className="text-3xl font-semibold text-foreground">
+            {isRA ? "My Projects" : "Projects"}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Manage project requests and track their progress through the workflow.
+            {isRA 
+              ? "View and manage projects you're assigned to."
+              : "Manage project requests and track their progress through the workflow."
+            }
           </p>
         </div>
-        <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-add-project">
-          <Plus className="h-4 w-4" /> New Project
-        </Button>
+        {!isRA && (
+          <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-add-project">
+            <Plus className="h-4 w-4" /> New Project
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-4">
@@ -357,7 +370,9 @@ export default function Projects() {
       <Card>
         <CardHeader className="pb-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-base font-medium">All Projects</CardTitle>
+            <CardTitle className="text-base font-medium">
+              {isRA ? "My Assigned Projects" : "All Projects"}
+            </CardTitle>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

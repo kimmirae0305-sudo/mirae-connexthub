@@ -514,20 +514,44 @@ export async function registerRoutes(
   // ==================== PROJECTS ====================
   app.get("/api/projects", authMiddleware, async (req, res) => {
     try {
-      const projects = await storage.getProjects();
+      const user = (req as any).user;
+      let projects = await storage.getProjects();
+      
+      // Filter by RA's assigned projects if user is RA
+      if (user?.role === "ra" || user?.role === "Research Associate") {
+        projects = projects.filter((p: any) => 
+          p.assignedRaId === user.id || 
+          (p.assignedRaIds && p.assignedRaIds.includes(user.id))
+        );
+      }
+      
       res.json(projects);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch projects" });
     }
   });
 
+  // Helper function to check if RA has access to project
+  function raHasProjectAccess(project: any, userId: number): boolean {
+    return project.assignedRaId === userId || 
+           (project.assignedRaIds && project.assignedRaIds.includes(userId));
+  }
+
   app.get("/api/projects/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      const user = (req as any).user;
       const project = await storage.getProject(id);
+      
       if (!project) {
         return res.status(404).json({ error: "Project not found" });
       }
+      
+      // Check RA access
+      if ((user?.role === "ra" || user?.role === "Research Associate") && !raHasProjectAccess(project, user.id)) {
+        return res.status(403).json({ error: "Access denied: You are not assigned to this project" });
+      }
+      
       res.json(project);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch project" });
@@ -581,9 +605,15 @@ export async function registerRoutes(
   app.get("/api/projects/:id/detail", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      const user = (req as any).user;
       const project = await storage.getProject(id);
       if (!project) {
         return res.status(404).json({ error: "Project not found" });
+      }
+      
+      // Check RA access
+      if ((user?.role === "ra" || user?.role === "Research Associate") && !raHasProjectAccess(project, user.id)) {
+        return res.status(403).json({ error: "Access denied: You are not assigned to this project" });
       }
 
       // Fetch related data
