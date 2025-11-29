@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, FileQuestion, GripVertical } from "lucide-react";
+import { Plus, Pencil, Trash2, FileQuestion } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,7 +57,7 @@ const questionFormSchema = z.object({
 
 type QuestionFormData = z.infer<typeof questionFormSchema>;
 
-export default function Vetting() {
+export default function InsightHub() {
   const { toast } = useToast();
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -177,9 +177,9 @@ export default function Vetting() {
     <div className="space-y-6 p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-foreground">Vetting Questions</h1>
+          <h1 className="text-3xl font-semibold text-foreground">Insight Hub</h1>
           <p className="text-sm text-muted-foreground">
-            Create and manage vetting questions for each project.
+            Create and manage screening insights for each project.
           </p>
         </div>
         <Button
@@ -225,7 +225,7 @@ export default function Vetting() {
         <EmptyState
           icon={FileQuestion}
           title="No projects available"
-          description="Create a project first before adding vetting questions."
+          description="Create a project first before adding screening questions."
         />
       ) : selectedProjectId ? (
         <Card>
@@ -242,7 +242,7 @@ export default function Vetting() {
               <EmptyState
                 icon={FileQuestion}
                 title="No questions yet"
-                description="Add vetting questions for this project."
+                description="Add screening questions for this project."
                 action={
                   <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-add-first-question">
                     <Plus className="h-4 w-4" /> Add Question
@@ -308,8 +308,8 @@ export default function Vetting() {
           {Object.entries(groupedQuestions || {}).length === 0 ? (
             <EmptyState
               icon={FileQuestion}
-              title="No vetting questions yet"
-              description="Add vetting questions to any of your projects."
+              title="No screening questions yet"
+              description="Add screening questions to any of your projects."
               action={
                 <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-add-first-question-all">
                   <Plus className="h-4 w-4" /> Add Question
@@ -383,12 +383,12 @@ export default function Vetting() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editingQuestion ? "Edit Question" : "Add Vetting Question"}
+              {editingQuestion ? "Edit Question" : "Add Question"}
             </DialogTitle>
             <DialogDescription>
               {editingQuestion
                 ? "Update the question details."
-                : "Create a new vetting question for the project."}
+                : "Create a new screening question for the project."}
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
@@ -429,7 +429,7 @@ export default function Vetting() {
                     <FormLabel>Question *</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder="Enter your vetting question..."
+                        placeholder="Enter your screening question..."
                         className="resize-none"
                         rows={3}
                         {...field}

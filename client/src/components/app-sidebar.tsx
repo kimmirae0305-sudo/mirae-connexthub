@@ -65,10 +65,10 @@ const mainNavItems: NavItem[] = [
 
 const managementItems: NavItem[] = [
   {
-    title: "Vetting Questions",
-    url: "/vetting",
+    title: "Insight Hub",
+    url: "/insight-hub",
     icon: FileQuestion,
-    pageKey: "vetting",
+    pageKey: "insight-hub",
   },
   {
     title: "Assignments",

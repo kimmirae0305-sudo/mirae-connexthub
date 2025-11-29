@@ -13,7 +13,7 @@ import Projects from "@/pages/projects";
 import ProjectDetail from "@/pages/project-detail";
 import Experts from "@/pages/experts";
 import Clients from "@/pages/clients";
-import Vetting from "@/pages/vetting";
+import InsightHub from "@/pages/insight-hub";
 import Assignments from "@/pages/assignments";
 import Consultations from "@/pages/consultations";
 import Usage from "@/pages/usage";
@@ -76,8 +76,8 @@ function Router() {
       <Route path="/clients">
         <MainLayout><Clients /></MainLayout>
       </Route>
-      <Route path="/vetting">
-        <MainLayout><Vetting /></MainLayout>
+      <Route path="/insight-hub">
+        <MainLayout><InsightHub /></MainLayout>
       </Route>
       <Route path="/assignments">
         <MainLayout><Assignments /></MainLayout>
