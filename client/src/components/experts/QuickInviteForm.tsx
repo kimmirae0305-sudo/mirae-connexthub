@@ -93,7 +93,10 @@ export function QuickInviteForm({ projectId, onSuccess, onCancel }: QuickInviteF
       const fullUrl = `${window.location.origin}${inviteUrl}`;
       await navigator.clipboard.writeText(fullUrl);
       setCopiedLink(true);
-      toast({ title: "Invite link copied to clipboard" });
+      toast({ 
+        title: "Invite link copied",
+        description: "Link copied to clipboard and ready to share"
+      });
       setTimeout(() => setCopiedLink(false), 2000);
     }
   };

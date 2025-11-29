@@ -932,6 +932,9 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Candidate name is required" });
       }
 
+      // Determine candidate contact (prefer email, then phone, then linkedin)
+      const candidateContact = email || phoneNumber || linkedinUrl || null;
+
       // Generate unique invite token
       const token = crypto.randomBytes(32).toString("hex");
       const link = await storage.createExpertInvitationLink({
@@ -940,7 +943,7 @@ export async function registerRoutes(
         inviteType: "quick",
         candidateName,
         candidateEmail: email || null,
-        status: "pending",
+        status: "pending_onboarding",
         recruitedBy: user?.email || "system",
         raId: user?.role === "ra" || user?.role === "Research Associate" ? user.id : null,
         isActive: true,
@@ -952,13 +955,14 @@ export async function registerRoutes(
         projectId,
         userId: user?.id,
         activityType: "quick_invite_created",
-        description: `Generated quick invite link for ${candidateName}`,
+        description: `Generated quick invite link for ${candidateName} (Contact: ${candidateContact})`,
       });
 
-      const inviteUrl = `/expert/project-invite/${token}`;
+      const inviteUrl = `/invite/onboarding/${token}`;
       res.status(201).json({
         link,
         inviteUrl,
+        token,
         message: "Quick invite link generated successfully",
       });
     } catch (error) {
