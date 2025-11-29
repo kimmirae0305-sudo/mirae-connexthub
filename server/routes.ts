@@ -1138,15 +1138,51 @@ export async function registerRoutes(
   app.post("/api/project-experts/:id/invite", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const assignment = await storage.updateProjectExpert(id, {
-        status: "invited",
-        invitedAt: new Date(),
-      });
+      
+      // Get assignment, expert, and project data
+      const assignment = await storage.getProjectExpert(id);
       if (!assignment) {
         return res.status(404).json({ error: "Assignment not found" });
       }
-      res.json(assignment);
+      
+      const expert = await storage.getExpert(assignment.expertId);
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+      
+      const project = await storage.getProject(assignment.projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+      
+      // Get vetting questions for this project
+      const vqs = await storage.getVettingQuestionsByProject(assignment.projectId);
+      
+      // Create or get invitation link
+      const token = crypto.randomBytes(16).toString("hex");
+      const baseUrl = process.env.BASE_URL || "http://localhost:5000";
+      const invitationUrl = `${baseUrl}/expert/project-invite/${assignment.projectId}/ra/${token}`;
+      
+      // Send email
+      await sendExpertInvitationEmail({
+        expertName: expert.name,
+        expertEmail: expert.email,
+        projectName: project.name,
+        clientName: project.clientName,
+        industry: project.industry,
+        invitationUrl,
+        vettingQuestionsCount: vqs.length,
+      });
+      
+      // Update status to invited
+      const updatedAssignment = await storage.updateProjectExpert(id, {
+        status: "invited",
+        invitedAt: new Date(),
+      });
+      
+      res.json(updatedAssignment);
     } catch (error) {
+      console.error("Failed to send invitation:", error);
       res.status(500).json({ error: "Failed to send invitation" });
     }
   });
