@@ -1,0 +1,200 @@
+I want to refactor the Project + Vetting Questions flow to match a real Expert Network PMS.
+
+High-level goal:
+- Each project can have multiple “Angles”.
+- Each Angle has its own pre-questionnaire / vetting questions (VQ).
+- The PM manages Angles and VQs directly inside the Project Detail page.
+- Under the project, the PM attaches experts and can see which angle(s) they are mapped to.
+
+Please implement the following.
+
+--------------------------------------------------
+1) DATA MODEL – ANGLES & VQ
+--------------------------------------------------
+
+Introduce an Angle (or ProjectAngle) entity:
+
+- id
+- projectId
+- title           (e.g. “Battery supply in Latin America”, “Semi capex outlook”)
+- description     (optional: short explanation of the angle)
+- orderIndex      (for display ordering)
+- createdAt, updatedAt
+
+Each Angle has its own vetting questions list.
+
+If we already have a Vetting Question or Insight model, link it to Angle:
+
+- vettingQuestions:
+  - id
+  - projectId
+  - angleId
+  - questionText
+  - questionType (text, yes/no, scale, etc. – simple text is enough for MVP)
+  - orderIndex
+
+If a global “Insight Hub” exists, refactor it so that it reads from this structure:
+- Project → multiple Angles → multiple VQs per Angle.
+
+--------------------------------------------------
+2) PROJECT DETAIL – ANGLES + VQ SECTION
+--------------------------------------------------
+
+On the Project Detail page, add a card at the top that looks conceptually like this:
+
+[ Client ]
+- Client name (read-only)
+- Client email (optional)
+- Client Request Details (free text field)
+- Main PM (drop-down)
+- RA (multi-select or text, at least show assigned RAs)
+- “Angles” description area
+
+Below that, add an “Angles & VQ” box similar to the reference:
+
+- Title: “Angles”
+- Show a bullet list or chips for each Angle:
+  - Angle title
+  - Short description (tooltip or smaller text)
+- Next to the list, have buttons:
+  - “+ Add Angle”
+  - For each Angle: “Edit VQ”
+
+Behavior:
+
+- “+ Add Angle” opens a modal:
+  - Fields:
+    - Angle Title (required)
+    - Description (optional)
+  - On save: creates a new Angle for that project.
+
+- Clicking on any Angle row or its “Edit VQ” button opens a modal or side panel:
+
+  Modal content:
+  - Header: Angle title + project name
+  - Subtext: angle description
+  - VQ list editor:
+    - List all existing VQ items for this angle.
+    - For each question:
+      - Question text field
+      - Reorder / delete
+    - “Add Question” button to append new question rows.
+  - Save / Cancel buttons.
+
+- Persist the VQ list for that Angle in the backend.
+
+--------------------------------------------------
+3) ATTACHED EXPERTS – ANGLE AWARE
+--------------------------------------------------
+
+Under the Angles/VQ area, keep a section called “Attached Experts” (or “Attached Advisors”) similar to the reference UI:
+
+Table columns idea:
+- [checkbox] (for bulk actions)
+- Expert name
+- Angle(s) (tags of which Angle(s) they are relevant for)
+- Rate (if available)
+- Invite status (Not Invited / Invited / Accepted / Declined)
+- Actions (invite, open profile, remove)
+
+Requirements:
+
+- An expert can be attached to one or multiple Angles.
+- When attaching an expert to the project, allow the PM to choose which Angle(s) this expert is relevant for:
+  - e.g. in the “Assign” flow or a small modal: multi-select of Angles.
+
+- In the table:
+  - Show Angle tags per expert.
+  - Allow filter by Angle (dropdown at the top: “Filter by Angle”).
+
+Buttons at the bottom of the attached experts table (similar to the mock-up):
+- “Invite” (uses the new invite flow we already defined: project-specific link + email/WhatsApp templates).
+- “Search” (open panel to search in the existing Expert database and attach selected experts to this project).
+
+--------------------------------------------------
+4) LINK BETWEEN ANGLES, VQ, AND EXPERT INVITES
+--------------------------------------------------
+
+The existing invite mechanism (project-expert token, /expert/project-invite/:token) should be angle-aware.
+
+Update the model that stores the project-expert link (e.g. ProjectExpertLink) to include:
+
+- angleIds: array of angle IDs that this invite is about (even if it’s just one Angle for now).
+
+When generating the invite view for the expert:
+
+- On /expert/project-invite/:token:
+  - Show:
+    - Project title
+    - The list of Angles the expert was attached to.
+  - For each Angle, show the corresponding VQ block:
+    - Title of the Angle
+    - List of questions for that Angle
+  - The expert can answer the questions (sample answers) and accept/decline.
+
+This way:
+- If a project has multiple Angles and the expert is only relevant for one, they see just the relevant Angle & questionnaire.
+- In the future, we can support multiple angles per invite without changing the core design.
+
+--------------------------------------------------
+5) UI INTEGRATION – REPLACING SEPARATE “ASSIGNMENTS” PAGE
+--------------------------------------------------
+
+We previously had a separate “Assignments” module under Management.
+
+Refactor as follows:
+
+- Move all expert assignment logic into the Project Detail page:
+  - Angles + VQ
+  - Attached Experts
+  - Invite / status tracking
+
+- Remove the standalone “Assignments” item from the sidebar,
+  OR keep a read-only “Assignments Overview” that simply aggregates data from projects
+  (but no creation/editing actions there).
+
+All expert sourcing and assignment actions should be performed inside:
+Projects → Project Detail.
+
+--------------------------------------------------
+6) PERMISSIONS
+--------------------------------------------------
+
+- Admin:
+  - Full access to create/edit Angles, VQ, and expert attachments across all projects.
+- PM (project owner):
+  - Can create/edit Angles for their projects.
+  - Can manage VQ for those Angles.
+  - Can attach experts to project and map them to Angles.
+  - Can send invites (email/WhatsApp) to experts.
+- RA:
+  - Can view project Angles/VQ for projects they are assigned to.
+  - Can see which experts are attached for those projects.
+  - (Their own RA invite flow for new experts is handled separately.)
+- Other roles:
+  - Read-only as needed, no editing of Angles/VQ.
+
+--------------------------------------------------
+7) DOCUMENTATION
+--------------------------------------------------
+
+After implementing, please document:
+
+- Data schema:
+  - How Project, Angle, VQ, and ProjectExpertLink relate to each other.
+- Where in the code the Project Detail page is defined.
+- How to:
+  - Add/edit Angles.
+  - Configure VQ per Angle.
+  - Attach experts and map them to Angles.
+  - Filter experts by Angle.
+- Confirm that:
+  - The new UI flow matches this sequence:
+
+    1) Client sends request with vetting questions and possibly multiple angles.
+    2) PM creates Project in the PMS.
+    3) PM defines one or more Angles inside that project and sets up a separate VQ list for each Angle.
+    4) PM searches the database for candidates and attaches them to the project, mapping each to one or more Angles.
+    5) PM invites those experts to the project; each invite shows the relevant Angle(s) and the corresponding VQ(s).
+
+This is the target flow.

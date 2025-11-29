@@ -110,21 +110,35 @@ export const experts = pgTable("experts", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Vetting Questions table
+// Project Angles table (groups of vetting questions per project)
+export const projectAngles = pgTable("project_angles", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  orderIndex: integer("order_index").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Vetting Questions table (linked to Angles)
 export const vettingQuestions = pgTable("vetting_questions", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  angleId: integer("angle_id").references(() => projectAngles.id, { onDelete: "cascade" }), // Optional: null = project-level, set = angle-specific
   question: text("question").notNull(),
+  questionType: text("question_type").notNull().default("text"), // text, yes_no, scale
   orderIndex: integer("order_index").notNull().default(0),
   isRequired: boolean("is_required").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Project-Expert Assignments table (Extended with invitation flow)
+// Project-Expert Assignments table (Extended with invitation flow and angle support)
 export const projectExperts = pgTable("project_experts", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   expertId: integer("expert_id").notNull().references(() => experts.id, { onDelete: "cascade" }),
+  angleIds: integer("angle_ids").array(), // Array of angle IDs this expert is relevant for
   status: text("status").notNull().default("assigned"), // assigned, invited, accepted, declined, client_selected, scheduled, completed
   invitationStatus: text("invitation_status").notNull().default("not_invited"), // not_invited, invited, opened, accepted, declined
   pipelineStatus: text("pipeline_status").notNull().default("interested"), // interested, shortlisted, accepted, declined, completed
@@ -241,11 +255,20 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
     references: [users.id],
     relationName: "assignedRa",
   }),
+  angles: many(projectAngles),
   vettingQuestions: many(vettingQuestions),
   projectExperts: many(projectExperts),
   callRecords: many(callRecords),
   usageRecords: many(usageRecords),
   invitationLinks: many(expertInvitationLinks),
+}));
+
+export const projectAnglesRelations = relations(projectAngles, ({ one, many }) => ({
+  project: one(projects, {
+    fields: [projectAngles.projectId],
+    references: [projects.id],
+  }),
+  vettingQuestions: many(vettingQuestions),
 }));
 
 export const expertsRelations = relations(experts, ({ one, many }) => ({
@@ -263,6 +286,10 @@ export const vettingQuestionsRelations = relations(vettingQuestions, ({ one }) =
   project: one(projects, {
     fields: [vettingQuestions.projectId],
     references: [projects.id],
+  }),
+  angle: one(projectAngles, {
+    fields: [vettingQuestions.angleId],
+    references: [projectAngles.id],
   }),
 }));
 
@@ -406,6 +433,12 @@ export const insertExpertSchema = createInsertSchema(experts).omit({
   sourcedAt: coerceDate.optional(),
 });
 
+export const insertProjectAngleSchema = createInsertSchema(projectAngles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertVettingQuestionSchema = createInsertSchema(vettingQuestions).omit({
   id: true,
   createdAt: true,
@@ -470,6 +503,9 @@ export type InsertProject = z.infer<typeof insertProjectSchema>;
 
 export type Expert = typeof experts.$inferSelect;
 export type InsertExpert = z.infer<typeof insertExpertSchema>;
+
+export type ProjectAngle = typeof projectAngles.$inferSelect;
+export type InsertProjectAngle = z.infer<typeof insertProjectAngleSchema>;
 
 export type VettingQuestion = typeof vettingQuestions.$inferSelect;
 export type InsertVettingQuestion = z.infer<typeof insertVettingQuestionSchema>;
