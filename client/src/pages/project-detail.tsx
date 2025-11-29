@@ -1161,92 +1161,32 @@ export default function ProjectDetail() {
         <TabsContent value="existing-experts" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Search className="h-4 w-4" />
-                Search Internal Expert Database
-              </CardTitle>
-              <CardDescription>
-                Search and invite experts from the internal database
-              </CardDescription>
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Search className="h-4 w-4" />
+                    Search Internal Expert Database
+                  </CardTitle>
+                  <CardDescription>
+                    Search and invite experts from the internal database
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="default"
+                  onClick={() => setIsExpertSearchModalOpen(true)}
+                  data-testid="button-search-add-experts"
+                >
+                  <Search className="h-4 w-4 mr-2" />
+                  Search & Add
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">Use the "Search & Add" button above to find and add experts from the database</p>
-
-              {selectedExperts.size > 0 && (
-                <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                  <span className="text-sm">{selectedExperts.size} expert(s) selected</span>
-                  <Button
-                    onClick={handleAttachExperts}
-                    disabled={attachExpertsMutation.isPending}
-                    data-testid="button-attach-experts"
-                  >
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    {attachExpertsMutation.isPending ? "Attaching..." : "Add to Project"}
-                  </Button>
-                </div>
-              )}
-
-              {!expertsToShow || expertsToShow.length === 0 ? (
-                <EmptyState
-                  icon={Users}
-                  title="No experts found"
-                  description="Try adjusting your search criteria or add experts first."
-                />
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12"></TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Company</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Country</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Rate</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {expertsToShow.map((expert) => {
-                        const isAssigned = assignedExpertIds.has(expert.id);
-                        return (
-                          <TableRow key={expert.id} data-testid={`row-expert-${expert.id}`}>
-                            <TableCell>
-                              <Checkbox
-                                checked={selectedExperts.has(expert.id)}
-                                onCheckedChange={(checked) =>
-                                  handleSelectExpert(expert.id, checked as boolean)
-                                }
-                                disabled={isAssigned}
-                                data-testid={`checkbox-expert-${expert.id}`}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <div>
-                                <p className="font-medium">{expert.name}</p>
-                                <p className="text-xs text-muted-foreground">{expert.jobTitle}</p>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-muted-foreground">{expert.company || "-"}</TableCell>
-                            <TableCell className="text-muted-foreground">
-                              {expert.country || expert.timezone || "-"}
-                            </TableCell>
-                            <TableCell className="font-mono text-sm">
-                              ${parseFloat(expert.hourlyRate).toFixed(0)}/hr
-                            </TableCell>
-                            <TableCell>
-                              {isAssigned ? (
-                                <Badge variant="secondary">In Project</Badge>
-                              ) : (
-                                <StatusBadge status={expert.status} type="expert" />
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+            <CardContent>
+              <EmptyState
+                icon={Users}
+                title="No experts found"
+                description="Click 'Search & Add' to find and add experts from your database."
+              />
             </CardContent>
           </Card>
 
