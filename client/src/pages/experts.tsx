@@ -74,10 +74,19 @@ const expertFormSchema = z.object({
   workHistory: z.array(z.object({
     company: z.string().min(1, "Company name required"),
     jobTitle: z.string().min(1, "Job title required"),
-    fromYear: z.coerce.number(),
-    toYear: z.coerce.number(),
-  })).default([]),
-});
+    fromYear: z.coerce.number().min(1900, "Year must be 1900 or later"),
+    toYear: z.coerce.number().min(1900, "Year must be 1900 or later"),
+  }).refine(
+    (exp) => exp.fromYear <= exp.toYear,
+    { message: "Start year must be before end year", path: ["toYear"] }
+  )).default([]),
+}).refine(
+  (data) => {
+    // Ensure workHistory always exists (empty array if not provided)
+    return data.workHistory !== undefined;
+  },
+  { message: "Work history must be an array" }
+);
 
 type ExpertFormData = z.infer<typeof expertFormSchema>;
 
@@ -641,6 +650,130 @@ export default function Experts() {
                 />
               </div>
 
+              <div className="space-y-4 border-t border-b py-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-base">Work History</h3>
+                    <p className="text-xs text-muted-foreground mt-1">Employment timeline and job roles</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const currentYear = new Date().getFullYear();
+                      setWorkHistory([
+                        ...workHistory,
+                        {
+                          company: "",
+                          jobTitle: "",
+                          fromYear: currentYear,
+                          toYear: currentYear,
+                        },
+                      ]);
+                    }}
+                    data-testid="button-add-work-history"
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add Experience
+                  </Button>
+                </div>
+
+                {workHistory.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">
+                    No work history added yet. Click "Add Experience" to get started.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Company</TableHead>
+                        <TableHead>Job Title</TableHead>
+                        <TableHead>From Year</TableHead>
+                        <TableHead>To Year</TableHead>
+                        <TableHead className="w-10"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {workHistory.map((exp, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell>
+                            <Input
+                              value={exp.company}
+                              onChange={(e) => {
+                                const updated = [...workHistory];
+                                updated[idx].company = e.target.value;
+                                setWorkHistory(updated);
+                              }}
+                              placeholder="e.g. Acme Corp"
+                              className="border-0 p-1 h-8"
+                              data-testid={`input-work-company-${idx}`}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={exp.jobTitle}
+                              onChange={(e) => {
+                                const updated = [...workHistory];
+                                updated[idx].jobTitle = e.target.value;
+                                setWorkHistory(updated);
+                              }}
+                              placeholder="e.g. Senior Manager"
+                              className="border-0 p-1 h-8"
+                              data-testid={`input-work-jobtitle-${idx}`}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={exp.fromYear}
+                              onChange={(e) => {
+                                const updated = [...workHistory];
+                                updated[idx].fromYear = parseInt(e.target.value) || new Date().getFullYear();
+                                setWorkHistory(updated);
+                              }}
+                              placeholder="2020"
+                              className="border-0 p-1 w-24 h-8"
+                              data-testid={`input-work-fromyear-${idx}`}
+                              min="1900"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={exp.toYear}
+                              onChange={(e) => {
+                                const updated = [...workHistory];
+                                updated[idx].toYear = parseInt(e.target.value) || new Date().getFullYear();
+                                setWorkHistory(updated);
+                              }}
+                              placeholder="2024"
+                              className="border-0 p-1 w-24 h-8"
+                              data-testid={`input-work-toyear-${idx}`}
+                              min="1900"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setWorkHistory(workHistory.filter((_, i) => i !== idx));
+                              }}
+                              data-testid={`button-remove-work-history-${idx}`}
+                              className="h-8 w-8"
+                            >
+                              <Trash2 className="w-4 h-4 text-destructive" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+
               <FormField
                 control={form.control}
                 name="linkedinUrl"
@@ -678,121 +811,6 @@ export default function Experts() {
                   </FormItem>
                 )}
               />
-
-              <div className="space-y-4 border-t pt-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-base">Work History</h3>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setWorkHistory([
-                        ...workHistory,
-                        {
-                          company: "",
-                          jobTitle: "",
-                          fromYear: new Date().getFullYear(),
-                          toYear: new Date().getFullYear(),
-                        },
-                      ]);
-                    }}
-                    data-testid="button-add-work-history"
-                  >
-                    <Plus className="w-4 h-4 mr-1" />
-                    Add Experience
-                  </Button>
-                </div>
-
-                {workHistory.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-2">
-                    No work history added yet.
-                  </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Company</TableHead>
-                        <TableHead>Job Title</TableHead>
-                        <TableHead>From</TableHead>
-                        <TableHead>To</TableHead>
-                        <TableHead className="w-10"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {workHistory.map((exp, idx) => (
-                        <TableRow key={idx}>
-                          <TableCell>
-                            <Input
-                              value={exp.company}
-                              onChange={(e) => {
-                                const updated = [...workHistory];
-                                updated[idx].company = e.target.value;
-                                setWorkHistory(updated);
-                              }}
-                              placeholder="Company name"
-                              className="border-0 p-0 h-8"
-                              data-testid={`input-work-company-${idx}`}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              value={exp.jobTitle}
-                              onChange={(e) => {
-                                const updated = [...workHistory];
-                                updated[idx].jobTitle = e.target.value;
-                                setWorkHistory(updated);
-                              }}
-                              placeholder="Job title"
-                              className="border-0 p-0 h-8"
-                              data-testid={`input-work-jobtitle-${idx}`}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={exp.fromYear}
-                              onChange={(e) => {
-                                const updated = [...workHistory];
-                                updated[idx].fromYear = parseInt(e.target.value) || 0;
-                                setWorkHistory(updated);
-                              }}
-                              className="border-0 p-0 w-20 h-8"
-                              data-testid={`input-work-fromyear-${idx}`}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={exp.toYear}
-                              onChange={(e) => {
-                                const updated = [...workHistory];
-                                updated[idx].toYear = parseInt(e.target.value) || 0;
-                                setWorkHistory(updated);
-                              }}
-                              className="border-0 p-0 w-20 h-8"
-                              data-testid={`input-work-toyear-${idx}`}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setWorkHistory(workHistory.filter((_, i) => i !== idx));
-                              }}
-                              data-testid={`button-remove-work-history-${idx}`}
-                            >
-                              <Trash2 className="w-4 h-4 text-destructive" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </div>
 
               <DialogFooter>
                 <Button
