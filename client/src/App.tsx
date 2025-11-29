@@ -23,6 +23,7 @@ import ExpertInvite from "@/pages/expert-invite";
 import ExpertOnboarding from "@/pages/expert-onboarding";
 import ExpertProjectInvite from "@/pages/expert-project-invite";
 import QuickInviteOnboarding from "@/pages/quick-invite-onboarding";
+import QuickInviteDecision from "@/pages/quick-invite-decision";
 import ExpertProfile from "@/pages/expert-profile";
 import Invites from "@/pages/invites";
 import ChangePassword from "@/pages/change-password";
@@ -85,6 +86,9 @@ function Router() {
       </Route>
       <Route path="/invite/onboarding/:token">
         {(params) => <QuickInviteOnboarding />}
+      </Route>
+      <Route path="/invite/decide/:token">
+        {(params) => <QuickInviteDecision />}
       </Route>
       <Route path="/">
         <MainLayout><Dashboard /></MainLayout>

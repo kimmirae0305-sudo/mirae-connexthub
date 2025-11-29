@@ -959,11 +959,11 @@ export async function registerRoutes(
     }
   });
 
-  // PUBLIC: Submit quick invite onboarding form
-  app.post("/api/quick-invite/:token/submit", async (req, res) => {
+  // PUBLIC: Submit quick invite onboarding form (Step 1)
+  app.post("/api/quick-invite/:token/onboard", async (req, res) => {
     try {
       const { token } = req.params;
-      const { firstName, lastName, email, phone, sampleAnswers } = req.body;
+      const { firstName, lastName, email, phone } = req.body;
 
       const link = await storage.getExpertInvitationLinkByToken(token);
       if (!link || link.status !== "pending_onboarding" || !link.isActive) {
@@ -994,54 +994,9 @@ export async function registerRoutes(
         });
       }
 
-      // Create or get project expert association with "interested" status
-      const existingProjectExperts = await db.select()
-        .from(projectExperts)
-        .where(
-          and(
-            eq(projectExperts.projectId, link.projectId!),
-            eq(projectExperts.expertId, expert.id)
-          )
-        )
-        .limit(1);
-      
-      let projectExpert = existingProjectExperts[0];
-
-      if (!projectExpert) {
-        projectExpert = await storage.createProjectExpert({
-          projectId: link.projectId,
-          expertId: expert.id,
-          status: "interested",
-          sourceType: "quick_invite",
-          sourcedByRaId: link.raId,
-          pipelineStatus: "interested",
-        });
-      } else {
-        // Update status to interested
-        await storage.updateProjectExpert(projectExpert.id, {
-          status: "interested",
-          pipelineStatus: "interested",
-        });
-      }
-
-      // Store sample answers if provided
-      if (sampleAnswers && Array.isArray(sampleAnswers)) {
-        for (const answer of sampleAnswers) {
-          if (answer.answer && answer.answer.trim()) {
-            // Store as vetting answer - you may need to extend the schema for this
-            await storage.createProjectActivity({
-              projectId: link.projectId,
-              expertId: expert.id,
-              activityType: "vq_answered",
-              description: `Expert provided answer to vetting question ${answer.questionId}`,
-            });
-          }
-        }
-      }
-
-      // Update invitation link status
+      // Update invitation link status to "onboarded" (waiting for decision)
       await db.update(expertInvitationLinks)
-        .set({ status: "accepted" })
+        .set({ status: "onboarded" })
         .where(eq(expertInvitationLinks.token, token));
 
       // Log activity
@@ -1049,17 +1004,153 @@ export async function registerRoutes(
         projectId: link.projectId,
         expertId: expert.id,
         activityType: "expert_onboarded",
-        description: `Expert ${expert.name} onboarded via quick invite link`,
+        description: `Expert ${expert.name} completed onboarding via quick invite`,
       });
 
       res.json({
         success: true,
         expertId: expert.id,
-        message: "You have been successfully added to the project",
+        message: "Onboarding complete",
       });
     } catch (error) {
-      console.error("Error submitting quick invite:", error);
-      res.status(500).json({ error: "Failed to submit onboarding" });
+      console.error("Error during onboarding:", error);
+      res.status(500).json({ error: "Failed to save profile" });
+    }
+  });
+
+  // PUBLIC: Fetch decision page data
+  app.get("/api/quick-invite/:token/decision", async (req, res) => {
+    try {
+      const { token } = req.params;
+      
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      if (!link || link.status !== "onboarded" || !link.isActive) {
+        return res.status(404).json({ error: "Invalid or expired invite link" });
+      }
+
+      if (!link.projectId) {
+        return res.status(400).json({ error: "Project not found" });
+      }
+
+      const project = await storage.getProject(link.projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const vettingQuestions = await storage.getVettingQuestionsByProject(link.projectId);
+
+      res.json({
+        project: {
+          id: project.id,
+          name: project.name,
+          clientName: project.clientName,
+          industry: project.industry,
+          projectOverview: project.projectOverview,
+        },
+        vettingQuestions: vettingQuestions.map((q) => ({
+          id: q.id,
+          question: q.question,
+          isRequired: q.isRequired,
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching decision data:", error);
+      res.status(500).json({ error: "Failed to fetch project details" });
+    }
+  });
+
+  // PUBLIC: Submit decision (Accept/Decline)
+  app.post("/api/quick-invite/:token/decide", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const { decision, sampleAnswers } = req.body;
+
+      if (!["accepted", "declined"].includes(decision)) {
+        return res.status(400).json({ error: "Invalid decision" });
+      }
+
+      const link = await storage.getExpertInvitationLinkByToken(token);
+      if (!link || link.status !== "onboarded" || !link.isActive) {
+        return res.status(404).json({ error: "This invitation has already been completed or is no longer valid" });
+      }
+
+      if (!link.projectId) {
+        return res.status(400).json({ error: "Project not found" });
+      }
+
+      // Get expert by email from link candidate data
+      let expert = link.candidateEmail ? await storage.getExpertByEmail(link.candidateEmail) : null;
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+
+      // Create or update project expert with final status
+      const existingProjectExperts = await db.select()
+        .from(projectExperts)
+        .where(
+          and(
+            eq(projectExperts.projectId, link.projectId),
+            eq(projectExperts.expertId, expert.id)
+          )
+        )
+        .limit(1);
+      
+      let projectExpert = existingProjectExperts[0];
+
+      const finalStatus = decision === "accepted" ? "interested" : "declined";
+      const finalPipelineStatus = decision === "accepted" ? "interested" : "declined";
+
+      if (!projectExpert) {
+        projectExpert = await storage.createProjectExpert({
+          projectId: link.projectId,
+          expertId: expert.id,
+          status: finalStatus,
+          sourceType: "quick_invite",
+          sourcedByRaId: link.raId,
+          pipelineStatus: finalPipelineStatus,
+        });
+      } else {
+        await storage.updateProjectExpert(projectExpert.id, {
+          status: finalStatus,
+          pipelineStatus: finalPipelineStatus,
+        });
+      }
+
+      // Store sample answers if accepted
+      if (decision === "accepted" && sampleAnswers && Object.keys(sampleAnswers).length > 0) {
+        for (const [questionId, answer] of Object.entries(sampleAnswers)) {
+          if (answer && (answer as string).trim()) {
+            await storage.createProjectActivity({
+              projectId: link.projectId,
+              expertId: expert.id,
+              activityType: "vq_answered",
+              description: `Expert provided sample answer to question ${questionId}`,
+            });
+          }
+        }
+      }
+
+      // Update invitation link status
+      await db.update(expertInvitationLinks)
+        .set({ status: decision === "accepted" ? "accepted" : "declined" })
+        .where(eq(expertInvitationLinks.token, token));
+
+      // Log activity
+      await storage.createProjectActivity({
+        projectId: link.projectId,
+        expertId: expert.id,
+        activityType: decision === "accepted" ? "expert_accepted" : "expert_declined",
+        description: `Expert ${decision === "accepted" ? "accepted" : "declined"} invitation to project`,
+      });
+
+      res.json({
+        success: true,
+        decision,
+        message: decision === "accepted" ? "Welcome to the project!" : "Decision noted",
+      });
+    } catch (error) {
+      console.error("Error submitting decision:", error);
+      res.status(500).json({ error: "Failed to submit decision" });
     }
   });
 

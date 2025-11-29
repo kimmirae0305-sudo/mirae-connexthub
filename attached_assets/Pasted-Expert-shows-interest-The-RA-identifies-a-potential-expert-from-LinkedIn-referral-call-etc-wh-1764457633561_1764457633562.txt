@@ -1,0 +1,82 @@
+Expert shows interest
+
+The RA identifies a potential expert (from LinkedIn, referral, call, etc.) who verbally or informally confirms interest in participating in a project.
+
+RA generates an invite link with minimal data
+
+Inside the RA-Sourced Experts Pipeline for a specific project, the RA can open a simple “Invite New Expert” modal.
+
+The RA only needs to input minimal information, such as:
+
+Expert name (required)
+
+LinkedIn URL and/or email and/or phone (at least one contact field required)
+
+When the RA clicks “Generate Invite Link”, the system:
+
+Creates a unique invite token for that expert + project + RA
+
+Stores the candidate + token in the database with status = pending_onboarding
+
+Returns a shareable URL (e.g. /invite/onboarding/:token) that the RA can copy and send to the expert.
+
+Expert onboarding → project details → Accept / Decline
+
+When the expert clicks the invite URL:
+
+Step 3A – Onboarding Form
+
+The expert first lands on the Onboarding form (multi-language: EN / PT-BR / ES).
+
+The form includes:
+
+Basic profile fields (name, title, company, location, experience, etc.)
+
+Work history section
+
+LinkedIn URL, email, phone
+
+T&C and LGPD consent checkboxes, with links to the full documents
+
+The expert must complete onboarding and check the consent boxes, then click Continue.
+
+After a successful onboarding submit:
+
+The expert record is created/updated in the main Experts database.
+
+The invite token status becomes onboarded.
+
+Step 3B – Project Detail & Decision Page
+
+After onboarding, the expert is redirected automatically to a Project Detail page tied to that token’s project.
+
+This page shows:
+
+Project overview (client, industry, short description, key focus)
+
+Vetting Questions (VQs)
+
+Optional text area for “Your sample answers”
+
+Two clear action buttons:
+
+ACCEPT / I’m interested
+
+DECLINE / Not available
+
+When the expert clicks:
+
+ACCEPT → invitation status becomes Interested, VQ answers saved, and the expert appears in the RA-Sourced Experts Pipeline for that project.
+
+DECLINE → status becomes Declined, also visible in the project view.
+
+🔐 Additional Requirements
+
+Every invite link must be unique per expert & project, not a shared static link.
+
+Tokens can only be used once; on reuse, show a message like “This invitation has already been completed or is no longer valid.”
+
+All of this is only available for RAs assigned to that project; Admin/PM flows remain unchanged.
+
+This 3-step flow is the core of how we want RA-sourced experts to enter the system.
+Please implement this end-to-end: invite generation → onboarding → project detail page with Accept/Decline.
