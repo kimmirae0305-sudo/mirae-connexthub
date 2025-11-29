@@ -21,12 +21,13 @@ import {
   projects,
   expertInvitationLinks,
   projectExperts,
+  users,
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
 import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles, hashPassword, comparePassword, type AuthRequest } from "./auth";
 import { insertClientSchema } from "@shared/schema";
-import { eq, and, gte, lt, sql } from "drizzle-orm";
+import { eq, and, gte, lt, sql, desc } from "drizzle-orm";
 import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
 import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
@@ -856,6 +857,7 @@ export async function registerRoutes(
         languages: canConsultInEnglish === "yes" ? ["English"] : [],
         status: "available" as const,
         sourcedByRaId,
+        sourcedAt: sourcedByRaId ? new Date() : undefined,
         pastEmployers: experiences?.map((e: any) => e.company) || [],
       };
 
@@ -978,7 +980,7 @@ export async function registerRoutes(
       let expert = await storage.getExpertByEmail(email);
       
       if (!expert) {
-        // Create new expert
+        // Create new expert with recruitment tracking
         const project = await storage.getProject(link.projectId);
         const industryValue = project?.industry || "General";
         expert = await storage.createExpert({
@@ -991,6 +993,13 @@ export async function registerRoutes(
           hourlyRate: "0",
           status: "available",
           sourcedByRaId: link.raId || undefined,
+          sourcedAt: link.raId ? new Date() : undefined,
+        });
+      } else if (link.raId && !expert.sourcedByRaId) {
+        // Update existing expert with RA tracking if they weren't recruited before
+        await storage.updateExpert(expert.id, {
+          sourcedByRaId: link.raId,
+          sourcedAt: new Date(),
         });
       }
 
@@ -3378,6 +3387,111 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Employee overview error:", error);
       res.status(500).json({ error: "Failed to fetch employee overview" });
+    }
+  });
+
+  // ==================== RA INCENTIVE ENDPOINTS ====================
+  
+  // GET /api/ra-incentives - Get all RAs incentive summary
+  app.get("/api/ra-incentives", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      
+      // Admin, PM, and finance can view all RA incentives
+      if (!["admin", "pm", "finance"].includes(user.role)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { fromDate, toDate } = req.query;
+      
+      const periodFromDate = fromDate ? new Date(fromDate as string) : undefined;
+      const periodToDate = toDate ? new Date(toDate as string) : undefined;
+
+      const summaries = await storage.getAllRaIncentiveSummary(periodFromDate, periodToDate);
+      
+      res.json({
+        period: {
+          fromDate: periodFromDate?.toISOString() || null,
+          toDate: periodToDate?.toISOString() || null,
+        },
+        incentivePerCallBRL: 250,
+        eligibilityWindowDays: 60,
+        summaries,
+      });
+    } catch (error) {
+      console.error("Error fetching RA incentives:", error);
+      res.status(500).json({ error: "Failed to fetch RA incentives" });
+    }
+  });
+
+  // GET /api/ra-incentives/:raId - Get detailed incentive info for specific RA
+  app.get("/api/ra-incentives/:raId", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const raId = parseInt(req.params.raId);
+
+      // RAs can only view their own incentives, admin/pm/finance can view all
+      if (user.role === "ra" && user.id !== raId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      if (!["admin", "pm", "finance", "ra"].includes(user.role)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { fromDate, toDate } = req.query;
+      
+      const periodFromDate = fromDate ? new Date(fromDate as string) : undefined;
+      const periodToDate = toDate ? new Date(toDate as string) : undefined;
+
+      const incentiveData = await storage.calculateRaIncentives(raId, periodFromDate, periodToDate);
+      
+      res.json({
+        period: {
+          fromDate: periodFromDate?.toISOString() || null,
+          toDate: periodToDate?.toISOString() || null,
+        },
+        incentivePerCallBRL: 250,
+        eligibilityWindowDays: 60,
+        ...incentiveData,
+      });
+    } catch (error) {
+      console.error("Error fetching RA incentive details:", error);
+      res.status(500).json({ error: "Failed to fetch RA incentive details" });
+    }
+  });
+
+  // GET /api/experts-with-recruiter - Get experts with their recruiter info
+  app.get("/api/experts-with-recruiter", authMiddleware, async (req, res) => {
+    try {
+      // Get all experts with recruiter info via a join
+      const expertsWithRecruiter = await db
+        .select({
+          id: experts.id,
+          name: experts.name,
+          email: experts.email,
+          phone: experts.phone,
+          expertise: experts.expertise,
+          industry: experts.industry,
+          company: experts.company,
+          jobTitle: experts.jobTitle,
+          yearsOfExperience: experts.yearsOfExperience,
+          hourlyRate: experts.hourlyRate,
+          status: experts.status,
+          createdAt: experts.createdAt,
+          sourcedByRaId: experts.sourcedByRaId,
+          sourcedAt: experts.sourcedAt,
+          recruiterName: users.fullName,
+          recruiterEmail: users.email,
+        })
+        .from(experts)
+        .leftJoin(users, eq(experts.sourcedByRaId, users.id))
+        .orderBy(desc(experts.createdAt));
+
+      res.json(expertsWithRecruiter);
+    } catch (error) {
+      console.error("Error fetching experts with recruiter:", error);
+      res.status(500).json({ error: "Failed to fetch experts" });
     }
   });
 

@@ -26,6 +26,7 @@ import QuickInviteOnboarding from "@/pages/quick-invite-onboarding";
 import QuickInviteDecision from "@/pages/quick-invite-decision";
 import ExpertProfile from "@/pages/expert-profile";
 import Invites from "@/pages/invites";
+import RaPerformance from "@/pages/ra-performance";
 import ChangePassword from "@/pages/change-password";
 import NotFound from "@/pages/not-found";
 
@@ -125,6 +126,12 @@ function Router() {
       </Route>
       <Route path="/invites">
         <MainLayout><Invites /></MainLayout>
+      </Route>
+      <Route path="/ra-performance">
+        <MainLayout><RaPerformance /></MainLayout>
+      </Route>
+      <Route path="/ra-performance/:raId">
+        <MainLayout><RaPerformance /></MainLayout>
       </Route>
       <Route>
         <MainLayout><NotFound /></MainLayout>

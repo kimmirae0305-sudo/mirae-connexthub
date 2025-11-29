@@ -1,0 +1,88 @@
+You are working on the existing Mirae Connext ENS app.
+
+Goal:
+Implement full tracking of RA-sourced experts and the incentive logic based on completed client calls.
+
+Business rules (must be strictly respected):
+1) When a new expert finishes onboarding (submits the onboarding form and is registered in the system), the RA who recruited this expert must be registered in the Experts data.
+2) For each expert, we must store:
+   - Who recruited the expert (RA user)
+   - When the expert was recruited (date-time)
+   This is required for KPI tracking.
+3) Incentive logic:
+   - Trigger: Incentive applies only when a “recruited expert” successfully completes a client call.
+   - Condition: Experts newly recruited by an RA must complete a consultation within 60 days from the recruitment date to be recognized as part of that RA’s performance.
+   - Rate: R$250 per completed call (only for RA-sourced experts that meet the condition above).
+
+Please do the following, using the current codebase structure and technology stack:
+
+A. Data model and database
+1) In the Experts model/table:
+   - Add a field like `recruitedById` (foreign key to the RA user who sourced the expert).
+   - Add a field like `recruitedAt` (DateTime).
+   - If there is already a similar field, standardize and reuse it instead of duplicating.
+2) Make sure there is a reliable link between:
+   - The RA who created the invitation or registration for the expert.
+   - The final Expert record.
+   For example:
+   - When an RA creates an expert invite, store `raId` in the invite record.
+   - When the expert finishes onboarding and the Expert record is created, copy `raId` into `Experts.recruitedById` and set `Experts.recruitedAt` to the onboarding completion time.
+3) Run the necessary migrations or schema updates to keep the database consistent.
+
+B. Onboarding flow
+1) Identify the endpoint / function that is called when an expert finishes onboarding and the Expert record is created.
+2) In this flow:
+   - Retrieve the RA who initiated the expert registration (for example from the invite, project-expert link, or URL token).
+   - Set `recruitedById` on the Expert record.
+   - Set `recruitedAt` to the current date-time (time of onboarding completion).
+3) Ensure that the Experts list (Experts tab) can display:
+   - Recruited by: RA name or email
+   - Recruited on: formatted date
+   This can be just an extra column in the list view.
+
+C. Incentive calculation logic
+1) Identify the model/table that stores client calls, for example `ExpertCall`, `Call`, `Consultation`, etc.
+   It should be the entity that represents a completed consultation between client and expert.
+2) Add or confirm the following fields (if not already present):
+   - `expertId` (link to Experts)
+   - `status` (with a value like `COMPLETED`)
+   - `callDate` or `completedAt` (date-time of the call)
+3) Implement a reusable function or service, something like:
+   - `calculateRaIncentives(raId, fromDate, toDate)` (or similar)
+   This function must:
+   - Find all Experts where `recruitedById == raId`.
+   - For each of these Experts, find all calls with:
+     - `status == COMPLETED`
+     - `callDate` (or `completedAt`) between:
+       - `expert.recruitedAt` and `expert.recruitedAt + 60 days`
+   - Count how many completed calls meet these conditions.
+   - Compute the total incentive as: `number_of_eligible_calls * 250`.
+   - Return both:
+     - The count of eligible calls.
+     - The total incentive amount in BRL.
+4) If we already have any RA performance or KPI endpoints/dashboards, integrate this incentive calculation:
+   - For each RA, show:
+     - Number of RA-sourced experts with at least one completed call within 60 days.
+     - Total number of eligible completed calls.
+     - Total incentive amount (R$250 per eligible call).
+   If no RA KPI view exists yet, create a simple API endpoint or page where we can pass an RA and a date range and see this information.
+
+D. Integrity and edge cases
+1) Make sure that if an expert is created manually (not via an RA onboarding flow), `recruitedById` can be null, and such experts should never generate incentives.
+2) If a call is cancelled, rescheduled or not completed, it must not generate incentives.
+3) If a call happens more than 60 days after `recruitedAt`, it must not generate incentives.
+
+E. UI/UX (minimal but clear)
+1) In the Experts tab:
+   - Add visible columns or labels for:
+     - Recruited by (RA)
+     - Recruited at (date)
+   so we can visually check that this is working.
+2) (Optional) In an RA performance dashboard or a separate page:
+   - Show the total “RA Incentive” for a selected period, based on the calculation rules above.
+
+After implementing all of the above:
+- Briefly describe in comments or short documentation:
+  - Where the onboarding logic is located.
+  - Where the incentive calculation function is implemented.
+  - How to test the RA incentive feature step-by-step (create RA, invite expert, complete onboarding, schedule and complete call, and then view incentive result).

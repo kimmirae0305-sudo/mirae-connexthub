@@ -13,6 +13,7 @@ import {
   UsersRound,
   Settings,
   Mail,
+  Award,
 } from "lucide-react";
 import {
   Sidebar,
@@ -104,6 +105,12 @@ const adminItems: NavItem[] = [
     url: "/employees",
     icon: UsersRound,
     pageKey: "employees",
+  },
+  {
+    title: "RA Performance",
+    url: "/ra-performance",
+    icon: Award,
+    pageKey: "ra-performance",
   },
 ];
 

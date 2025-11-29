@@ -50,6 +50,12 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import type { Expert, InsertExpert } from "@shared/schema";
+import { format } from "date-fns";
+
+interface ExpertWithRecruiter extends Expert {
+  recruiterName: string | null;
+  recruiterEmail: string | null;
+}
 
 interface WorkExperience {
   company: string;
@@ -114,11 +120,11 @@ export default function Experts() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingExpert, setEditingExpert] = useState<Expert | null>(null);
   const [deletingExpert, setDeletingExpert] = useState<Expert | null>(null);
-  const [viewingExpert, setViewingExpert] = useState<Expert | null>(null);
+  const [viewingExpert, setViewingExpert] = useState<ExpertWithRecruiter | null>(null);
   const [workHistory, setWorkHistory] = useState<WorkExperience[]>([]);
 
-  const { data: experts, isLoading } = useQuery<Expert[]>({
-    queryKey: ["/api/experts"],
+  const { data: experts, isLoading } = useQuery<ExpertWithRecruiter[]>({
+    queryKey: ["/api/experts-with-recruiter"],
   });
 
   const form = useForm<ExpertFormData>({
@@ -143,7 +149,7 @@ export default function Experts() {
   const createMutation = useMutation({
     mutationFn: (data: InsertExpert) => apiRequest("POST", "/api/experts", data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/experts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/experts-with-recruiter"] });
       setIsDialogOpen(false);
       form.reset();
       toast({ title: "Expert registered successfully" });
@@ -157,7 +163,7 @@ export default function Experts() {
     mutationFn: (data: InsertExpert & { id: number }) =>
       apiRequest("PATCH", `/api/experts/${data.id}`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/experts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/experts-with-recruiter"] });
       setIsDialogOpen(false);
       setEditingExpert(null);
       form.reset();
@@ -171,7 +177,7 @@ export default function Experts() {
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/experts/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/experts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/experts-with-recruiter"] });
       setDeletingExpert(null);
       toast({ title: "Expert removed successfully" });
     },
@@ -445,6 +451,16 @@ export default function Experts() {
                     <span className="font-mono">${Number(expert.hourlyRate).toFixed(0)}/hr</span>
                   </div>
                 </div>
+                {expert.recruiterName && (
+                  <div className="mt-3 pt-3 border-t border-border">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Recruited by: <span className="font-medium text-foreground">{expert.recruiterName}</span></span>
+                      {expert.sourcedAt && (
+                        <span>{format(new Date(expert.sourcedAt), "MMM d, yyyy")}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}
@@ -914,6 +930,25 @@ export default function Experts() {
                   )}
                 </div>
               </div>
+
+              {viewingExpert.recruiterName && (
+                <div className="space-y-2 border-t pt-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Recruitment Info</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Recruited By</p>
+                      <p className="text-sm font-medium">{viewingExpert.recruiterName}</p>
+                      <p className="text-xs text-muted-foreground">{viewingExpert.recruiterEmail}</p>
+                    </div>
+                    {viewingExpert.sourcedAt && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Recruited On</p>
+                        <p className="text-sm font-medium">{format(new Date(viewingExpert.sourcedAt), "MMMM d, yyyy")}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

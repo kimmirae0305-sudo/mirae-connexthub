@@ -11,6 +11,7 @@ export type PageKey =
   | "analytics"
   | "employees"
   | "invites"
+  | "ra-performance"
   | "settings";
 
 /**
@@ -39,6 +40,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "analytics",
     "employees",
     "invites",
+    "ra-performance",
     "settings",
   ],
   pm: [
@@ -50,6 +52,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "consultations",
     "usage",
     "invites",
+    "ra-performance",
   ],
   ra: [
     "dashboard",
@@ -65,6 +68,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "clients",
     "usage",
     "analytics",
+    "ra-performance",
   ],
 };
 
@@ -79,6 +83,7 @@ export const PAGE_TO_ROUTE: Record<PageKey, string> = {
   analytics: "/analytics",
   employees: "/employees",
   invites: "/invites",
+  "ra-performance": "/ra-performance",
   settings: "/settings",
 };
 
@@ -93,6 +98,7 @@ export const ROUTE_TO_PAGE: Record<string, PageKey> = {
   "/analytics": "analytics",
   "/employees": "employees",
   "/invites": "invites",
+  "/ra-performance": "ra-performance",
   "/settings": "settings",
 };
 

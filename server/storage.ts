@@ -41,7 +41,7 @@ import {
   calculateCU,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, ilike, or, and, sql } from "drizzle-orm";
+import { eq, desc, ilike, or, and, sql, gte, lte } from "drizzle-orm";
 
 export interface IStorage {
   // Users (Employees)
@@ -930,6 +930,175 @@ export class DatabaseStorage implements IStorage {
   async deleteUsageRecord(id: number): Promise<boolean> {
     const result = await db.delete(usageRecords).where(eq(usageRecords.id, id)).returning();
     return result.length > 0;
+  }
+
+  // RA Incentive Calculations
+  // Get experts recruited by a specific RA
+  async getExpertsByRecruiterId(raId: number): Promise<Expert[]> {
+    return db
+      .select()
+      .from(experts)
+      .where(eq(experts.sourcedByRaId, raId))
+      .orderBy(desc(experts.sourcedAt));
+  }
+
+  // Get completed calls for an expert within a date range
+  async getCompletedCallsForExpert(
+    expertId: number,
+    fromDate: Date,
+    toDate: Date
+  ): Promise<CallRecord[]> {
+    return db
+      .select()
+      .from(callRecords)
+      .where(
+        and(
+          eq(callRecords.expertId, expertId),
+          eq(callRecords.status, "completed"),
+          gte(callRecords.completedAt, fromDate),
+          lte(callRecords.completedAt, toDate)
+        )
+      );
+  }
+
+  // Calculate RA incentives for a specific period
+  // Business rule: R$250 per completed call for RA-sourced experts within 60 days of recruitment
+  async calculateRaIncentives(
+    raId: number,
+    periodFromDate?: Date,
+    periodToDate?: Date
+  ): Promise<{
+    raId: number;
+    raName: string;
+    raEmail: string;
+    totalRecruitedExperts: number;
+    expertsWithCompletedCalls: number;
+    totalEligibleCalls: number;
+    totalIncentiveBRL: number;
+    eligibleExperts: Array<{
+      expertId: number;
+      expertName: string;
+      recruitedAt: Date | null;
+      eligibleCalls: number;
+      incentiveBRL: number;
+    }>;
+  }> {
+    const INCENTIVE_PER_CALL_BRL = 250;
+    const ELIGIBILITY_DAYS = 60;
+
+    // Get RA info
+    const [ra] = await db.select().from(users).where(eq(users.id, raId));
+    if (!ra) {
+      throw new Error("RA not found");
+    }
+
+    // Get all experts recruited by this RA
+    const recruitedExperts = await this.getExpertsByRecruiterId(raId);
+
+    let totalEligibleCalls = 0;
+    let expertsWithCompletedCalls = 0;
+    const eligibleExperts: Array<{
+      expertId: number;
+      expertName: string;
+      recruitedAt: Date | null;
+      eligibleCalls: number;
+      incentiveBRL: number;
+    }> = [];
+
+    for (const expert of recruitedExperts) {
+      if (!expert.sourcedAt) continue;
+
+      const recruitedAt = new Date(expert.sourcedAt);
+      const eligibilityEndDate = new Date(recruitedAt);
+      eligibilityEndDate.setDate(eligibilityEndDate.getDate() + ELIGIBILITY_DAYS);
+
+      // Get completed calls within the 60-day eligibility window
+      // Also filter by the period if provided
+      let callsFromDate = recruitedAt;
+      let callsToDate = eligibilityEndDate;
+
+      if (periodFromDate && periodFromDate > callsFromDate) {
+        callsFromDate = periodFromDate;
+      }
+      if (periodToDate && periodToDate < callsToDate) {
+        callsToDate = periodToDate;
+      }
+
+      // Skip if the period doesn't overlap with eligibility window
+      if (callsFromDate >= callsToDate) continue;
+
+      const completedCalls = await this.getCompletedCallsForExpert(
+        expert.id,
+        callsFromDate,
+        callsToDate
+      );
+
+      if (completedCalls.length > 0) {
+        expertsWithCompletedCalls++;
+        totalEligibleCalls += completedCalls.length;
+        const incentiveBRL = completedCalls.length * INCENTIVE_PER_CALL_BRL;
+
+        eligibleExperts.push({
+          expertId: expert.id,
+          expertName: expert.name,
+          recruitedAt: expert.sourcedAt,
+          eligibleCalls: completedCalls.length,
+          incentiveBRL,
+        });
+      }
+    }
+
+    return {
+      raId,
+      raName: ra.fullName,
+      raEmail: ra.email,
+      totalRecruitedExperts: recruitedExperts.length,
+      expertsWithCompletedCalls,
+      totalEligibleCalls,
+      totalIncentiveBRL: totalEligibleCalls * INCENTIVE_PER_CALL_BRL,
+      eligibleExperts,
+    };
+  }
+
+  // Get all RAs with their incentive summary
+  async getAllRaIncentiveSummary(
+    periodFromDate?: Date,
+    periodToDate?: Date
+  ): Promise<Array<{
+    raId: number;
+    raName: string;
+    raEmail: string;
+    totalRecruitedExperts: number;
+    expertsWithCompletedCalls: number;
+    totalEligibleCalls: number;
+    totalIncentiveBRL: number;
+  }>> {
+    // Get all RAs
+    const ras = await db
+      .select()
+      .from(users)
+      .where(eq(users.role, "ra"));
+
+    const summaries = [];
+
+    for (const ra of ras) {
+      const incentiveData = await this.calculateRaIncentives(
+        ra.id,
+        periodFromDate,
+        periodToDate
+      );
+      summaries.push({
+        raId: incentiveData.raId,
+        raName: incentiveData.raName,
+        raEmail: incentiveData.raEmail,
+        totalRecruitedExperts: incentiveData.totalRecruitedExperts,
+        expertsWithCompletedCalls: incentiveData.expertsWithCompletedCalls,
+        totalEligibleCalls: incentiveData.totalEligibleCalls,
+        totalIncentiveBRL: incentiveData.totalIncentiveBRL,
+      });
+    }
+
+    return summaries.sort((a, b) => b.totalIncentiveBRL - a.totalIncentiveBRL);
   }
 }
 
