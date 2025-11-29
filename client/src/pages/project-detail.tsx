@@ -108,10 +108,6 @@ export default function ProjectDetail() {
   const { toast } = useToast();
   const projectId = parseInt(id || "0");
 
-  const [expertSearchQuery, setExpertSearchQuery] = useState("");
-  const [countryFilter, setCountryFilter] = useState("");
-  const [minRate, setMinRate] = useState("");
-  const [maxRate, setMaxRate] = useState("");
   const [selectedExperts, setSelectedExperts] = useState<Set<number>>(new Set());
   const [selectedRaIds, setSelectedRaIds] = useState<number[]>([]);
   const [isAssignRaModalOpen, setIsAssignRaModalOpen] = useState(false);
@@ -1161,43 +1157,7 @@ export default function ProjectDetail() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by name, company, title, expertise..."
-                    value={expertSearchQuery}
-                    onChange={(e) => setExpertSearchQuery(e.target.value)}
-                    className="pl-9"
-                    data-testid="input-search-experts"
-                  />
-                </div>
-                <Input
-                  placeholder="Country/Timezone"
-                  value={countryFilter}
-                  onChange={(e) => setCountryFilter(e.target.value)}
-                  className="w-full sm:w-40"
-                  data-testid="input-country-filter"
-                />
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Min Rate"
-                    type="number"
-                    value={minRate}
-                    onChange={(e) => setMinRate(e.target.value)}
-                    className="w-24"
-                    data-testid="input-min-rate"
-                  />
-                  <Input
-                    placeholder="Max Rate"
-                    type="number"
-                    value={maxRate}
-                    onChange={(e) => setMaxRate(e.target.value)}
-                    className="w-24"
-                    data-testid="input-max-rate"
-                  />
-                </div>
-              </div>
+              <p className="text-sm text-muted-foreground">Use the "Search & Add" button above to find and add experts from the database</p>
 
               {selectedExperts.size > 0 && (
                 <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
@@ -1213,9 +1173,7 @@ export default function ProjectDetail() {
                 </div>
               )}
 
-              {searchLoading ? (
-                <DataTableSkeleton columns={6} rows={5} />
-              ) : !expertsToShow || expertsToShow.length === 0 ? (
+              {!expertsToShow || expertsToShow.length === 0 ? (
                 <EmptyState
                   icon={Users}
                   title="No experts found"
