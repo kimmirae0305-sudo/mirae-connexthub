@@ -4,11 +4,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Search, Briefcase, Filter } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Briefcase, Filter, Users, Eye, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -55,14 +56,18 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
-import type { Project, InsertProject } from "@shared/schema";
+import type { Project, InsertProject, ClientOrganization, ProjectExpert } from "@shared/schema";
 
 const projectFormSchema = z.object({
   name: z.string().min(1, "Project name is required"),
+  projectOverview: z.string().optional(),
+  clientOrganizationId: z.number().optional(),
   clientName: z.string().min(1, "Client name is required"),
+  clientPocName: z.string().optional(),
+  clientPocEmail: z.string().email().optional().or(z.literal("")),
   description: z.string().optional(),
   industry: z.string().min(1, "Industry is required"),
-  status: z.string().default("pending"),
+  status: z.string().default("new"),
   budget: z.string().optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
@@ -81,31 +86,58 @@ const industries = [
   "Legal",
   "Real Estate",
   "Education",
+  "Pharmaceuticals",
+  "Telecommunications",
+  "Automotive",
+  "Aerospace",
+  "Agriculture",
   "Other",
 ];
 
-const statuses = ["pending", "active", "completed", "archived"];
+const statuses = [
+  { value: "new", label: "New" },
+  { value: "sourcing", label: "Sourcing" },
+  { value: "pending_client_review", label: "Client Review" },
+  { value: "client_selected", label: "Client Selected" },
+  { value: "scheduled", label: "Scheduled" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+];
 
 export default function Projects() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [viewingProject, setViewingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
   });
 
+  const { data: clientOrganizations } = useQuery<ClientOrganization[]>({
+    queryKey: ["/api/client-organizations"],
+  });
+
+  const { data: projectExperts } = useQuery<ProjectExpert[]>({
+    queryKey: ["/api/project-experts", viewingProject?.id],
+    enabled: !!viewingProject,
+  });
+
   const form = useForm<ProjectFormData>({
     resolver: zodResolver(projectFormSchema),
     defaultValues: {
       name: "",
+      projectOverview: "",
       clientName: "",
+      clientPocName: "",
+      clientPocEmail: "",
       description: "",
       industry: "",
-      status: "pending",
+      status: "new",
       budget: "",
       startDate: "",
       endDate: "",
@@ -165,7 +197,11 @@ export default function Projects() {
       setEditingProject(project);
       form.reset({
         name: project.name,
+        projectOverview: project.projectOverview || "",
+        clientOrganizationId: project.clientOrganizationId || undefined,
         clientName: project.clientName,
+        clientPocName: project.clientPocName || "",
+        clientPocEmail: project.clientPocEmail || "",
         description: project.description || "",
         industry: project.industry,
         status: project.status,
@@ -183,6 +219,11 @@ export default function Projects() {
   const onSubmit = (data: ProjectFormData) => {
     const projectData: InsertProject = {
       ...data,
+      projectOverview: data.projectOverview || null,
+      clientOrganizationId: data.clientOrganizationId || null,
+      clientPocName: data.clientPocName || null,
+      clientPocEmail: data.clientPocEmail || null,
+      description: data.description || null,
       budget: data.budget || null,
       startDate: data.startDate ? new Date(data.startDate) : null,
       endDate: data.endDate ? new Date(data.endDate) : null,
@@ -195,18 +236,50 @@ export default function Projects() {
     }
   };
 
+  const getExpertCount = (projectId: number) => {
+    if (!viewingProject || viewingProject.id !== projectId) return null;
+    return projectExperts?.length || 0;
+  };
+
   return (
     <div className="space-y-6 p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Projects</h1>
           <p className="text-sm text-muted-foreground">
-            Manage your project requests and track their progress.
+            Manage project requests and track their progress through the workflow.
           </p>
         </div>
         <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-add-project">
-          <Plus className="h-4 w-4" /> Add Project
+          <Plus className="h-4 w-4" /> New Project
         </Button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold">{projects?.filter(p => p.status === "new").length || 0}</div>
+            <p className="text-xs text-muted-foreground">New Requests</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold">{projects?.filter(p => p.status === "sourcing").length || 0}</div>
+            <p className="text-xs text-muted-foreground">Sourcing</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold">{projects?.filter(p => p.status === "pending_client_review").length || 0}</div>
+            <p className="text-xs text-muted-foreground">Client Review</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-2xl font-bold">{projects?.filter(p => p.status === "completed").length || 0}</div>
+            <p className="text-xs text-muted-foreground">Completed</p>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
@@ -225,15 +298,15 @@ export default function Projects() {
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full sm:w-40" data-testid="select-status-filter">
+                <SelectTrigger className="w-full sm:w-44" data-testid="select-status-filter">
                   <Filter className="mr-2 h-4 w-4" />
                   <SelectValue placeholder="Filter by status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Statuses</SelectItem>
                   {statuses.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {status.charAt(0).toUpperCase() + status.slice(1)}
+                    <SelectItem key={status.value} value={status.value}>
+                      {status.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -243,7 +316,7 @@ export default function Projects() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <DataTableSkeleton columns={6} rows={5} />
+            <DataTableSkeleton columns={7} rows={5} />
           ) : filteredProjects?.length === 0 ? (
             <EmptyState
               icon={Briefcase}
@@ -266,10 +339,11 @@ export default function Projects() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-xs font-semibold uppercase">Project Name</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Industry</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">CU Used</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Created</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
                   </TableRow>
@@ -277,17 +351,38 @@ export default function Projects() {
                 <TableBody>
                   {filteredProjects?.map((project) => (
                     <TableRow key={project.id} className="hover-elevate" data-testid={`row-project-${project.id}`}>
-                      <TableCell className="font-medium">{project.name}</TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{project.name}</p>
+                          {project.clientPocName && (
+                            <p className="text-xs text-muted-foreground">POC: {project.clientPocName}</p>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{project.clientName}</TableCell>
                       <TableCell className="text-muted-foreground">{project.industry}</TableCell>
                       <TableCell>
                         <StatusBadge status={project.status} type="project" />
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {parseFloat(project.totalCuUsed || "0").toFixed(1)}
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         {format(new Date(project.createdAt), "MMM dd, yyyy")}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              setViewingProject(project);
+                              setIsDetailDialogOpen(true);
+                            }}
+                            data-testid={`button-view-project-${project.id}`}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -316,7 +411,7 @@ export default function Projects() {
       </Card>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingProject ? "Edit Project" : "Create New Project"}</DialogTitle>
             <DialogDescription>
@@ -327,20 +422,21 @@ export default function Projects() {
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Project Name *</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Enter project name" {...field} data-testid="input-project-name" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Project Name *</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter project name" {...field} data-testid="input-project-name" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
                 <FormField
                   control={form.control}
                   name="clientName"
@@ -349,6 +445,62 @@ export default function Projects() {
                       <FormLabel>Client Name *</FormLabel>
                       <FormControl>
                         <Input placeholder="Enter client name" {...field} data-testid="input-client-name" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="clientOrganizationId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Link to Organization</FormLabel>
+                      <Select
+                        onValueChange={(v) => field.onChange(v ? parseInt(v) : undefined)}
+                        value={field.value?.toString() || ""}
+                      >
+                        <FormControl>
+                          <SelectTrigger data-testid="select-org">
+                            <SelectValue placeholder="Select organization (optional)" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {clientOrganizations?.map((org) => (
+                            <SelectItem key={org.id} value={org.id.toString()}>
+                              {org.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="clientPocName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Client POC Name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Point of contact name" {...field} data-testid="input-poc-name" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="clientPocEmail"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Client POC Email</FormLabel>
+                      <FormControl>
+                        <Input type="email" placeholder="poc@company.com" {...field} data-testid="input-poc-email" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -395,8 +547,8 @@ export default function Projects() {
                         </FormControl>
                         <SelectContent>
                           {statuses.map((status) => (
-                            <SelectItem key={status} value={status}>
-                              {status.charAt(0).toUpperCase() + status.slice(1)}
+                            <SelectItem key={status.value} value={status.value}>
+                              {status.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -409,13 +561,33 @@ export default function Projects() {
 
               <FormField
                 control={form.control}
+                name="projectOverview"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Project Overview</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Brief overview of the project..."
+                        className="resize-none"
+                        rows={2}
+                        {...field}
+                        data-testid="input-project-overview"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Description</FormLabel>
+                    <FormLabel>Detailed Description</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder="Enter project description"
+                        placeholder="Enter detailed project description"
                         className="resize-none"
                         rows={3}
                         {...field}
@@ -500,13 +672,86 @@ export default function Projects() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{viewingProject?.name}</DialogTitle>
+            <DialogDescription>
+              Project details and assigned experts
+            </DialogDescription>
+          </DialogHeader>
+          {viewingProject && (
+            <div className="space-y-6">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-sm text-muted-foreground">Client</p>
+                  <p className="font-medium">{viewingProject.clientName}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Industry</p>
+                  <p className="font-medium">{viewingProject.industry}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Status</p>
+                  <StatusBadge status={viewingProject.status} type="project" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">CU Used</p>
+                  <p className="font-mono font-medium">{parseFloat(viewingProject.totalCuUsed || "0").toFixed(1)}</p>
+                </div>
+              </div>
+              
+              {viewingProject.projectOverview && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Overview</p>
+                  <p className="text-sm">{viewingProject.projectOverview}</p>
+                </div>
+              )}
+
+              {viewingProject.description && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Description</p>
+                  <p className="text-sm">{viewingProject.description}</p>
+                </div>
+              )}
+
+              <div className="border-t pt-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="flex items-center gap-2 font-medium">
+                    <Users className="h-4 w-4" /> Assigned Experts
+                  </h4>
+                  <Badge variant="secondary">{projectExperts?.length || 0}</Badge>
+                </div>
+                {projectExperts?.length === 0 ? (
+                  <p className="mt-2 text-sm text-muted-foreground">No experts assigned yet.</p>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {projectExperts?.map((pe) => (
+                      <div key={pe.id} className="flex items-center justify-between rounded-md border p-2">
+                        <span className="text-sm">Expert #{pe.expertId}</span>
+                        <StatusBadge status={pe.status} type="assignment" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDetailDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={!!deletingProject} onOpenChange={() => setDeletingProject(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Project</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete "{deletingProject?.name}"? This action cannot be
-              undone and will also remove all associated vetting questions and expert assignments.
+              undone and will also remove all associated vetting questions, expert assignments, and call records.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -7,6 +7,8 @@ import {
   UserPlus,
   BarChart3,
   TrendingUp,
+  Building2,
+  Phone,
 } from "lucide-react";
 import {
   Sidebar,
@@ -37,6 +39,11 @@ const mainNavItems = [
     url: "/experts",
     icon: Users,
   },
+  {
+    title: "Clients",
+    url: "/clients",
+    icon: Building2,
+  },
 ];
 
 const managementItems = [
@@ -49,6 +56,11 @@ const managementItems = [
     title: "Assignments",
     url: "/assignments",
     icon: UserPlus,
+  },
+  {
+    title: "Consultations",
+    url: "/consultations",
+    icon: Phone,
   },
   {
     title: "Usage Tracker",
