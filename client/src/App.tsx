@@ -14,7 +14,6 @@ import ProjectDetail from "@/pages/project-detail";
 import Experts from "@/pages/experts";
 import Clients from "@/pages/clients";
 import InsightHub from "@/pages/insight-hub";
-import Assignments from "@/pages/assignments";
 import Consultations from "@/pages/consultations";
 import Usage from "@/pages/usage";
 import Analytics from "@/pages/analytics";
@@ -102,9 +101,6 @@ function Router() {
       </Route>
       <Route path="/insight-hub">
         <MainLayout><InsightHub /></MainLayout>
-      </Route>
-      <Route path="/assignments">
-        <MainLayout><Assignments /></MainLayout>
       </Route>
       <Route path="/consultations">
         <MainLayout><Consultations /></MainLayout>

@@ -49,6 +49,32 @@ Preferred communication style: Simple, everyday language.
   - API: Uses PATCH `/api/experts/:id` to update expert records
   - Schema: Added `workHistory` (JSONB array) and `biography` (text) fields to experts table
 
+- **Fixed Expert Search & Attach**: Corrected API endpoint mismatch in project detail page
+  - Changed frontend from `/api/projects/:projectId/attach-experts` to `/api/projects/:projectId/experts/bulk`
+  - Fixed "Attach" button functionality in Expert Search modal
+  - Experts can now be attached to projects from the search results
+
+- **Fixed Invitation Email URLs**: All invitation links now use deployed domain instead of localhost
+  - Updated 5 locations in backend to use `APP_BASE_URL` environment variable
+  - Invitation links now work: `${APP_BASE_URL}/expert/project-invite/${token}`
+  - Set APP_BASE_URL in Replit Secrets (defaults to deployed Replit URL)
+  - Supports custom domain after deployment to miraeconnexthub.com
+
+- **Token-Based Expert Invite Flow**: Implemented frictionless project invitation for experts
+  - **Public route** `/expert/project-invite/:token` - no login required
+  - Experts see project details, client info, vetting questions grouped by angle
+  - **Accept/Decline** without logging in via POST `/api/expert/project-invite/:token/respond`
+  - Security: Tokens validated, time-limited (30-day expiration), deactivated after use
+  - Shows confirmation message after response
+  - Invalid/expired links show: "This invitation link is no longer valid"
+
+- **Assignments Module Refactor**: Removed standalone "Assignments" page, merged into Project workflow
+  - ✅ Removed "Assignments" from sidebar navigation
+  - ✅ Removed `/assignments` route and Assignments import from App.tsx
+  - ✅ Removed "assignments" pageKey from permissions system
+  - ✅ All assignment functionality now in Project Detail page's "Existing Experts" tab
+  - ✅ RA workflow is fully contained within project screens (no context switching)
+
 ### Core Features
 
 - **Force Password Change on First Login**: New users must change a temporary password. Implemented via a `mustChangePassword` flag in the user model, frontend redirection, and a dedicated `/api/auth/change-password` endpoint.

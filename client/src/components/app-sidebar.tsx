@@ -72,12 +72,6 @@ const managementItems: NavItem[] = [
     pageKey: "insight-hub",
   },
   {
-    title: "Assignments",
-    url: "/assignments",
-    icon: UserPlus,
-    pageKey: "assignments",
-  },
-  {
     title: "Consultations",
     url: "/consultations",
     icon: Phone,
