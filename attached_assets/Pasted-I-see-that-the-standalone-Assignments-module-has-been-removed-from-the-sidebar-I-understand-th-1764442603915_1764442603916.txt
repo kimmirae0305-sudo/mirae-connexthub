@@ -1,0 +1,60 @@
+I see that the standalone "Assignments" module has been removed from the sidebar.
+
+I understand that the workflow has been moved into each Project (Existing Experts tab), which is good, but I still need a global Assignments overview.
+
+Please bring back Assignments as a read-only / management dashboard, without duplicating the project-level workflow.
+
+Requirements:
+
+1) Sidebar:
+   - Add back a menu item under MANAGEMENT called:
+     "Assignments" (or "Assignments Overview").
+
+2) Purpose:
+   - This page is NOT for creating new assignments.
+   - All creation / sourcing / inviting still happens inside each Project.
+   - The Assignments page is only for monitoring and managing all expert assignments across projects.
+
+3) Data to show (table view):
+   Columns should include:
+   - Project name
+   - Client name
+   - Industry
+   - RA / PM in charge
+   - Expert name
+   - Expert email
+   - Invitation status (Not Invited, Invited, Accepted, Declined, Unreachable, etc.)
+   - Pipeline status (Interested, Shortlisted, Backup, etc.)
+   - Consultation status (Not scheduled, Scheduled, Completed, Cancelled)
+   - Last activity datetime
+
+4) Filters:
+   - Filter by:
+     - Project
+     - Client
+     - RA / PM
+     - Invitation status
+     - Consultation status
+     - Date range (based on last activity or consultation date)
+
+5) Actions (lightweight, no complex workflow here):
+   - From this Assignments overview, for each row:
+     - Open the underlying Project page in a new tab (deep link to that project’s Existing Experts tab).
+     - Optionally: quick actions like:
+       - "Send invite" / "Resend invite" (calls the same API used by the Project view)
+       - "Mark as not interested" or update pipeline status
+     - But do NOT build a separate sourcing flow here; this is a monitoring and control panel.
+
+6) Permissions:
+   - Admin / Manager: can see all assignments.
+   - RA: can see only assignments for projects they are assigned to.
+
+7) UX:
+   - This page should behave like a global dashboard:
+     - Default sort: latest activity first.
+     - If there are no assignments yet, show an empty state:
+       "No assignments yet. Once experts are added to projects, they will appear here."
+
+Summary:
+- Keep the sourcing and invitation workflow inside each Project (Existing Experts).
+- Restore Assignments as a global "Assignments Overview" dashboard to monitor all expert assignments and statuses across projects, with filters and simple actions.
