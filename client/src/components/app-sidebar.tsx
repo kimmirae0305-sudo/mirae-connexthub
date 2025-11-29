@@ -12,6 +12,7 @@ import {
   LogOut,
   UsersRound,
   Settings,
+  Mail,
 } from "lucide-react";
 import {
   Sidebar,
@@ -76,6 +77,12 @@ const managementItems: NavItem[] = [
     url: "/consultations",
     icon: Phone,
     pageKey: "consultations",
+  },
+  {
+    title: "Invites",
+    url: "/invites",
+    icon: Mail,
+    pageKey: "invites",
   },
   {
     title: "Usage Tracker",
