@@ -20,6 +20,7 @@ import {
   experts,
   projects,
   expertInvitationLinks,
+  projectExperts,
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
@@ -979,17 +980,17 @@ export async function registerRoutes(
       if (!expert) {
         // Create new expert
         const project = await storage.getProject(link.projectId);
+        const industryValue = project?.industry || "General";
         expert = await storage.createExpert({
           name: `${firstName} ${lastName}`.trim(),
           email,
           phone: phone || null,
           expertise: "Professional",
-          industry: project?.industry || "General",
+          industry: industryValue,
           yearsOfExperience: 0,
           hourlyRate: "0",
           status: "available",
           sourcedByRaId: link.raId || undefined,
-          sourcedAt: new Date(),
         });
       }
 
