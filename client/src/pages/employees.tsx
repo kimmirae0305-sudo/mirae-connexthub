@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, MoreHorizontal, Key, Edit, ToggleLeft, ToggleRight, Shield, UserCheck, Users, Calculator, Phone, DollarSign, Clock, X, Building } from "lucide-react";
+import { Plus, MoreHorizontal, Key, Edit, ToggleLeft, ToggleRight, Shield, UserCheck, Users, Calculator, Phone, DollarSign, Clock, X, Building, ArrowUp, ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -116,6 +116,7 @@ function EmployeesContent() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<User | null>(null);
   const [detailEmployeeId, setDetailEmployeeId] = useState<number | null>(null);
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   
   const [createForm, setCreateForm] = useState({
     fullName: "",
@@ -236,6 +237,17 @@ function EmployeesContent() {
   const activeCount = employees?.filter(e => e.isActive !== false).length ?? 0;
   const inactiveCount = employees?.filter(e => e.isActive === false).length ?? 0;
 
+  const sortedEmployees = employees 
+    ? [...employees].sort((a, b) => {
+        const comparison = a.fullName.localeCompare(b.fullName);
+        return sortOrder === "asc" ? comparison : -comparison;
+      })
+    : employees;
+
+  const handleNameSort = () => {
+    setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+  };
+
   return (
     <div className="flex flex-col gap-6 p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -295,7 +307,20 @@ function EmployeesContent() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
+                <TableHead>
+                  <button
+                    onClick={handleNameSort}
+                    className="flex items-center gap-2 hover:text-primary transition-colors"
+                    data-testid="button-sort-name"
+                  >
+                    Name
+                    {sortOrder === "asc" ? (
+                      <ArrowUp className="h-4 w-4" />
+                    ) : (
+                      <ArrowDown className="h-4 w-4" />
+                    )}
+                  </button>
+                </TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Status</TableHead>
@@ -318,7 +343,7 @@ function EmployeesContent() {
                   </TableCell>
                 </TableRow>
               ) : (
-                employees?.map((employee) => {
+                sortedEmployees?.map((employee) => {
                   const RoleIcon = getRoleIcon(employee.role);
                   return (
                     <TableRow key={employee.id} data-testid={`row-employee-${employee.id}`}>
