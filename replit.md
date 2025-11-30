@@ -36,6 +36,7 @@ PostgreSQL (Neon serverless) is used as the database, managed with Drizzle ORM f
 - **Unique Invite Tokens & History**: Each invitation generates a new unique token for better tracking. A centralized `/invites` page allows Admin, PM, and RA roles to view and manage invitation links with filtering and statistics.
 - **RA Incentive Tracking**: Comprehensive RA recruitment incentive system tracking experts sourced by RAs. Includes `sourcedByRaId` and `sourcedAt` timestamps on experts, incentive calculation (R$250 per completed call within 60 days of recruitment), and dedicated RA Performance dashboard (`/ra-performance`) accessible to Admin, PM, and Finance roles.
 - **Recruiter Info Display**: Experts list shows "Recruited By" and "Recruited At" columns. Expert profile modal displays recruitment details section when applicable.
+- **Shortlist Export**: CSV export functionality for "Interested" experts in Internal Experts Pipeline. Endpoint `GET /api/projects/:projectId/export-shortlist` generates CSV with expert details including name, email, position, angles, status, activity dates, recruiter info, and expert ID. Role-based authorization allows Admin, PM, and assigned RAs to export.
 
 ## External Dependencies
 
