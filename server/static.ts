@@ -1,39 +1,26 @@
-import express from "express";
 import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
-
-// ESM 환경에서 __filename, __dirname 정의
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import express from "express";
 
 export function serveStatic(app: express.Application) {
-  // 실제 index.html 이 있을만한 후보 경로들
-  const candidates = [
-    // 1) dist/public (지금 구조와 가장 잘 맞는 후보)
-    path.resolve(__dirname, "..", "dist", "public"),
-    // 2) dist 루트
-    path.resolve(__dirname, "..", "dist"),
-    // 3) client/dist (혹시 향후 구조 바뀔 경우 대비)
-    path.resolve(__dirname, "..", "client", "dist"),
-  ];
+  // 1) SPA 빌드가 있는 실제 경로
+  // dist/public/index.html 구조를 정확히 타겟팅
+  const distPath = path.join(process.cwd(), "dist", "public");
 
-  // index.html 이 실제로 존재하는 폴더 찾기
-  const spaRoot =
-    candidates.find((root) =>
-      fs.existsSync(path.join(root, "index.html")),
-    ) ?? candidates[0];
+  // 2) 모든 나머지 경로 처리
+  app.get("*", (req, res) => {
+    const indexPath = path.join(distPath, "index.html");
 
-  console.log("Serving SPA from:", spaRoot);
+    // dist/public/index.html이 존재하면 SPA 리턴
+    if (fs.existsSync(indexPath)) {
+      return res.sendFile(indexPath);
+    }
 
-  // 정적 파일 서빙
-  app.use(express.static(spaRoot));
-
-  // 나머지 모든 경로는 SPA index.html 로 처리
-  app.get("*", (_req, res) => {
-    res.sendFile(path.join(spaRoot, "index.html"));
+    // 존재하지 않으면 백엔드의 기본 응답
+    return res.send("Mirae ConnextHub backend is live (no SPA build).");
   });
 }
+
 
 
 
