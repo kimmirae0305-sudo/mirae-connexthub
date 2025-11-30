@@ -1,0 +1,95 @@
+You are working on the Mirae Connext ENS application.
+
+Goal:
+Replace the current “Accepted Experts Export” mechanism with a beautiful, client-facing HTML card-style shortlist page — matching the exact UI/UX shown in the attached reference image (Jacob Nelson example). The output must be copy-paste ready for email delivery (Gmail, Outlook, etc.), with clean inline HTML styling that preserves formatting when pasted.
+
+This is NOT a CSV export. NOT a PDF.  
+This is a visually appealing HTML shortlist that the RA/PM can directly copy and paste into an email.
+
+————————————
+REQUIREMENTS
+————————————
+
+A. New “Accepted Experts” UI (Client Shortlist Page)
+Create a new page under Project → “Accepted Experts” (or a modal/panel):
+
+For each accepted expert (status = Interested / Accepted / Scheduled):
+Render a card that visually matches the attached design:
+
+CARD STRUCTURE (replicate exactly):
+1) Expert Name (bold, large font)
+2) A small tag showing “Accepted” (rounded pill button)
+3) Tag area for Angle(s)
+4) Section: “Work History”
+   - Table: Company | Job Title | Period
+   - Show chronological list (most recent first)
+5) Section: “Bio”
+   - Expert’s short bio or summary (if available)
+6) Section: “Comments on Questions”
+   - List each VQ from the project
+   - Under each question, show the expert’s answer
+   - Preserve line breaks and spacing
+7) (Optional) Section: Availability
+   - List the expert’s available time slots, if any
+
+The visual style MUST:
+- Use a white card with a soft shadow
+- Rounded corners
+- Clean spacing exactly like the provided example
+- Professional and client-ready
+
+B. Copy-to-Clipboard Feature
+Add a button on each card:
+“Copy Profile to Clipboard”
+When clicked:
+- Generate the ENTIRE card as inline HTML (with styling)
+- Copy to clipboard so RA/PM can paste directly into an email
+- The formatting MUST remain consistent in Gmail and Outlook
+
+C. Backend Logic
+For the project, fetch only experts with a positive response:
+- Pipeline status: “Interested”, “Accepted”, or “Scheduled”
+- MUST include:
+  • Expert basic profile
+  • Employment history
+  • VQ questions + expert answers
+  • Optional availability
+
+D. Frontend Implementation
+Build a dedicated component:
+<ProjectAcceptedExpertCard />
+
+Fields required:
+- name
+- angles[]
+- workHistory[]
+- bio
+- vqQuestions[]
+- vqAnswers[]
+- availabilitySlots[]
+- acceptedStatusBadge
+
+Use only frontend rendering — no PDF/CSV generation.
+
+E. Styling
+Replicate the attached design exactly:
+- Name: bold, black
+- Accepted badge: blue rounded pill
+- Section titles: bold, slightly larger
+- Tables clean and aligned
+- All text left-aligned
+- White background card, 12–16px padding, subtle shadow
+- Border lines between sections
+
+F. Testing
+Ensure:
+- Pasted output into Gmail looks identical
+- Pasted output into Outlook keeps formatting
+- Multiple cards can be copied at once
+- Korean, English, and Portuguese text renders correctly
+
+————————————
+DELIVERABLE
+————————————
+
+A fully implemented “Client Shortlist” HTML card UI, with copy-to-clipboard HTML generation, matching the attached reference design so PMs can directly paste expert profiles into client emails with no further formatting.

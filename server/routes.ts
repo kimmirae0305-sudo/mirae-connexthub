@@ -3701,7 +3701,7 @@ export async function registerRoutes(
       const vettingQuestionsList = await storage.getVettingQuestionsByProject(projectId);
 
       // Accepted status values (experts who accepted the consultation)
-      const acceptedStatuses = ["interested", "shortlisted", "accepted"];
+      const acceptedStatuses = ["interested", "shortlisted", "accepted", "scheduled"];
 
       // Fetch accepted experts with full details
       const acceptedExperts = await db
@@ -3845,7 +3845,7 @@ export async function registerRoutes(
       const vettingQuestionsList = await storage.getVettingQuestionsByProject(projectId);
 
       // Accepted status values
-      const acceptedStatuses = ["interested", "shortlisted", "accepted"];
+      const acceptedStatuses = ["interested", "shortlisted", "accepted", "scheduled"];
 
       // Fetch accepted experts
       const acceptedExperts = await db
