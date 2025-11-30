@@ -37,6 +37,9 @@ import {
   Layers,
   Download,
   FileSearch,
+  Phone,
+  Video,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -82,7 +85,19 @@ import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { RegisterExpertForm } from "@/components/experts/RegisterExpertForm";
 import { QuickInviteForm } from "@/components/experts/QuickInviteForm";
-import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle } from "@shared/schema";
+import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle, CallRecord, InsertCallRecord } from "@shared/schema";
+import { z } from "zod";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { useAuth } from "@/lib/auth";
 
 interface EnrichedExpert extends ProjectExpert {
   expert?: Expert;
@@ -161,6 +176,16 @@ export default function ProjectDetail() {
   
   // Shortlist export state
   const [isExportingShortlist, setIsExportingShortlist] = useState(false);
+  
+  // Consultations tab state
+  const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
+  const [isCompleteCallModalOpen, setIsCompleteCallModalOpen] = useState(false);
+  const [selectedCallRecord, setSelectedCallRecord] = useState<CallRecord | null>(null);
+  const [consultationStatusFilter, setConsultationStatusFilter] = useState<string>("all");
+  
+  // Auth for role-based UI
+  const { user } = useAuth();
+  const isRA = user?.role === "ra" || user?.role?.toLowerCase() === "research associate";
 
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
@@ -206,6 +231,21 @@ export default function ProjectDetail() {
       if (!res.ok) throw new Error("Failed to fetch experts");
       return res.json();
     },
+  });
+
+  // Call records for this project (Consultations tab)
+  const { data: projectCallRecords, isLoading: callRecordsLoading } = useQuery<CallRecord[]>({
+    queryKey: ["/api/call-records", { projectId }],
+    queryFn: async () => {
+      const res = await fetch(`/api/call-records?projectId=${projectId}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("authToken")}`,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to fetch call records");
+      return res.json();
+    },
+    enabled: !!projectId,
   });
 
   // Expert search results query with metrics
@@ -460,6 +500,136 @@ export default function ProjectDetail() {
       toast({ title: "Failed to delete angle", variant: "destructive" });
     },
   });
+
+  // Call Record mutations (Consultations tab)
+  const createCallMutation = useMutation({
+    mutationFn: (data: InsertCallRecord) => apiRequest("POST", "/api/call-records", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
+      setIsScheduleCallModalOpen(false);
+      scheduleCallForm.reset();
+      toast({ title: "Consultation scheduled successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to schedule consultation", variant: "destructive" });
+    },
+  });
+
+  const completeCallMutation = useMutation({
+    mutationFn: (data: { actualDurationMinutes: number; recordingUrl?: string; notes?: string }) =>
+      apiRequest("POST", `/api/call-records/${selectedCallRecord?.id}/complete`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      setIsCompleteCallModalOpen(false);
+      setSelectedCallRecord(null);
+      completeCallForm.reset();
+      toast({ title: "Consultation marked as completed" });
+    },
+    onError: () => {
+      toast({ title: "Failed to complete consultation", variant: "destructive" });
+    },
+  });
+
+  const cancelCallMutation = useMutation({
+    mutationFn: (callId: number) =>
+      apiRequest("POST", `/api/call-records/${callId}/cancel`, { reason: "Cancelled by user" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
+      toast({ title: "Consultation cancelled" });
+    },
+    onError: () => {
+      toast({ title: "Failed to cancel consultation", variant: "destructive" });
+    },
+  });
+
+  // Schedule Call Form
+  const scheduleCallFormSchema = z.object({
+    expertId: z.number().min(1, "Expert is required"),
+    callDate: z.string().min(1, "Call date is required"),
+    durationMinutes: z.number().min(1, "Duration is required"),
+    scheduledStartTime: z.string().optional(),
+    scheduledEndTime: z.string().optional(),
+    zoomLink: z.string().optional(),
+    notes: z.string().optional(),
+  });
+
+  type ScheduleCallFormData = z.infer<typeof scheduleCallFormSchema>;
+
+  const scheduleCallForm = useForm<ScheduleCallFormData>({
+    resolver: zodResolver(scheduleCallFormSchema),
+    defaultValues: {
+      expertId: 0,
+      callDate: format(new Date(), "yyyy-MM-dd"),
+      durationMinutes: 30,
+      scheduledStartTime: "",
+      scheduledEndTime: "",
+      zoomLink: "",
+      notes: "",
+    },
+  });
+
+  // Complete Call Form
+  const completeCallFormSchema = z.object({
+    actualDurationMinutes: z.number().min(1, "Duration is required"),
+    recordingUrl: z.string().optional(),
+    notes: z.string().optional(),
+  });
+
+  type CompleteCallFormData = z.infer<typeof completeCallFormSchema>;
+
+  const completeCallForm = useForm<CompleteCallFormData>({
+    resolver: zodResolver(completeCallFormSchema),
+    defaultValues: {
+      actualDurationMinutes: 30,
+      recordingUrl: "",
+      notes: "",
+    },
+  });
+
+  const onScheduleCallSubmit = (data: ScheduleCallFormData) => {
+    const cuUsed = Math.ceil((data.durationMinutes / 60) * 4) / 4;
+    const callData: InsertCallRecord = {
+      projectId,
+      expertId: data.expertId,
+      callDate: new Date(data.callDate),
+      durationMinutes: data.durationMinutes,
+      cuUsed: cuUsed.toString(),
+      status: data.scheduledStartTime ? "scheduled" : "pending",
+      scheduledStartTime: data.scheduledStartTime ? new Date(data.scheduledStartTime) : null,
+      scheduledEndTime: data.scheduledEndTime ? new Date(data.scheduledEndTime) : null,
+      zoomLink: data.zoomLink || null,
+      notes: data.notes || null,
+    };
+    createCallMutation.mutate(callData);
+  };
+
+  const onCompleteCallSubmit = (data: CompleteCallFormData) => {
+    completeCallMutation.mutate(data);
+  };
+
+  // Helper functions for Consultations tab
+  const getExpertNameById = (expertId: number) => {
+    return allExperts?.find((e) => e.id === expertId)?.name || "Unknown";
+  };
+
+  const getRaNameById = (raId: number | null) => {
+    if (!raId) return "—";
+    return allRAs?.find((ra) => ra.id === raId)?.fullName || "Unknown";
+  };
+
+  const filteredProjectCalls = projectCallRecords?.filter((record) =>
+    consultationStatusFilter === "all" || record.status === consultationStatusFilter
+  );
+
+  const projectScheduledCalls = projectCallRecords?.filter((r) => r.status === "scheduled").length || 0;
+  const projectCompletedCalls = projectCallRecords?.filter((r) => r.status === "completed").length || 0;
+  const projectTotalCuUsed = projectCallRecords
+    ?.filter((r) => r.status === "completed")
+    .reduce((sum, r) => sum + parseFloat(r.cuUsed || "0"), 0) || 0;
 
   // Vetting Questions mutations
   const createVQMutation = useMutation({
@@ -830,6 +1000,9 @@ export default function ProjectDetail() {
           </TabsTrigger>
           <TabsTrigger value="ra-sourcing" data-testid="tab-ra-sourcing">
             RA Sourcing {projectDetail.raSourcedExperts?.length ? `(${projectDetail.raSourcedExperts.length})` : ""}
+          </TabsTrigger>
+          <TabsTrigger value="consultations" data-testid="tab-consultations">
+            Consultations {projectCallRecords?.length ? `(${projectCallRecords.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="activity" data-testid="tab-activity">
             Activity {projectDetail.activities?.length ? `(${projectDetail.activities.length})` : ""}
@@ -1792,6 +1965,209 @@ export default function ProjectDetail() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="consultations" className="space-y-4">
+          {/* Summary Stats */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+                    <Clock className="h-5 w-5 text-blue-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-semibold">{projectScheduledCalls}</p>
+                    <p className="text-sm text-muted-foreground">Scheduled</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-semibold">{projectCompletedCalls}</p>
+                    <p className="text-sm text-muted-foreground">Completed</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10">
+                    <DollarSign className="h-5 w-5 text-purple-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-semibold">{projectTotalCuUsed.toFixed(2)}</p>
+                    <p className="text-sm text-muted-foreground">CUs Used</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Call Records Table */}
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Phone className="h-4 w-4" />
+                    Project Consultations
+                  </CardTitle>
+                  <CardDescription>
+                    All calls and consultations for this project
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Select
+                    value={consultationStatusFilter}
+                    onValueChange={setConsultationStatusFilter}
+                  >
+                    <SelectTrigger className="w-[140px]" data-testid="select-consultation-status-filter">
+                      <SelectValue placeholder="Filter status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="scheduled">Scheduled</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      <SelectItem value="no-show">No Show</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {!isRA && (
+                    <Button
+                      onClick={() => setIsScheduleCallModalOpen(true)}
+                      data-testid="button-schedule-call"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Schedule Call
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {callRecordsLoading ? (
+                <DataTableSkeleton columns={7} rows={3} />
+              ) : !filteredProjectCalls || filteredProjectCalls.length === 0 ? (
+                <EmptyState
+                  icon={Phone}
+                  title="No consultations found"
+                  description={
+                    consultationStatusFilter !== "all"
+                      ? "No calls match the current filter."
+                      : "Schedule a call to get started."
+                  }
+                  action={
+                    !isRA ? (
+                      <Button onClick={() => setIsScheduleCallModalOpen(true)}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Schedule Call
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Expert</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Duration</TableHead>
+                        <TableHead>CU Used</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Assigned RA</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredProjectCalls.map((record) => (
+                        <TableRow key={record.id} data-testid={`row-call-record-${record.id}`}>
+                          <TableCell className="font-medium">
+                            {getExpertNameById(record.expertId)}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {format(new Date(record.callDate), "MMM dd, yyyy")}
+                            {record.scheduledStartTime && (
+                              <span className="block text-xs text-muted-foreground">
+                                {format(new Date(record.scheduledStartTime), "HH:mm")}
+                                {record.scheduledEndTime && ` - ${format(new Date(record.scheduledEndTime), "HH:mm")}`}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-mono text-sm">
+                              {record.actualDurationMinutes || record.durationMinutes} min
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-mono text-sm">{parseFloat(record.cuUsed || "0").toFixed(2)}</span>
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={record.status} type="call" />
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {getRaNameById(record.assignedRaId)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {record.zoomLink && (
+                                  <DropdownMenuItem
+                                    onClick={() => window.open(record.zoomLink!, "_blank")}
+                                  >
+                                    <Video className="h-4 w-4 mr-2" />
+                                    Join Call
+                                  </DropdownMenuItem>
+                                )}
+                                {(record.status === "pending" || record.status === "scheduled") && !isRA && (
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedCallRecord(record);
+                                      completeCallForm.setValue(
+                                        "actualDurationMinutes",
+                                        record.durationMinutes || 30
+                                      );
+                                      setIsCompleteCallModalOpen(true);
+                                    }}
+                                  >
+                                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                                    Mark Completed
+                                  </DropdownMenuItem>
+                                )}
+                                {(record.status === "pending" || record.status === "scheduled") && !isRA && (
+                                  <DropdownMenuItem
+                                    onClick={() => cancelCallMutation.mutate(record.id)}
+                                    className="text-destructive"
+                                  >
+                                    <XCircle className="h-4 w-4 mr-2" />
+                                    Cancel Call
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="activity" className="space-y-4">
           <Card>
             <CardHeader>
@@ -2403,6 +2779,280 @@ export default function ProjectDetail() {
             }}
             onCancel={() => setIsQuickInviteModalOpen(false)}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Schedule Call Modal */}
+      <Dialog open={isScheduleCallModalOpen} onOpenChange={setIsScheduleCallModalOpen}>
+        <DialogContent className="max-w-md" aria-describedby="schedule-call-description">
+          <DialogHeader>
+            <DialogTitle>Schedule Consultation</DialogTitle>
+            <DialogDescription id="schedule-call-description">
+              Schedule a new consultation call for this project
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...scheduleCallForm}>
+            <form onSubmit={scheduleCallForm.handleSubmit(onScheduleCallSubmit)} className="space-y-4">
+              <FormField
+                control={scheduleCallForm.control}
+                name="expertId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Expert</FormLabel>
+                    <FormControl>
+                      <Select
+                        value={field.value ? String(field.value) : ""}
+                        onValueChange={(v) => field.onChange(parseInt(v))}
+                      >
+                        <SelectTrigger data-testid="select-schedule-expert">
+                          <SelectValue placeholder="Select expert" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(() => {
+                            const projectExpertIds = new Set([
+                              ...(projectDetail?.internalExperts?.map((pe) => pe.expertId) || []),
+                              ...(projectDetail?.raSourcedExperts?.map((pe) => pe.expertId) || []),
+                            ]);
+                            const projectExperts = allExperts?.filter((e) =>
+                              projectExpertIds.has(e.id)
+                            );
+                            return projectExperts?.map((expert) => (
+                              <SelectItem key={expert.id} value={String(expert.id)}>
+                                {expert.name}
+                              </SelectItem>
+                            ));
+                          })()}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={scheduleCallForm.control}
+                name="callDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Call Date</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="date"
+                        {...field}
+                        data-testid="input-schedule-date"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={scheduleCallForm.control}
+                  name="scheduledStartTime"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Start Time</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="datetime-local"
+                          {...field}
+                          data-testid="input-schedule-start-time"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={scheduleCallForm.control}
+                  name="scheduledEndTime"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>End Time</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="datetime-local"
+                          {...field}
+                          data-testid="input-schedule-end-time"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <FormField
+                control={scheduleCallForm.control}
+                name="durationMinutes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Duration (minutes)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        {...field}
+                        onChange={(e) => field.onChange(parseInt(e.target.value) || 30)}
+                        data-testid="input-schedule-duration"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={scheduleCallForm.control}
+                name="zoomLink"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Meeting Link (optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="https://zoom.us/..."
+                        {...field}
+                        data-testid="input-schedule-zoom-link"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={scheduleCallForm.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Notes (optional)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Call agenda, topics to cover..."
+                        {...field}
+                        data-testid="input-schedule-notes"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsScheduleCallModalOpen(false);
+                    scheduleCallForm.reset();
+                  }}
+                  data-testid="button-cancel-schedule"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={createCallMutation.isPending}
+                  data-testid="button-confirm-schedule"
+                >
+                  {createCallMutation.isPending ? "Scheduling..." : "Schedule Call"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Complete Call Modal */}
+      <Dialog open={isCompleteCallModalOpen} onOpenChange={setIsCompleteCallModalOpen}>
+        <DialogContent className="max-w-md" aria-describedby="complete-call-description">
+          <DialogHeader>
+            <DialogTitle>Complete Consultation</DialogTitle>
+            <DialogDescription id="complete-call-description">
+              Mark this consultation as completed and record the actual duration
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...completeCallForm}>
+            <form onSubmit={completeCallForm.handleSubmit(onCompleteCallSubmit)} className="space-y-4">
+              {selectedCallRecord && (
+                <div className="p-3 rounded-lg bg-muted/50 border">
+                  <p className="text-sm font-medium">{getExpertNameById(selectedCallRecord.expertId)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Scheduled: {format(new Date(selectedCallRecord.callDate), "MMM dd, yyyy")}
+                  </p>
+                </div>
+              )}
+              <FormField
+                control={completeCallForm.control}
+                name="actualDurationMinutes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Actual Duration (minutes)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        {...field}
+                        onChange={(e) => field.onChange(parseInt(e.target.value) || 30)}
+                        data-testid="input-complete-duration"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={completeCallForm.control}
+                name="recordingUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Recording URL (optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="https://..."
+                        {...field}
+                        data-testid="input-complete-recording"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={completeCallForm.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Completion Notes (optional)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Call summary, key takeaways..."
+                        {...field}
+                        data-testid="input-complete-notes"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsCompleteCallModalOpen(false);
+                    setSelectedCallRecord(null);
+                    completeCallForm.reset();
+                  }}
+                  data-testid="button-cancel-complete"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={completeCallMutation.isPending}
+                  data-testid="button-confirm-complete"
+                >
+                  {completeCallMutation.isPending ? "Completing..." : "Mark Completed"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
     </div>
