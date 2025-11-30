@@ -21,13 +21,14 @@ import {
   projects,
   expertInvitationLinks,
   projectExperts,
+  projectAngles,
   users,
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
 import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles, hashPassword, comparePassword, type AuthRequest } from "./auth";
 import { insertClientSchema } from "@shared/schema";
-import { eq, and, gte, lt, sql, desc } from "drizzle-orm";
+import { eq, and, gte, lt, sql, desc, inArray } from "drizzle-orm";
 import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
 import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
@@ -3492,6 +3493,165 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching experts with recruiter:", error);
       res.status(500).json({ error: "Failed to fetch experts" });
+    }
+  });
+
+  // =====================================================
+  // SHORTLIST EXPORT ENDPOINT
+  // Export experts with pipelineStatus = "interested" as CSV
+  // Location: server/routes.ts - GET /api/projects/:projectId/export-shortlist
+  // =====================================================
+  app.get("/api/projects/:projectId/export-shortlist", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const projectId = parseInt(req.params.projectId);
+      
+      if (isNaN(projectId)) {
+        return res.status(400).json({ error: "Invalid project ID" });
+      }
+
+      // Authorization: admin and PM can export any project, RA only assigned projects
+      if (!["admin", "pm"].includes(user.role)) {
+        if (user.role === "ra") {
+          // Check if RA is assigned to this project
+          const project = await storage.getProject(projectId);
+          const isAssigned = project?.assignedRaIds?.includes(user.id);
+          if (!isAssigned) {
+            return res.status(403).json({ error: "Access denied - not assigned to this project" });
+          }
+        } else {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      }
+
+      // Fetch all project experts with pipelineStatus = "interested" (shortlisted experts)
+      const shortlistedExperts = await db
+        .select({
+          projectExpertId: projectExperts.id,
+          expertId: projectExperts.expertId,
+          angleIds: projectExperts.angleIds,
+          pipelineStatus: projectExperts.pipelineStatus,
+          respondedAt: projectExperts.respondedAt,
+          lastActivityAt: projectExperts.lastActivityAt,
+          assignedAt: projectExperts.assignedAt,
+          sourcedByRaId: projectExperts.sourcedByRaId,
+          expertName: experts.name,
+          expertEmail: experts.email,
+          expertJobTitle: experts.jobTitle,
+          expertSourcedByRaId: experts.sourcedByRaId,
+          expertSourcedAt: experts.sourcedAt,
+        })
+        .from(projectExperts)
+        .innerJoin(experts, eq(projectExperts.expertId, experts.id))
+        .where(
+          and(
+            eq(projectExperts.projectId, projectId),
+            eq(projectExperts.pipelineStatus, "interested")
+          )
+        )
+        .orderBy(experts.name);
+
+      if (shortlistedExperts.length === 0) {
+        return res.status(404).json({ error: "No shortlisted experts to export" });
+      }
+
+      // Fetch angles for the project to map IDs to names
+      const angles = await db
+        .select()
+        .from(projectAngles)
+        .where(eq(projectAngles.projectId, projectId));
+      
+      const angleMap = new Map(angles.map(a => [a.id, a.title]));
+
+      // Fetch RA names for recruiting info
+      const raIdSet = new Set(
+        shortlistedExperts
+          .map(e => e.expertSourcedByRaId || e.sourcedByRaId)
+          .filter((id): id is number => id !== null)
+      );
+      const raIds = Array.from(raIdSet);
+      
+      let raMap = new Map<number, string>();
+      if (raIds.length > 0) {
+        const ras = await db
+          .select({ id: users.id, fullName: users.fullName })
+          .from(users)
+          .where(inArray(users.id, raIds));
+        raMap = new Map(ras.map(r => [r.id, r.fullName]));
+      }
+
+      // Helper function to escape CSV fields
+      const escapeCSV = (value: string | null | undefined): string => {
+        if (value === null || value === undefined) return "";
+        const str = String(value);
+        // If contains comma, quote, or newline, wrap in quotes and escape internal quotes
+        if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+
+      // CSV headers
+      const headers = [
+        "Expert Name",
+        "Email",
+        "Title / Position",
+        "Angles",
+        "Status",
+        "Last Activity / Onboarding Date",
+        "Recruited By",
+        "Recruited At",
+        "Expert ID"
+      ];
+
+      // Build CSV rows
+      const rows = shortlistedExperts.map(expert => {
+        // Get angle names from IDs
+        const angleNames = expert.angleIds
+          ? expert.angleIds.map(id => angleMap.get(id) || `Angle ${id}`).join("; ")
+          : "";
+        
+        // Determine last activity date
+        const lastActivityDate = expert.lastActivityAt || expert.respondedAt || expert.assignedAt;
+        const formattedDate = lastActivityDate 
+          ? new Date(lastActivityDate).toISOString().split("T")[0]
+          : "";
+
+        // Get recruiter info (prefer expert-level, fallback to project-expert level)
+        const recruiterId = expert.expertSourcedByRaId || expert.sourcedByRaId;
+        const recruiterName = recruiterId ? raMap.get(recruiterId) || "" : "";
+        
+        const recruitedAt = expert.expertSourcedAt 
+          ? new Date(expert.expertSourcedAt).toISOString().split("T")[0]
+          : "";
+
+        return [
+          escapeCSV(expert.expertName),
+          escapeCSV(expert.expertEmail),
+          escapeCSV(expert.expertJobTitle),
+          escapeCSV(angleNames),
+          "Interested", // Status is always "Interested" for shortlisted
+          escapeCSV(formattedDate),
+          escapeCSV(recruiterName),
+          escapeCSV(recruitedAt),
+          String(expert.expertId)
+        ].join(",");
+      });
+
+      // Combine headers and rows
+      const csvContent = [headers.join(","), ...rows].join("\n");
+
+      // Set response headers for CSV download
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition", 
+        `attachment; filename="shortlist_project_${projectId}.csv"`
+      );
+      res.send(csvContent);
+
+    } catch (error) {
+      console.error("Error exporting shortlist:", error);
+      res.status(500).json({ error: "Failed to export shortlist" });
     }
   });
 

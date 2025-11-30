@@ -35,6 +35,7 @@ import {
   GripVertical,
   Pencil,
   Layers,
+  Download,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -156,6 +157,9 @@ export default function ProjectDetail() {
   
   // Register Expert modal state
   const [isRegisterExpertModalOpen, setIsRegisterExpertModalOpen] = useState(false);
+  
+  // Shortlist export state
+  const [isExportingShortlist, setIsExportingShortlist] = useState(false);
 
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
@@ -631,6 +635,64 @@ export default function ProjectDetail() {
   const handleAttachExperts = () => {
     if (selectedExperts.size === 0) return;
     attachExpertsMutation.mutate(Array.from(selectedExperts));
+  };
+
+  // =====================================================
+  // SHORTLIST EXPORT HANDLER
+  // Button location: Internal Experts Pipeline section header (next to "Search & Add")
+  // Exports experts with pipelineStatus = "interested" as CSV
+  // =====================================================
+  const handleExportShortlist = async () => {
+    // Check if there are any experts with "interested" pipeline status
+    const shortlistedExperts = (projectDetail?.internalExperts || [])
+      .filter(pe => pe.pipelineStatus === "interested");
+    
+    if (shortlistedExperts.length === 0) {
+      toast({
+        title: "No shortlisted experts to export yet.",
+        description: "Experts must have 'Interested' pipeline status to be included.",
+        variant: "default",
+      });
+      return;
+    }
+
+    setIsExportingShortlist(true);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/export-shortlist`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("authToken")}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to export shortlist");
+      }
+
+      // Get the CSV content as a blob
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `shortlist_project_${projectId}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      toast({
+        title: "Shortlist exported successfully",
+        description: `${shortlistedExperts.length} expert(s) exported to CSV.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Failed to export shortlist",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExportingShortlist(false);
+    }
   };
 
   const getInvitationStatusIcon = (status?: string) => {
@@ -1278,6 +1340,16 @@ export default function ProjectDetail() {
                   >
                     <Search className="h-4 w-4 mr-2" />
                     Search & Add
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleExportShortlist}
+                    disabled={isExportingShortlist}
+                    data-testid="button-export-shortlist"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    {isExportingShortlist ? "Exporting..." : "Export Shortlist"}
                   </Button>
                   {projectDetail?.angles && projectDetail.angles.length > 0 && (
                     <Select value={internalExpertsAngleFilter} onValueChange={setInternalExpertsAngleFilter}>
