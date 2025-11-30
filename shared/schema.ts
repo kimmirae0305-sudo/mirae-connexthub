@@ -159,6 +159,7 @@ export const projectExperts = pgTable("project_experts", {
   invitationToken: text("invitation_token").unique(),
   vqAnswers: jsonb("vq_answers").$type<{ questionId: number; questionText: string; answerText: string }[]>(),
   availabilityNote: text("availability_note"),
+  availabilitySlots: jsonb("availability_slots").$type<{ date: string; startTime: string; endTime: string; timezone: string }[]>(), // Structured time slots for consultations
   notes: text("notes"),
   lastActivityAt: timestamp("last_activity_at"),
 });

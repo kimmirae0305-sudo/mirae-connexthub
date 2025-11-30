@@ -27,6 +27,7 @@ import QuickInviteDecision from "@/pages/quick-invite-decision";
 import ExpertProfile from "@/pages/expert-profile";
 import Invites from "@/pages/invites";
 import RaPerformance from "@/pages/ra-performance";
+import ClientShortlist from "@/pages/client-shortlist";
 import ChangePassword from "@/pages/change-password";
 import NotFound from "@/pages/not-found";
 
@@ -99,6 +100,9 @@ function Router() {
       </Route>
       <Route path="/projects/:id">
         <MainLayout><ProjectDetail /></MainLayout>
+      </Route>
+      <Route path="/projects/:projectId/client-shortlist">
+        <MainLayout><ClientShortlist /></MainLayout>
       </Route>
       <Route path="/experts">
         <MainLayout><Experts /></MainLayout>

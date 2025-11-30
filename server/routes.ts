@@ -32,6 +32,7 @@ import { eq, and, gte, lt, sql, desc, inArray } from "drizzle-orm";
 import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
 import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
+import PDFDocument from "pdfkit";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -3652,6 +3653,381 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error exporting shortlist:", error);
       res.status(500).json({ error: "Failed to export shortlist" });
+    }
+  });
+
+  // =====================================================
+  // CLIENT SHORTLIST ENDPOINTS
+  // Feature: Client-facing shortlist of accepted experts with employment history, VQ answers, and availability
+  // Accepted status values: "interested", "shortlisted", "accepted" (excludes "declined", "completed")
+  // Location: server/routes.ts
+  // =====================================================
+
+  // GET /api/projects/:projectId/client-shortlist
+  // Returns accepted experts with full profile, employment history, VQ answers, and availability
+  app.get("/api/projects/:projectId/client-shortlist", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const projectId = parseInt(req.params.projectId);
+
+      if (isNaN(projectId)) {
+        return res.status(400).json({ error: "Invalid project ID" });
+      }
+
+      // Authorization: admin and PM can access any project, RA only assigned projects
+      if (!["admin", "pm"].includes(user.role)) {
+        if (user.role === "ra") {
+          const project = await storage.getProject(projectId);
+          const isAssigned = project?.assignedRaIds?.includes(user.id);
+          if (!isAssigned) {
+            return res.status(403).json({ error: "Access denied - not assigned to this project" });
+          }
+        } else {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      }
+
+      // Get project details including vetting questions
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      // Get project angles
+      const projectAnglesList = await storage.getProjectAngles(projectId);
+      const angleMap = new Map(projectAnglesList.map(a => [a.id, a.title]));
+
+      // Get vetting questions for this project
+      const vettingQuestionsList = await storage.getVettingQuestionsByProject(projectId);
+
+      // Accepted status values (experts who accepted the consultation)
+      const acceptedStatuses = ["interested", "shortlisted", "accepted"];
+
+      // Fetch accepted experts with full details
+      const acceptedExperts = await db
+        .select({
+          projectExpertId: projectExperts.id,
+          expertId: projectExperts.expertId,
+          pipelineStatus: projectExperts.pipelineStatus,
+          angleIds: projectExperts.angleIds,
+          vqAnswers: projectExperts.vqAnswers,
+          availabilityNote: projectExperts.availabilityNote,
+          availabilitySlots: projectExperts.availabilitySlots,
+          respondedAt: projectExperts.respondedAt,
+          // Expert details
+          expertName: experts.name,
+          expertEmail: experts.email,
+          expertJobTitle: experts.jobTitle,
+          expertCompany: experts.company,
+          expertCountry: experts.country,
+          expertCity: experts.city,
+          expertTimezone: experts.timezone,
+          expertYearsOfExperience: experts.yearsOfExperience,
+          expertIndustry: experts.industry,
+          expertExpertise: experts.expertise,
+          expertWorkHistory: experts.workHistory,
+          expertBiography: experts.biography,
+        })
+        .from(projectExperts)
+        .innerJoin(experts, eq(projectExperts.expertId, experts.id))
+        .where(
+          and(
+            eq(projectExperts.projectId, projectId),
+            inArray(projectExperts.pipelineStatus, acceptedStatuses)
+          )
+        )
+        .orderBy(desc(projectExperts.respondedAt));
+
+      // Format the response data
+      const clientShortlist = acceptedExperts.map(expert => {
+        // Get angle names
+        const angleNames = expert.angleIds
+          ? expert.angleIds.map(id => angleMap.get(id) || `Angle ${id}`)
+          : [];
+
+        // Format employment history (most recent first)
+        const workHistory = (expert.expertWorkHistory as Array<{ company: string; jobTitle: string; fromYear: number; toYear: number }>) || [];
+        const sortedWorkHistory = [...workHistory].sort((a, b) => (b.toYear || 9999) - (a.toYear || 9999));
+
+        // Format VQ answers - map question IDs to full questions
+        const vqAnswersFormatted = vettingQuestionsList.map(vq => {
+          const answer = expert.vqAnswers?.find(a => a.questionId === vq.id);
+          return {
+            questionId: vq.id,
+            questionText: vq.question,
+            answerText: answer?.answerText || null,
+            angleName: vq.angleId ? angleMap.get(vq.angleId) : null,
+          };
+        });
+
+        // Format availability slots
+        const availabilitySlots = (expert.availabilitySlots as Array<{ date: string; startTime: string; endTime: string; timezone: string }>) || [];
+
+        return {
+          projectExpertId: expert.projectExpertId,
+          expertId: expert.expertId,
+          pipelineStatus: expert.pipelineStatus,
+          angles: angleNames,
+          respondedAt: expert.respondedAt,
+          // Basic profile
+          profile: {
+            name: expert.expertName,
+            email: expert.expertEmail,
+            jobTitle: expert.expertJobTitle,
+            company: expert.expertCompany,
+            location: [expert.expertCity, expert.expertCountry].filter(Boolean).join(", ") || null,
+            timezone: expert.expertTimezone,
+            yearsOfExperience: expert.expertYearsOfExperience,
+            industry: expert.expertIndustry,
+            expertise: expert.expertExpertise,
+            biography: expert.expertBiography,
+          },
+          // Employment history
+          employmentHistory: sortedWorkHistory.slice(0, 5), // Show up to 5 most recent roles
+          // VQ answers
+          vettingAnswers: vqAnswersFormatted,
+          // Availability
+          availability: {
+            note: expert.availabilityNote,
+            slots: availabilitySlots,
+          },
+        };
+      });
+
+      res.json({
+        projectId,
+        projectTitle: project.title,
+        totalExperts: clientShortlist.length,
+        experts: clientShortlist,
+      });
+
+    } catch (error) {
+      console.error("Error fetching client shortlist:", error);
+      res.status(500).json({ error: "Failed to fetch client shortlist" });
+    }
+  });
+
+  // GET /api/projects/:projectId/client-shortlist-export
+  // Generates PDF export of client shortlist
+  app.get("/api/projects/:projectId/client-shortlist-export", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const projectId = parseInt(req.params.projectId);
+
+      if (isNaN(projectId)) {
+        return res.status(400).json({ error: "Invalid project ID" });
+      }
+
+      // Authorization: admin and PM can access any project, RA only assigned projects
+      if (!["admin", "pm"].includes(user.role)) {
+        if (user.role === "ra") {
+          const project = await storage.getProject(projectId);
+          const isAssigned = project?.assignedRaIds?.includes(user.id);
+          if (!isAssigned) {
+            return res.status(403).json({ error: "Access denied - not assigned to this project" });
+          }
+        } else {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      }
+
+      // Get project details
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      // Get project angles
+      const projectAnglesList = await storage.getProjectAngles(projectId);
+      const angleMap = new Map(projectAnglesList.map(a => [a.id, a.title]));
+
+      // Get vetting questions for this project
+      const vettingQuestionsList = await storage.getVettingQuestionsByProject(projectId);
+
+      // Accepted status values
+      const acceptedStatuses = ["interested", "shortlisted", "accepted"];
+
+      // Fetch accepted experts
+      const acceptedExperts = await db
+        .select({
+          projectExpertId: projectExperts.id,
+          expertId: projectExperts.expertId,
+          pipelineStatus: projectExperts.pipelineStatus,
+          angleIds: projectExperts.angleIds,
+          vqAnswers: projectExperts.vqAnswers,
+          availabilityNote: projectExperts.availabilityNote,
+          availabilitySlots: projectExperts.availabilitySlots,
+          expertName: experts.name,
+          expertEmail: experts.email,
+          expertJobTitle: experts.jobTitle,
+          expertCompany: experts.company,
+          expertCountry: experts.country,
+          expertCity: experts.city,
+          expertTimezone: experts.timezone,
+          expertYearsOfExperience: experts.yearsOfExperience,
+          expertIndustry: experts.industry,
+          expertWorkHistory: experts.workHistory,
+        })
+        .from(projectExperts)
+        .innerJoin(experts, eq(projectExperts.expertId, experts.id))
+        .where(
+          and(
+            eq(projectExperts.projectId, projectId),
+            inArray(projectExperts.pipelineStatus, acceptedStatuses)
+          )
+        )
+        .orderBy(desc(projectExperts.respondedAt));
+
+      if (acceptedExperts.length === 0) {
+        return res.status(404).json({ error: "No accepted experts to export" });
+      }
+
+      // Generate PDF using PDFKit
+      const doc = new PDFDocument({ 
+        size: "A4",
+        margins: { top: 50, bottom: 50, left: 50, right: 50 }
+      });
+
+      // Set response headers for PDF download
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="client_shortlist_project_${projectId}.pdf"`
+      );
+
+      // Pipe PDF to response
+      doc.pipe(res);
+
+      // Title page
+      doc.fontSize(24).font("Helvetica-Bold").text("Client Shortlist", { align: "center" });
+      doc.moveDown(0.5);
+      doc.fontSize(16).font("Helvetica").text(project.title, { align: "center" });
+      doc.moveDown(0.5);
+      doc.fontSize(12).fillColor("#666666").text(`Generated: ${new Date().toLocaleDateString()}`, { align: "center" });
+      doc.fillColor("#000000");
+      doc.moveDown(0.5);
+      doc.fontSize(12).text(`Total Experts: ${acceptedExperts.length}`, { align: "center" });
+      doc.moveDown(2);
+
+      // Add each expert
+      acceptedExperts.forEach((expert, index) => {
+        // Add new page for each expert after the first
+        if (index > 0) {
+          doc.addPage();
+        }
+
+        // Expert header
+        doc.fontSize(18).font("Helvetica-Bold").fillColor("#1a1a1a");
+        doc.text(expert.expertName || "Unknown Expert");
+        doc.moveDown(0.3);
+        
+        // Title and company
+        if (expert.expertJobTitle || expert.expertCompany) {
+          doc.fontSize(12).font("Helvetica").fillColor("#333333");
+          const titleCompany = [expert.expertJobTitle, expert.expertCompany].filter(Boolean).join(" at ");
+          doc.text(titleCompany);
+        }
+
+        // Location and experience
+        const location = [expert.expertCity, expert.expertCountry].filter(Boolean).join(", ");
+        if (location || expert.expertYearsOfExperience) {
+          doc.fontSize(11).fillColor("#666666");
+          const details = [];
+          if (location) details.push(location);
+          if (expert.expertYearsOfExperience) details.push(`${expert.expertYearsOfExperience} years experience`);
+          if (expert.expertTimezone) details.push(expert.expertTimezone);
+          doc.text(details.join(" | "));
+        }
+
+        // Angles
+        if (expert.angleIds && expert.angleIds.length > 0) {
+          const angleNames = expert.angleIds.map(id => angleMap.get(id) || `Angle ${id}`).join(", ");
+          doc.fontSize(10).fillColor("#0066cc").text(`Angles: ${angleNames}`);
+        }
+
+        doc.moveDown(1);
+        doc.fillColor("#000000");
+
+        // Section 1: Employment History
+        doc.fontSize(14).font("Helvetica-Bold").text("Employment History");
+        doc.moveDown(0.3);
+
+        const workHistory = (expert.expertWorkHistory as Array<{ company: string; jobTitle: string; fromYear: number; toYear: number }>) || [];
+        const sortedHistory = [...workHistory].sort((a, b) => (b.toYear || 9999) - (a.toYear || 9999));
+
+        if (sortedHistory.length > 0) {
+          doc.fontSize(11).font("Helvetica");
+          sortedHistory.slice(0, 5).forEach((job, i) => {
+            const years = job.toYear 
+              ? `${job.fromYear} - ${job.toYear}`
+              : `${job.fromYear} - Present`;
+            doc.fillColor("#333333").text(`${job.jobTitle}`, { continued: true });
+            doc.fillColor("#666666").text(` at ${job.company} (${years})`);
+          });
+        } else {
+          doc.fontSize(11).font("Helvetica-Oblique").fillColor("#999999").text("No employment history available");
+        }
+
+        doc.moveDown(1);
+        doc.fillColor("#000000");
+
+        // Section 2: Vetting Questions & Answers
+        doc.fontSize(14).font("Helvetica-Bold").text("Vetting Questions & Answers");
+        doc.moveDown(0.3);
+
+        if (vettingQuestionsList.length > 0) {
+          doc.fontSize(11).font("Helvetica");
+          vettingQuestionsList.forEach((vq, i) => {
+            const answer = expert.vqAnswers?.find((a: any) => a.questionId === vq.id);
+            const angleName = vq.angleId ? angleMap.get(vq.angleId) : null;
+            
+            // Question
+            doc.font("Helvetica-Bold").fillColor("#333333");
+            const questionPrefix = angleName ? `[${angleName}] ` : "";
+            doc.text(`Q${i + 1}: ${questionPrefix}${vq.question}`);
+            
+            // Answer
+            doc.font("Helvetica").fillColor("#444444");
+            const answerText = answer?.answerText || "No answer provided";
+            doc.text(`A${i + 1}: ${answerText}`);
+            doc.moveDown(0.5);
+          });
+        } else {
+          doc.fontSize(11).font("Helvetica-Oblique").fillColor("#999999").text("No vetting questions for this project");
+        }
+
+        doc.moveDown(0.5);
+        doc.fillColor("#000000");
+
+        // Section 3: Availability
+        doc.fontSize(14).font("Helvetica-Bold").text("Availability");
+        doc.moveDown(0.3);
+
+        const availabilitySlots = (expert.availabilitySlots as Array<{ date: string; startTime: string; endTime: string; timezone: string }>) || [];
+
+        if (availabilitySlots.length > 0) {
+          doc.fontSize(11).font("Helvetica");
+          availabilitySlots.forEach(slot => {
+            doc.fillColor("#333333").text(`${slot.date}, ${slot.startTime} - ${slot.endTime} (${slot.timezone})`);
+          });
+        } else if (expert.availabilityNote) {
+          doc.fontSize(11).font("Helvetica").fillColor("#333333").text(expert.availabilityNote);
+        } else {
+          doc.fontSize(11).font("Helvetica-Oblique").fillColor("#999999").text("No availability submitted yet");
+        }
+
+        // Add horizontal line separator if not last expert
+        if (index < acceptedExperts.length - 1) {
+          doc.moveDown(2);
+        }
+      });
+
+      // Finalize PDF
+      doc.end();
+
+    } catch (error) {
+      console.error("Error exporting client shortlist:", error);
+      res.status(500).json({ error: "Failed to export client shortlist" });
     }
   });
 

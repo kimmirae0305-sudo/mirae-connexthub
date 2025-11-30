@@ -1,0 +1,150 @@
+You are working on the Mirae Connext ENS app.
+
+Goal:
+Implement a “Client Shortlist” feature for each Project. The shortlist must include ONLY experts who accepted the consultation and must contain:
+- Employment history
+- Vetting Questions (VQs) + each expert’s answers
+- The expert’s available time slots for the call
+
+Important business rules:
+- “Accepted expert” = experts on this project whose Pipeline / Invitation status indicates they are willing to participate (e.g. status == "Interested" or "Accepted" or "Scheduled"). Please use the existing status field and values in the codebase, but ensure we only include experts that explicitly accepted the project.
+- This shortlist is client-facing, so the layout must be clean and readable.
+
+---
+
+A. Data model wiring
+
+1) For each Project, there is a list of linked experts (Internal Experts Pipeline).
+   Each project-expert association should already contain or be able to access:
+   - Expert basic profile (name, title, company, location, seniority, etc.)
+   - The project’s Vetting Questions (VQs)
+   - The expert’s answers to each VQ (typically stored in a join table like ProjectExpertAnswers, ExpertVQAnswers, or similar).
+   - The expert’s availability for this specific project/consultation (time slots or proposed times).
+
+2) Please ensure we can query, for a given projectId:
+   - All experts where pipeline_status is something like "Interested" or "Scheduled" (these are considered “Accepted experts”).
+   - For each of these experts:
+     • Basic profile fields
+     • Employment history (see below)
+     • VQs + this expert’s answers
+     • Availability slots
+
+3) Employment history:
+   - Use the existing data model for the expert’s CV / employment history.
+   - For the shortlist, we need at least:
+     • Current role (Company, Job Title, From–To)
+     • Up to 2–3 past roles (Company, Job Title, From–To)
+   - If the data model stores more items, it’s okay, but in the client view we should show the most recent roles in reverse chronological order.
+
+4) Availability:
+   - Use the availability data already collected from the expert for that project (e.g. from the onboarding or availability form).
+   - Represent availability as a list of time slots with date, start time, end time, and timezone.
+   - If no availability is stored, show “No availability submitted yet”.
+
+---
+
+B. Client Shortlist View (UI)
+
+1) In the Project page (Existing Experts / Internal Experts Pipeline tab), add a new button:
+   - Label: “Client Shortlist”
+   - Place it near the top-right area of the Internal Experts Pipeline section, next to or near “Search & Add”.
+   - Clicking this opens a dedicated “Client Shortlist” view for that project.
+
+2) Client Shortlist page should display one card or section per accepted expert:
+   For each expert, show:
+
+   Header:
+   - Expert Name
+   - Current Title & Company
+   - Location (if available)
+   - Seniority / Years of experience (if available)
+
+   Section 1 – Employment History:
+   - List the most recent roles, for example:
+     • Company, Job Title, From–To
+     • Company, Job Title, From–To
+     • Company, Job Title, From–To
+   - If there are more roles, either truncate or allow “Show more”.
+
+   Section 2 – Vetting Questions & Answers:
+   - For this project, show each VQ and the expert’s answer:
+     • Q1: <VQ text>
+       A1: <Expert’s answer>
+     • Q2: <VQ text>
+       A2: <Expert’s answer>
+   - Only include VQs that belong to this project.
+   - If the expert has not answered a particular question, show “No answer”.
+
+   Section 3 – Availability:
+   - Show all submitted time slots for this project:
+     • e.g. “2025-12-02, 09:00–10:00 (UTC-3)”
+   - If there is no availability, show “No availability submitted yet”.
+
+3) Make sure the Client Shortlist page is read-only (no editing from this view; it’s purely for reviewing and exporting).
+
+---
+
+C. Export feature
+
+1) On the Client Shortlist page, add a button:
+   - Label: “Export Shortlist”
+   - Action: Export all accepted experts on this project, with the following content:
+     • Basic profile
+     • Employment history
+     • Project VQs + answers
+     • Availability
+
+2) Export format:
+   - Prefer a clean, client-friendly format such as PDF.
+   - One PDF combining all experts is fine (each expert can have its own page or section).
+   - Basic layout structure per expert in the PDF:
+     - Header (Name, Title, Company, Location)
+     - Employment History (list)
+     - VQs & Answers (Q/A pairs)
+     - Availability (list of time slots)
+   - File name example: `client_shortlist_project_<projectId>.pdf`
+
+3) Backend:
+   - Implement an endpoint such as:
+     GET /api/projects/:projectId/client-shortlist-export
+   - This endpoint:
+     • Fetches all accepted experts for that project.
+     • Collects their employment history, VQ answers, and availability.
+     • Generates the PDF with a simple, professional layout.
+     • Returns the file with appropriate headers so the browser downloads it.
+
+4) Frontend:
+   - The “Export Shortlist” button on the Client Shortlist page calls this endpoint and triggers the download.
+
+---
+
+D. Filters and conditions
+
+1) Only include experts that:
+   - Belong to this project AND
+   - Have accepted the consultation (pipeline status like “Interested” or “Scheduled”). Do NOT include Invited, Declined, or Pending statuses.
+
+2) If no accepted experts exist:
+   - The Client Shortlist page should display a simple message:
+     “No accepted experts available yet.”
+   - The Export button should either be disabled or display a toast:
+     “No accepted experts to export.”
+
+---
+
+E. Documentation & Testing
+
+1) In the code comments or a short internal doc, describe:
+   - Where the Client Shortlist view is implemented (frontend component / route).
+   - Where the shortlist export endpoint is implemented (backend).
+   - Which status values are considered “accepted”.
+
+2) Provide a short test scenario in comments:
+   - Create a project.
+   - Invite a few experts.
+   - Have some experts accept (status “Interested” / “Scheduled”) and fill in:
+     • Employment history
+     • VQ answers
+     • Availability
+   - Open the Client Shortlist, verify all fields appear correctly.
+   - Click “Export Shortlist” and check that the PDF file includes all the required information for each expert.

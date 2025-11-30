@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useParams, useLocation } from "wouter";
+import { useParams, useLocation, Link } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
 import {
   ArrowLeft,
@@ -36,6 +36,7 @@ import {
   Pencil,
   Layers,
   Download,
+  FileSearch,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1341,6 +1342,16 @@ export default function ProjectDetail() {
                     <Search className="h-4 w-4 mr-2" />
                     Search & Add
                   </Button>
+                  <Link href={`/projects/${projectId}/client-shortlist`}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      data-testid="button-client-shortlist"
+                    >
+                      <FileSearch className="h-4 w-4 mr-2" />
+                      Client Shortlist
+                    </Button>
+                  </Link>
                   <Button
                     variant="secondary"
                     size="sm"
