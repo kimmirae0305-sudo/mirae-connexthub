@@ -793,14 +793,23 @@ export class DatabaseStorage implements IStorage {
     return newRecord;
   }
 
-  async updateCallRecord(id: number, record: Partial<InsertCallRecord>): Promise<CallRecord | undefined> {
+  /**
+   * Update a call record.
+   * If cuUsed is explicitly provided, use that value (manual override).
+   * If only durationMinutes is provided, auto-calculate cuUsed.
+   * CU formula: ceil(durationMinutes / 15) * 0.25
+   */
+  async updateCallRecord(id: number, record: Partial<InsertCallRecord> & { cuUsed?: string }): Promise<CallRecord | undefined> {
     const existing = await this.getCallRecord(id);
     if (!existing) return undefined;
     
     let updateData: any = { ...record };
-    if (record.durationMinutes !== undefined) {
+    
+    // Only auto-calculate CU if cuUsed is NOT explicitly provided
+    if (record.durationMinutes !== undefined && record.cuUsed === undefined) {
       updateData.cuUsed = calculateCU(record.durationMinutes).toString();
     }
+    // If cuUsed is explicitly provided, use it as-is (manual override)
     
     const [updated] = await db
       .update(callRecords)

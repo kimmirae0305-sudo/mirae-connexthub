@@ -92,6 +92,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -180,6 +181,7 @@ export default function ProjectDetail() {
   // Consultations tab state
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const [isCompleteCallModalOpen, setIsCompleteCallModalOpen] = useState(false);
+  const [isEditCallModalOpen, setIsEditCallModalOpen] = useState(false);
   const [selectedCallRecord, setSelectedCallRecord] = useState<CallRecord | null>(null);
   const [consultationStatusFilter, setConsultationStatusFilter] = useState<string>("all");
   
@@ -546,6 +548,28 @@ export default function ProjectDetail() {
     },
   });
 
+  /**
+   * Edit Call Mutation - Updates duration and CU Used
+   * Uses PATCH /api/call-records/:id endpoint
+   * CU formula: ceil(durationMinutes / 15) * 0.25
+   */
+  const editCallMutation = useMutation({
+    mutationFn: (data: { durationMinutes: number; cuUsed: string }) =>
+      apiRequest("PATCH", `/api/call-records/${selectedCallRecord?.id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      setIsEditCallModalOpen(false);
+      setSelectedCallRecord(null);
+      editCallForm.reset();
+      toast({ title: "Consultation updated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update consultation", variant: "destructive" });
+    },
+  });
+
   // Schedule Call Form
   const scheduleCallFormSchema = z.object({
     expertId: z.number().min(1, "Expert is required"),
@@ -589,6 +613,45 @@ export default function ProjectDetail() {
       notes: "",
     },
   });
+
+  /**
+   * Edit Call Form Schema
+   * Duration must be > 0
+   * CU Used must be >= 0 and in 0.25 increments
+   */
+  const editCallFormSchema = z.object({
+    durationMinutes: z.number().min(1, "Duration must be greater than 0"),
+    cuUsed: z.number().min(0, "CU Used must be 0 or greater").refine(
+      (val) => val % 0.25 === 0,
+      "CU Used must be in 0.25 increments (e.g., 0.25, 0.50, 0.75, 1.00)"
+    ),
+  });
+
+  type EditCallFormData = z.infer<typeof editCallFormSchema>;
+
+  const editCallForm = useForm<EditCallFormData>({
+    resolver: zodResolver(editCallFormSchema),
+    defaultValues: {
+      durationMinutes: 30,
+      cuUsed: 0.5,
+    },
+  });
+
+  /**
+   * Calculate CU from duration
+   * CU formula: ceil(durationMinutes / 15) * 0.25
+   * (1 CU = 60 minutes, charged in 0.25 CU / 15 min increments)
+   */
+  const calculateCuFromDuration = (minutes: number): number => {
+    return Math.ceil(minutes / 15) * 0.25;
+  };
+
+  const onEditCallSubmit = (data: EditCallFormData) => {
+    editCallMutation.mutate({
+      durationMinutes: data.durationMinutes,
+      cuUsed: data.cuUsed.toString(),
+    });
+  };
 
   const onScheduleCallSubmit = (data: ScheduleCallFormData) => {
     const cuUsed = Math.ceil((data.durationMinutes / 60) * 4) / 4;
@@ -2131,6 +2194,20 @@ export default function ProjectDetail() {
                                     Join Call
                                   </DropdownMenuItem>
                                 )}
+                                {!isRA && (
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedCallRecord(record);
+                                      editCallForm.setValue("durationMinutes", record.durationMinutes || 30);
+                                      editCallForm.setValue("cuUsed", parseFloat(record.cuUsed || "0.5"));
+                                      setIsEditCallModalOpen(true);
+                                    }}
+                                    data-testid={`button-edit-call-${record.id}`}
+                                  >
+                                    <Pencil className="h-4 w-4 mr-2" />
+                                    Edit Call
+                                  </DropdownMenuItem>
+                                )}
                                 {(record.status === "pending" || record.status === "scheduled") && !isRA && (
                                   <DropdownMenuItem
                                     onClick={() => {
@@ -3049,6 +3126,93 @@ export default function ProjectDetail() {
                   data-testid="button-confirm-complete"
                 >
                   {completeCallMutation.isPending ? "Completing..." : "Mark Completed"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Call Modal */}
+      <Dialog open={isEditCallModalOpen} onOpenChange={setIsEditCallModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Consultation</DialogTitle>
+            <DialogDescription>
+              Update the duration and CU usage for this consultation.
+              CU auto-calculates based on duration (1 CU = 60 min, billed in 0.25 CU / 15 min increments).
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...editCallForm}>
+            <form onSubmit={editCallForm.handleSubmit(onEditCallSubmit)} className="space-y-4">
+              <FormField
+                control={editCallForm.control}
+                name="durationMinutes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Duration (minutes)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        {...field}
+                        onChange={(e) => {
+                          const minutes = parseInt(e.target.value) || 0;
+                          field.onChange(minutes);
+                          // Auto-calculate CU when duration changes
+                          const calculatedCu = calculateCuFromDuration(minutes);
+                          editCallForm.setValue("cuUsed", calculatedCu);
+                        }}
+                        data-testid="input-edit-duration"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={editCallForm.control}
+                name="cuUsed"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>CU Used (manual override allowed)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="0.25"
+                        min={0}
+                        {...field}
+                        onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                        data-testid="input-edit-cu"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Auto-calculated: {calculateCuFromDuration(editCallForm.watch("durationMinutes"))} CU. 
+                      Override if needed (must be in 0.25 increments).
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditCallModalOpen(false);
+                    setSelectedCallRecord(null);
+                    editCallForm.reset();
+                  }}
+                  data-testid="button-cancel-edit"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={editCallMutation.isPending}
+                  data-testid="button-confirm-edit"
+                >
+                  {editCallMutation.isPending ? "Saving..." : "Save Changes"}
                 </Button>
               </DialogFooter>
             </form>

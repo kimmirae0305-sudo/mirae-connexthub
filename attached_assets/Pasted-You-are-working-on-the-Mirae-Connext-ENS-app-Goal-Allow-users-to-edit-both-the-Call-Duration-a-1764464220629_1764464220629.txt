@@ -1,0 +1,109 @@
+You are working on the Mirae Connext ENS app.
+
+Goal:
+Allow users to edit both the Call Duration and CU Used values for a consultation inside the Project → Consultations tab.
+
+Current UI:
+- In each Project, there is a “Consultations” tab with a table:
+  • Expert
+  • Date
+  • Duration
+  • CU Used
+  • Status
+  • Assigned RA
+  • Actions (ellipsis menu: “Mark Completed”, “Cancel Call”)
+
+We need to:
+1) Add an explicit “Edit Call” option in the Actions menu.
+2) Open a modal where the user can edit:
+   - Call Duration (in minutes)
+   - CU Used (credits)
+   - (Optionally we can also show Status and Assigned RA, but the key requirement is Duration and CU Used.)
+
+——————
+Business rules
+——————
+
+- CU Used is normally calculated based on duration:
+  • Billing rule: 1 CU = 60 minutes.
+  • Charge in 0.25 CU increments (every 15 minutes).
+  • Formula:
+      cuUsed = ceil(durationMinutes / 15) * 0.25
+- However, the user must be allowed to override CU Used manually if needed.
+
+Behavior requirements:
+- When the modal opens:
+  • Pre-fill “Duration (minutes)” with the current stored duration.
+  • Pre-fill “CU Used” with the current stored CU value.
+- When the Duration value is changed:
+  • Automatically recalculate CU Used using the formula above, BUT keep the CU Used field editable so the user can manually adjust after the auto-calculation.
+- Validation:
+  • Duration must be > 0.
+  • CU Used must be >= 0 and in 0.25 increments (0.25, 0.50, 0.75, 1.00, etc.).
+  • If the CU Used value is not a multiple of 0.25, show a small validation message.
+- On save:
+  • Persist the updated duration and CU Used to the database.
+  • Update:
+     – The row in the consultations table.
+     – The summary metrics at the top of the tab (Scheduled, Completed, CUs Used).
+     – Any other CU usage trackers that depend on this consultation (Usage Tracker / Analytics, if they read from the same data source).
+
+——————
+Implementation details
+——————
+
+A. Backend
+1) Add/update an endpoint to edit a consultation:
+   - PATCH /api/consultations/:id
+   - Accept payload:
+       {
+         durationMinutes: number,
+         cuUsed: number
+       }
+   - Update the consultation record in the database.
+   - Recalculate any derived fields if needed.
+
+B. Frontend
+1) Actions menu:
+   - Add a new option “Edit Call” under the ellipsis menu for each consultation row.
+
+2) Edit modal component (e.g. <EditConsultationModal />):
+   Fields:
+   - Duration (minutes) – type=number
+   - CU Used – type=number, step=0.25
+
+   Behavior:
+   - When opened, fetch or receive the current consultation object.
+   - On Duration change:
+       • Recalculate CU with:
+           const cu = Math.ceil(durationMinutes / 15) * 0.25;
+       • Update the CU field, but allow the user to manually override afterwards.
+   - On Save:
+       • Call PATCH /api/consultations/:id with the new values.
+       • On success:
+           – Close modal.
+           – Update the consultations table row.
+           – Refresh or recompute the CUs Used summary card.
+
+3) UI / UX:
+   - Keep styling consistent with existing modals (rounded corners, header title “Edit Consultation” or “Edit Call”).
+   - Buttons:
+       • “Cancel”
+       • “Save changes” (primary)
+
+C. Edge cases
+- If the consultation is already marked Completed, the user should still be allowed to adjust Duration and CU Used (to fix errors).
+- If the API update fails, show a small error toast and do not change the UI values.
+- If Duration or CU Used is cleared or invalid, disable the Save button and show a small validation message.
+
+D. Documentation
+- In a short comment, indicate:
+  • Where the Edit Call modal component is defined.
+  • Which endpoint updates the consultation.
+  • Where the CU rounding logic is implemented, so future updates to the billing rule are easy.
+
+After implementation, the user should be able to:
+- Open Project → Consultations.
+- Click “…” → “Edit Call” on any row.
+- Change the duration and CU Used.
+- Save it and immediately see updated values and CU totals.
