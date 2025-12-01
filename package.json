@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-  "start": "node dist/index.cjs",
-  "build": "echo Build step skipped"
-},
-  "dependencies": {},
+    "start": "node dist/index.cjs",
+    "build": "echo Build step skipped"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "date-fns-tz": "^3.2.0",
+    "dotenv": "^17.2.3"
+  },
   "devDependencies": {}
 }
