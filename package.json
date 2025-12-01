@@ -3,11 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "tsc script/build.ts",
-    "postbuild": "echo \"skip postbuild\"",
-    "start": "node -r dotenv/config dist/index.cjs",
-    "start:local": "node -r dotenv/config local-server.cjs"
-  },
+  "start": "node -r dotenv/config dist/index.cjs",
+  "build": "echo Build step skipped"
+},
   "dependencies": {},
   "devDependencies": {}
 }
