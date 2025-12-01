@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-  "start": "node -r dotenv/config dist/index.cjs",
+  "start": "node dist/index.cjs",
   "build": "echo Build step skipped"
 },
   "dependencies": {},
