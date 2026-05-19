@@ -123,7 +123,7 @@ export async function loginHandler(req: Request, res: Response) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    if (!user.isActive) {
+    if (user.isActive === false) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
