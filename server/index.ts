@@ -64,22 +64,41 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+function sanitizeResponseBody(body: unknown): unknown {
+  if (Array.isArray(body)) {
+    return body.map(sanitizeResponseBody);
+  }
+
+  if (body && typeof body === "object" && !(body instanceof Date) && !Buffer.isBuffer(body)) {
+    return Object.fromEntries(
+      Object.entries(body)
+        .filter(([key]) => key !== "passwordHash")
+        .map(([key, value]) => [key, sanitizeResponseBody(value)])
+    );
+  }
+
+  return body;
+}
+
 app.use((req, res, next) => {
   const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  const requestPath = req.path;
+  let capturedJsonResponse: unknown;
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
+    const sanitizedBody = sanitizeResponseBody(bodyJson);
+    capturedJsonResponse = sanitizedBody;
+    return originalResJson.apply(res, [sanitizedBody, ...args]);
   };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+
+    if (requestPath.startsWith("/api")) {
+      let logLine = `${req.method} ${requestPath} ${res.statusCode} in ${duration}ms`;
+
+      if (process.env.NODE_ENV !== "production" && capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
 
