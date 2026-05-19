@@ -89,6 +89,9 @@ function Router() {
       <Route path="/invite/onboarding/:token">
         {(params) => <QuickInviteOnboarding />}
       </Route>
+      <Route path="/r/:token">
+        {(params) => <QuickInviteOnboarding />}
+      </Route>
       <Route path="/invite/decide/:token">
         {(params) => <QuickInviteDecision />}
       </Route>
