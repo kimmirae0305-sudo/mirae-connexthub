@@ -21,6 +21,45 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const userStorageKeys = ["user", "authUser", "currentUser"];
+const invalidStorageValues = new Set(["", "undefined", "null"]);
+
+function getStoredAuthToken() {
+  const storedToken = localStorage.getItem("authToken");
+  const normalizedToken = storedToken?.trim() ?? "";
+
+  if (invalidStorageValues.has(normalizedToken)) {
+    localStorage.removeItem("authToken");
+    sessionStorage.removeItem("authToken");
+    return null;
+  }
+
+  return storedToken;
+}
+
+function clearInvalidStoredJson(storage: Storage, key: string) {
+  const storedValue = storage.getItem(key);
+  const normalizedValue = storedValue?.trim() ?? "";
+
+  if (!storedValue || invalidStorageValues.has(normalizedValue)) {
+    storage.removeItem(key);
+    return;
+  }
+
+  try {
+    JSON.parse(storedValue);
+  } catch {
+    storage.removeItem(key);
+  }
+}
+
+function sanitizeStoredAuthValues() {
+  userStorageKeys.forEach((key) => {
+    clearInvalidStoredJson(localStorage, key);
+    clearInvalidStoredJson(sessionStorage, key);
+  });
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -28,7 +67,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [, setLocation] = useLocation();
 
   useEffect(() => {
-    const storedToken = localStorage.getItem("authToken");
+    sanitizeStoredAuthValues();
+    const storedToken = getStoredAuthToken();
     if (storedToken) {
       setToken(storedToken);
       fetchUser(storedToken);
