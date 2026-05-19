@@ -1022,6 +1022,11 @@ export default function ProjectDetail() {
     );
   }
 
+  const projectApplications = [
+    ...(projectDetail.internalExperts || []),
+    ...(projectDetail.raSourcedExperts || []),
+  ].filter((pe) => pe.applicationStatus === "submitted" || pe.acceptedAt || pe.expectedHourlyRateUsd);
+
   return (
     <div className="space-y-6 p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1063,6 +1068,9 @@ export default function ProjectDetail() {
           </TabsTrigger>
           <TabsTrigger value="ra-sourcing" data-testid="tab-ra-sourcing">
             RA Sourcing {projectDetail.raSourcedExperts?.length ? `(${projectDetail.raSourcedExperts.length})` : ""}
+          </TabsTrigger>
+          <TabsTrigger value="applications" data-testid="tab-applications">
+            Applications {projectApplications.length ? `(${projectApplications.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="consultations" data-testid="tab-consultations">
             Consultations {projectCallRecords?.length ? `(${projectCallRecords.length})` : ""}
@@ -2024,6 +2032,91 @@ export default function ProjectDetail() {
                   </div>
                 );
               })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="applications" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <ClipboardList className="h-4 w-4" />
+                Project Applications
+              </CardTitle>
+              <CardDescription>
+                Experts who submitted the public onboarding application for this project
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {projectApplications.length === 0 ? (
+                <EmptyState
+                  icon={ClipboardList}
+                  title="No submitted applications yet"
+                  description="Submitted onboarding forms will appear here for RA and PM review."
+                />
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
+                        <TableHead className="text-xs font-semibold uppercase">Rate</TableHead>
+                        <TableHead className="text-xs font-semibold uppercase">Consent</TableHead>
+                        <TableHead className="text-xs font-semibold uppercase">Answers</TableHead>
+                        <TableHead className="text-xs font-semibold uppercase">Availability</TableHead>
+                        <TableHead className="text-xs font-semibold uppercase">Conflict Check</TableHead>
+                        <TableHead className="text-xs font-semibold uppercase">Submitted</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {projectApplications.map((pe) => (
+                        <TableRow key={pe.id} data-testid={`row-project-application-${pe.id}`}>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {pe.expert?.email} {pe.expert?.jobTitle ? `- ${pe.expert.jobTitle}` : ""}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {pe.expectedHourlyRateUsd ? `$${Number(pe.expectedHourlyRateUsd).toFixed(0)}/hr` : "-"}
+                          </TableCell>
+                          <TableCell>
+                            {pe.termsAccepted && pe.lgpdAccepted ? (
+                              <Badge className="bg-green-500/10 text-green-600 border-green-500/20">
+                                Complete
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">Missing</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {Array.isArray(pe.vqAnswers) && pe.vqAnswers.length > 0 ? (
+                              <Badge variant="outline">{pe.vqAnswers.length} answers</Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="max-w-[220px] truncate text-sm">
+                            {pe.availabilityNote || "-"}
+                          </TableCell>
+                          <TableCell className="max-w-[220px] truncate text-sm">
+                            {pe.conflictCheck || "-"}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">
+                            {pe.acceptedAt
+                              ? formatDistanceToNow(new Date(pe.acceptedAt), { addSuffix: true })
+                              : pe.respondedAt
+                              ? formatDistanceToNow(new Date(pe.respondedAt), { addSuffix: true })
+                              : "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
