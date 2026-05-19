@@ -1922,7 +1922,7 @@ export default function ProjectDetail() {
                                       size="sm"
                                       className="gap-1"
                                       onClick={async () => {
-                                        const fullUrl = `${window.location.origin}/invite/onboarding/${invite.token}`;
+                                        const fullUrl = `${window.location.origin}/r/${invite.token}`;
                                         await navigator.clipboard.writeText(fullUrl);
                                         toast({
                                           title: "Link copied",

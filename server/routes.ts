@@ -34,6 +34,8 @@ import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
 import PDFDocument from "pdfkit";
 
+const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -756,7 +758,7 @@ export async function registerRoutes(
       }
 
       // ALWAYS generate a NEW unique token for each invitation
-      const token = crypto.randomBytes(32).toString("hex");
+      const token = generateRecruitmentToken();
       const link = await storage.createExpertInvitationLink({
         token,
         projectId,
@@ -876,7 +878,7 @@ export async function registerRoutes(
       });
 
       // Generate unique invite token
-      const token = crypto.randomBytes(32).toString("hex");
+      const token = generateRecruitmentToken();
       const link = await storage.createExpertInvitationLink({
         token,
         projectId,
@@ -1317,7 +1319,7 @@ export async function registerRoutes(
       const candidateContact = email || phoneNumber || linkedinUrl || null;
 
       // Generate unique invite token
-      const token = crypto.randomBytes(32).toString("hex");
+      const token = generateRecruitmentToken();
       const link = await storage.createExpertInvitationLink({
         token,
         projectId,
@@ -1339,7 +1341,7 @@ export async function registerRoutes(
         description: `Generated quick invite link for ${candidateName} (Contact: ${candidateContact})`,
       });
 
-      const inviteUrl = `/invite/onboarding/${token}`;
+      const inviteUrl = `/r/${token}`;
       res.status(201).json({
         link,
         inviteUrl,
@@ -1370,7 +1372,7 @@ export async function registerRoutes(
       }
 
       // ALWAYS generate a NEW unique token for each invitation
-      const token = crypto.randomBytes(32).toString("hex");
+      const token = generateRecruitmentToken();
       const user = (req as any).user;
       const link = await storage.createExpertInvitationLink({
         token,
@@ -1808,7 +1810,7 @@ export async function registerRoutes(
       const vqs = await storage.getVettingQuestionsByProject(assignment.projectId);
       
       // ALWAYS create a NEW unique token for each invitation
-      const token = crypto.randomBytes(32).toString("hex");
+      const token = generateRecruitmentToken();
       const user = (req as any).user;
       const link = await storage.createExpertInvitationLink({
         token,
@@ -2015,7 +2017,7 @@ export async function registerRoutes(
           const finalAngleIds = angleIds && angleIds.length > 0 ? angleIds : pe.angleIds;
           
           // ALWAYS create a NEW unique token for each invitation
-          const token = crypto.randomBytes(32).toString("hex");
+          const token = generateRecruitmentToken();
           const link = await storage.createExpertInvitationLink({
             token,
             projectId,
@@ -2145,7 +2147,7 @@ export async function registerRoutes(
         console.log(`[Bulk Invite] Processing expert: ${expert.name} (${expert.email})`);
         
         // ALWAYS create a NEW unique token for each invitation
-        const token = crypto.randomBytes(32).toString("hex");
+        const token = generateRecruitmentToken();
         const link = await storage.createExpertInvitationLink({
           token,
           projectId,
@@ -2592,7 +2594,7 @@ export async function registerRoutes(
 
   app.post("/api/invitation-links", authMiddleware, async (req, res) => {
     try {
-      const token = crypto.randomBytes(32).toString("hex");
+      const token = generateRecruitmentToken();
       const result = insertExpertInvitationLinkSchema.safeParse({
         ...req.body,
         token,
@@ -2848,7 +2850,7 @@ export async function registerRoutes(
       });
       
       // Create project-expert assignment with status "interested"
-      const invitationToken = crypto.randomBytes(32).toString("hex");
+      const invitationToken = generateRecruitmentToken();
       await storage.createProjectExpert({
         projectId: projectIdNum,
         expertId: expert.id,

@@ -214,7 +214,9 @@ export default function Invites() {
     const baseUrl = window.location.origin;
     let inviteUrl: string;
     
-    if (invite.inviteType === "existing" && invite.expertId) {
+    if (invite.inviteType === "quick") {
+      inviteUrl = `${baseUrl}/r/${invite.token}`;
+    } else if (invite.inviteType === "existing" && invite.expertId) {
       inviteUrl = `${baseUrl}/expert/project-invite/${invite.token}`;
     } else if (invite.projectId) {
       inviteUrl = `${baseUrl}/invite/${invite.projectId}/${invite.inviteType}/${invite.token}`;
@@ -519,11 +521,13 @@ export default function Invites() {
                             )}
                             <DropdownMenuItem asChild>
                               <a 
-                                href={invite.inviteType === "existing" && invite.expertId 
-                                  ? `/expert/project-invite/${invite.token}`
-                                  : invite.projectId 
-                                    ? `/invite/${invite.projectId}/${invite.inviteType}/${invite.token}`
-                                    : `/expert-invite/${invite.token}`
+                                href={invite.inviteType === "quick"
+                                  ? `/r/${invite.token}`
+                                  : invite.inviteType === "existing" && invite.expertId 
+                                    ? `/expert/project-invite/${invite.token}`
+                                    : invite.projectId 
+                                      ? `/invite/${invite.projectId}/${invite.inviteType}/${invite.token}`
+                                      : `/expert-invite/${invite.token}`
                                 }
                                 target="_blank"
                                 rel="noopener noreferrer"
