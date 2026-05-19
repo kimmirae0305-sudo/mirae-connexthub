@@ -1,6 +1,9 @@
 import type { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { eq } from "drizzle-orm";
+import { db } from "./db";
+import { users } from "@shared/schema";
 
 if (!process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET environment variable is required for authentication");
@@ -30,7 +33,13 @@ export async function comparePassword(password: string, hash: string): Promise<b
 
 export function generateToken(user: AuthUser): string {
   return jwt.sign(
-    { id: user.id, fullName: user.fullName, email: user.email, role: user.role },
+    {
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword ?? false,
+    },
     JWT_SECRET,
     { expiresIn: "7d" }
   );
@@ -89,8 +98,8 @@ export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction
 }
 
 /**
- * 개발용 임시 로그인 핸들러
- * DB나 storage 없이, 고정된 계정만 로그인 허용
+ * Production login handler
+ * Checks the users table in Neon DB.
  */
 export async function loginHandler(req: Request, res: Response) {
   try {
@@ -100,20 +109,36 @@ export async function loginHandler(req: Request, res: Response) {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // ⬇⬇ 여기 자격 증명은 필요하면 너가 바꿔도 됨 ⬇⬇
-    const DEV_EMAIL = "mirae@miraeconnexthub.com";
-    const DEV_PASSWORD = "password123";
+    const normalizedEmail = String(email).trim().toLowerCase();
 
-    if (email !== DEV_EMAIL || password !== DEV_PASSWORD) {
+    const result = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, normalizedEmail))
+      .limit(1);
+
+    const user = result[0];
+
+    if (!user) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    if (!user.passwordHash) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    const isPasswordValid = await comparePassword(password, user.passwordHash);
+
+    if (!isPasswordValid) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
     const authUser: AuthUser = {
-      id: 1,
-      fullName: "Mirae (Dev Admin)",
-      email: DEV_EMAIL,
-      role: "admin",
-      mustChangePassword: false,
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword ?? false,
     };
 
     const token = generateToken(authUser);
@@ -129,5 +154,6 @@ export async function getMeHandler(req: AuthRequest, res: Response) {
   if (!req.user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+
   res.json(req.user);
 }
