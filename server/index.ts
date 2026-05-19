@@ -1,7 +1,6 @@
 import path from "path";
 import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
-import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -9,16 +8,32 @@ import { env } from 'process';
 
 const app = express();
 
-app.use(cors({
-  origin: [
-    "https://miraeconnexthub.com",
-    "https://www.miraeconnexthub.com",
-    "https://miraeconnextconnexthub-frontend.onrender.com"
-  ],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
+const allowedOrigins = [
+  "https://miraeconnexthub.com",
+  "https://www.miraeconnexthub.com",
+  "https://miraeconnextconnexthub-frontend.onrender.com",
+  "https://mirae-connexthub-server.onrender.com",
+  "https://api.miraeconnexthub.com"
+];
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+
+  next();
+});
 
 const httpServer = createServer(app);
 
@@ -94,10 +109,6 @@ app.use((req, res, next) => {
   }
 })();
 
-// ALWAYS serve the app on the port specified in the environment variable PORT
-// Other ports are firewalled. Default to 5000 if not specified.
-// this serves both the API and the client.
-// It is the only port that is not firewalled.
 const port = Number(process.env.PORT) || 5000;
 
 httpServer.listen(port, () => {
