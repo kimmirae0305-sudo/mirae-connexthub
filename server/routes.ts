@@ -941,19 +941,33 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Project not found" });
       }
 
-      const vettingQuestions = await storage.getVettingQuestionsByProject(link.projectId);
+      const [vettingQuestions, angles] = await Promise.all([
+        storage.getVettingQuestionsByProject(link.projectId),
+        storage.getProjectAngles(link.projectId),
+      ]);
+      const angleMap = new Map(angles.map((angle) => [angle.id, angle.title]));
 
       res.json({
+        token: link.token,
+        candidateName: link.candidateName,
+        candidateEmail: link.candidateEmail,
         project: {
           id: project.id,
           name: project.name,
-          clientName: project.clientName,
           industry: project.industry,
           projectOverview: project.projectOverview,
         },
+        angles: angles.map((angle) => ({
+          id: angle.id,
+          title: angle.title,
+          description: angle.description,
+        })),
         vettingQuestions: vettingQuestions.map((q) => ({
           id: q.id,
           question: q.question,
+          angleId: q.angleId,
+          angleTitle: q.angleId ? angleMap.get(q.angleId) || null : null,
+          orderIndex: q.orderIndex,
           isRequired: q.isRequired,
         })),
       });
@@ -963,11 +977,30 @@ export async function registerRoutes(
     }
   });
 
-  // PUBLIC: Submit quick invite onboarding form (Step 1)
+  // PUBLIC: Submit full expert onboarding form
   app.post("/api/quick-invite/:token/onboard", async (req, res) => {
     try {
       const { token } = req.params;
-      const { firstName, lastName, email, phone } = req.body;
+      const {
+        fullName,
+        email,
+        phoneWhatsapp,
+        country,
+        city,
+        currentTitle,
+        currentCompany,
+        expectedHourlyRateUsd,
+        termsAccepted,
+        lgpdAccepted,
+        workHistory,
+        yearsOfExperience,
+        sectorExpertise,
+        regionalExpertise,
+        professionalBio,
+        sampleAnswers,
+        availability,
+        conflictCheck,
+      } = req.body;
 
       const link = await storage.getExpertInvitationLinkByToken(token);
       if (!link || link.status !== "pending_onboarding" || !link.isActive) {
@@ -978,50 +1011,149 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Project not found" });
       }
 
+      if (!termsAccepted || !lgpdAccepted) {
+        return res.status(400).json({ error: "Terms and LGPD consent are required" });
+      }
+
+      if (!fullName || !email || !expectedHourlyRateUsd || yearsOfExperience === undefined || yearsOfExperience === "" || !sectorExpertise) {
+        return res.status(400).json({ error: "Missing required onboarding fields" });
+      }
+
+      const project = await storage.getProject(link.projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const vettingQuestions = await storage.getVettingQuestionsByProject(link.projectId);
+      const questionMap = new Map(vettingQuestions.map((question) => [question.id, question.question]));
+      const formattedAnswers = Array.isArray(sampleAnswers)
+        ? sampleAnswers
+            .filter((answer: any) => answer?.answerText && String(answer.answerText).trim())
+            .map((answer: any) => ({
+              questionId: Number(answer.questionId),
+              questionText: questionMap.get(Number(answer.questionId)) || "",
+              answerText: String(answer.answerText).trim(),
+            }))
+        : [];
+
+      const normalizedEmail = String(email).trim().toLowerCase();
+      const acceptedAt = new Date();
+      const numericRate = Number(expectedHourlyRateUsd);
+      if (!Number.isFinite(numericRate) || numericRate <= 0) {
+        return res.status(400).json({ error: "Expected hourly rate must be a positive USD amount" });
+      }
+
       // Check if expert with email already exists
-      let expert = await storage.getExpertByEmail(email);
+      let expert = await storage.getExpertByEmail(normalizedEmail);
       
       if (!expert) {
         // Create new expert with recruitment tracking
-        const project = await storage.getProject(link.projectId);
-        const industryValue = project?.industry || "General";
         expert = await storage.createExpert({
-          name: `${firstName} ${lastName}`.trim(),
-          email,
-          phone: phone || null,
+          name: String(fullName).trim(),
+          email: normalizedEmail,
+          phone: phoneWhatsapp || null,
+          whatsapp: phoneWhatsapp || null,
+          country: country || null,
+          city: city || null,
+          jobTitle: currentTitle || null,
+          company: currentCompany || null,
           expertise: "Professional",
-          industry: industryValue,
-          yearsOfExperience: 0,
-          hourlyRate: "0",
+          sectorExpertise: sectorExpertise || null,
+          regionalExpertise: regionalExpertise || null,
+          industry: sectorExpertise || project.industry || "General",
+          yearsOfExperience: Number(yearsOfExperience),
+          hourlyRate: String(numericRate),
+          workHistory: Array.isArray(workHistory) ? workHistory : [],
+          biography: professionalBio || null,
+          bio: professionalBio || null,
           status: "available",
           sourcedByRaId: link.raId || undefined,
           sourcedAt: link.raId ? new Date() : undefined,
+          termsAccepted: true,
+          lgpdAccepted: true,
         });
-      } else if (link.raId && !expert.sourcedByRaId) {
-        // Update existing expert with RA tracking if they weren't recruited before
+      } else {
         await storage.updateExpert(expert.id, {
-          sourcedByRaId: link.raId,
-          sourcedAt: new Date(),
+          name: String(fullName).trim(),
+          phone: phoneWhatsapp || expert.phone,
+          whatsapp: phoneWhatsapp || expert.whatsapp,
+          country: country || expert.country,
+          city: city || expert.city,
+          jobTitle: currentTitle || expert.jobTitle,
+          company: currentCompany || expert.company,
+          sectorExpertise: sectorExpertise || (expert as any).sectorExpertise,
+          regionalExpertise: regionalExpertise || (expert as any).regionalExpertise,
+          industry: sectorExpertise || expert.industry,
+          expertise: sectorExpertise || expert.expertise,
+          yearsOfExperience: Number(yearsOfExperience),
+          hourlyRate: String(numericRate),
+          workHistory: Array.isArray(workHistory) ? workHistory : expert.workHistory,
+          biography: professionalBio || expert.biography,
+          bio: professionalBio || expert.bio,
+          termsAccepted: true,
+          lgpdAccepted: true,
+          ...(link.raId && !expert.sourcedByRaId
+            ? { sourcedByRaId: link.raId, sourcedAt: new Date() }
+            : {}),
         });
+        expert = await storage.getExpert(expert.id) || expert;
       }
 
-      // Update invitation link status to "onboarded" (waiting for decision)
+      const existingProjectExperts = await db
+        .select()
+        .from(projectExperts)
+        .where(and(eq(projectExperts.projectId, link.projectId), eq(projectExperts.expertId, expert.id)))
+        .limit(1);
+
+      const projectExpertData = {
+        projectId: link.projectId,
+        expertId: expert.id,
+        angleIds: link.angleIds || undefined,
+        status: "accepted",
+        invitationStatus: "accepted",
+        pipelineStatus: "interested",
+        sourceType: "ra_external",
+        sourcedByRaId: link.raId || undefined,
+        invitedAt: link.createdAt || new Date(),
+        respondedAt: new Date(),
+        invitationToken: token,
+        vqAnswers: formattedAnswers,
+        availabilityNote: availability || null,
+        expectedHourlyRateUsd: String(numericRate),
+        termsAccepted: true,
+        lgpdAccepted: true,
+        acceptedAt,
+        ipAddress: req.ip || req.socket.remoteAddress || null,
+        userAgent: req.get("user-agent") || null,
+        conflictCheck: conflictCheck || null,
+        applicationStatus: "submitted",
+        lastActivityAt: new Date(),
+      } as any;
+
+      let projectExpert = existingProjectExperts[0];
+      if (projectExpert) {
+        projectExpert = await storage.updateProjectExpert(projectExpert.id, projectExpertData) || projectExpert;
+      } else {
+        projectExpert = await storage.createProjectExpert(projectExpertData);
+      }
+
       await db.update(expertInvitationLinks)
-        .set({ status: "onboarded" })
+        .set({ status: "accepted", usedAt: new Date(), updatedAt: new Date() })
         .where(eq(expertInvitationLinks.token, token));
 
       // Log activity
       await storage.createProjectActivity({
         projectId: link.projectId,
         expertId: expert.id,
-        activityType: "expert_onboarded",
-        description: `Expert ${expert.name} completed onboarding via quick invite`,
+        activityType: "expert_application_submitted",
+        description: `Expert ${expert.name} submitted onboarding application`,
       });
 
       res.json({
         success: true,
         expertId: expert.id,
-        message: "Onboarding complete",
+        projectExpertId: projectExpert.id,
+        message: "Onboarding application submitted",
       });
     } catch (error) {
       console.error("Error during onboarding:", error);

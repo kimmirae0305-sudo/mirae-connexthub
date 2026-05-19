@@ -94,6 +94,8 @@ export const experts = pgTable("experts", {
   timezone: text("timezone"),
   whatsapp: text("whatsapp"),
   expertise: text("expertise").notNull(),
+  sectorExpertise: text("sector_expertise"),
+  regionalExpertise: text("regional_expertise"),
   areasOfExpertise: text("areas_of_expertise").array(),
   industry: text("industry").notNull(),
   company: text("company"), // Current employer
@@ -160,6 +162,14 @@ export const projectExperts = pgTable("project_experts", {
   vqAnswers: jsonb("vq_answers").$type<{ questionId: number; questionText: string; answerText: string }[]>(),
   availabilityNote: text("availability_note"),
   availabilitySlots: jsonb("availability_slots").$type<{ date: string; startTime: string; endTime: string; timezone: string }[]>(), // Structured time slots for consultations
+  expectedHourlyRateUsd: decimal("expected_hourly_rate_usd", { precision: 10, scale: 2 }),
+  termsAccepted: boolean("terms_accepted").default(false),
+  lgpdAccepted: boolean("lgpd_accepted").default(false),
+  acceptedAt: timestamp("accepted_at"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  conflictCheck: text("conflict_check"),
+  applicationStatus: text("application_status").notNull().default("pending_review"),
   notes: text("notes"),
   lastActivityAt: timestamp("last_activity_at"),
 });
