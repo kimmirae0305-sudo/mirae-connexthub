@@ -94,6 +94,7 @@ app.use((req, res, next) => {
 
   res.on("finish", () => {
     const duration = Date.now() - start;
+
     if (requestPath.startsWith("/api")) {
       let logLine = `${req.method} ${requestPath} ${res.statusCode} in ${duration}ms`;
 
