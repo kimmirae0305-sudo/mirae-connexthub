@@ -96,17 +96,17 @@ function Router() {
       <Route path="/invite/decide/:token">
         {(params) => <QuickInviteDecision />}
       </Route>
-      <Route path="/">
-        <MainLayout><Dashboard /></MainLayout>
+      <Route path="/projects">
+        <MainLayout><Projects /></MainLayout>
       </Route>
       <Route path="/projects/new">
         <MainLayout><ProjectCreate /></MainLayout>
       </Route>
-      <Route path="/projects">
-        <MainLayout><Projects /></MainLayout>
-      </Route>
       <Route path="/projects/:id">
         <MainLayout><ProjectDetail /></MainLayout>
+      </Route>
+      <Route path="/">
+        <MainLayout><Dashboard /></MainLayout>
       </Route>
       <Route path="/projects/:projectId/client-shortlist">
         <MainLayout><ClientShortlist /></MainLayout>
