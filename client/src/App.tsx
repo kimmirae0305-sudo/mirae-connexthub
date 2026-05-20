@@ -11,6 +11,7 @@ import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Projects from "@/pages/projects";
 import ProjectDetail from "@/pages/project-detail";
+import ProjectCreate from "@/pages/project-create";
 import Experts from "@/pages/experts";
 import Clients from "@/pages/clients";
 import InsightHub from "@/pages/insight-hub";
@@ -97,6 +98,9 @@ function Router() {
       </Route>
       <Route path="/">
         <MainLayout><Dashboard /></MainLayout>
+      </Route>
+      <Route path="/projects/new">
+        <MainLayout><ProjectCreate /></MainLayout>
       </Route>
       <Route path="/projects">
         <MainLayout><Projects /></MainLayout>
