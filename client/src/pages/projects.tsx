@@ -334,7 +334,7 @@ export default function Projects() {
           </p>
         </div>
         {!isRA && (
-          <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-add-project">
+          <Button onClick={() => setLocation("/projects/new")} className="gap-2" data-testid="button-add-project">
             <Plus className="h-4 w-4" /> New Project
           </Button>
         )}
@@ -417,7 +417,7 @@ export default function Projects() {
               }
               action={
                 !isRA && !searchQuery && statusFilter === "all" ? (
-                  <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-create-empty-project">
+                  <Button onClick={() => setLocation("/projects/new")} className="gap-2" data-testid="button-create-empty-project">
                     <Plus className="h-4 w-4" /> Create Project
                   </Button>
                 ) : undefined
