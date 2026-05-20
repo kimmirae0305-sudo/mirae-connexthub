@@ -757,6 +757,14 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid RA" });
       }
 
+      const existingLink = await storage.getExpertInvitationLinkByProjectAndRa(projectId, raId);
+      if (existingLink) {
+        await storage.updateExpertInvitationLink(existingLink.id, {
+          status: "expired",
+          isActive: false,
+        });
+      }
+
       // ALWAYS generate a NEW unique token for each invitation
       const token = generateRecruitmentToken();
       const link = await storage.createExpertInvitationLink({
@@ -766,14 +774,14 @@ export async function registerRoutes(
         inviteType: "ra",
         candidateName: candidateName || null,
         candidateEmail: candidateEmail || null,
-        status: "pending",
+        status: "pending_onboarding",
         recruitedBy: ra.email,
         isActive: true,
         expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
       });
 
       const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
-      const inviteUrl = `${baseUrl}/invite/${projectId}/ra/${link.token}`;
+      const inviteUrl = `${baseUrl}/r/${link.token}`;
       res.json({ link, inviteUrl });
     } catch (error) {
       console.error("Error generating RA invite link:", error);

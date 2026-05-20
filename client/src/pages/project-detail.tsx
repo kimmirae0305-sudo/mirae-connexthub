@@ -346,6 +346,24 @@ export default function ProjectDetail() {
     },
   });
 
+  const regenerateRaInviteLinkMutation = useMutation({
+    mutationFn: async ({ raId }: { raId: number }) => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/ra-invite-link`, { raId });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      const fullUrl = data.inviteUrl?.startsWith("http")
+        ? data.inviteUrl
+        : `${window.location.origin}${data.inviteUrl}`;
+      navigator.clipboard.writeText(fullUrl);
+      toast({ title: "Recruitment link regenerated and copied" });
+    },
+    onError: () => {
+      toast({ title: "Failed to regenerate recruitment link", variant: "destructive" });
+    },
+  });
+
   const addActivityMutation = useMutation({
     mutationFn: async (description: string) => {
       const res = await apiRequest("POST", `/api/projects/${projectId}/activities`, {
@@ -1814,8 +1832,14 @@ export default function ProjectDetail() {
                 />
               ) : (
                 <div className="space-y-3">
-                  {projectDetail.assignedRas.map((ra) => (
-                    <div key={ra.id} className="flex items-center justify-between p-3 rounded-lg border">
+                  {projectDetail.assignedRas.map((ra) => {
+                    const raInviteLink = projectDetail.raInviteLinks?.find(
+                      (link: any) => link.inviteType === "ra" && link.raId === ra.id
+                    );
+                    const recruitmentUrl = raInviteLink ? `/r/${raInviteLink.token}` : null;
+
+                    return (
+                    <div key={ra.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
                           <UserCheck className="h-4 w-4 text-muted-foreground" />
@@ -1823,10 +1847,45 @@ export default function ProjectDetail() {
                         <div>
                           <p className="font-medium">{ra.fullName}</p>
                           <p className="text-xs text-muted-foreground">{ra.email}</p>
+                          {recruitmentUrl && (
+                            <p className="text-xs font-mono text-muted-foreground mt-1">{recruitmentUrl}</p>
+                          )}
                         </div>
                       </div>
+                      <div className="flex items-center gap-2">
+                        {recruitmentUrl && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1"
+                            onClick={async () => {
+                              await navigator.clipboard.writeText(`${window.location.origin}${recruitmentUrl}`);
+                              toast({
+                                title: "Link copied",
+                                description: "Recruitment link copied to clipboard",
+                              });
+                            }}
+                            data-testid={`button-copy-ra-link-${ra.id}`}
+                          >
+                            <Copy className="h-3 w-3" />
+                            Copy
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1"
+                          onClick={() => regenerateRaInviteLinkMutation.mutate({ raId: ra.id })}
+                          disabled={regenerateRaInviteLinkMutation.isPending}
+                          data-testid={`button-regenerate-ra-link-${ra.id}`}
+                        >
+                          <RefreshCw className={`h-3 w-3 ${regenerateRaInviteLinkMutation.isPending ? "animate-spin" : ""}`} />
+                          Regenerate
+                        </Button>
+                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
