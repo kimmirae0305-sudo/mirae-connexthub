@@ -1025,7 +1025,17 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Terms and LGPD consent are required" });
       }
 
-      if (!fullName || !email || !expectedHourlyRateUsd || yearsOfExperience === undefined || yearsOfExperience === "" || !sectorExpertise) {
+      if (
+        !String(fullName || "").trim() ||
+        !String(email || "").trim() ||
+        !String(phoneWhatsapp || "").trim() ||
+        !String(country || "").trim() ||
+        !String(city || "").trim() ||
+        !String(currentTitle || "").trim() ||
+        !String(currentCompany || "").trim() ||
+        !expectedHourlyRateUsd ||
+        !String(availability || "").trim()
+      ) {
         return res.status(400).json({ error: "Missing required onboarding fields" });
       }
 
@@ -1035,6 +1045,28 @@ export async function registerRoutes(
       }
 
       const vettingQuestions = await storage.getVettingQuestionsByProject(link.projectId);
+      const normalizedWorkHistory = Array.isArray(workHistory)
+        ? workHistory.filter((item: any) => String(item?.company || "").trim() && String(item?.jobTitle || "").trim())
+        : [];
+      if (normalizedWorkHistory.length === 0) {
+        return res.status(400).json({ error: "Work history is required" });
+      }
+
+      const requiredQuestionIds = vettingQuestions
+        .filter((question) => question.isRequired)
+        .map((question) => question.id);
+      const answeredQuestionIds = new Set(
+        Array.isArray(sampleAnswers)
+          ? sampleAnswers
+              .filter((answer: any) => answer?.answerText && String(answer.answerText).trim())
+              .map((answer: any) => Number(answer.questionId))
+          : []
+      );
+      const missingRequiredAnswer = requiredQuestionIds.some((questionId) => !answeredQuestionIds.has(questionId));
+      if (missingRequiredAnswer) {
+        return res.status(400).json({ error: "Required vetting question answers are missing" });
+      }
+
       const questionMap = new Map(vettingQuestions.map((question) => [question.id, question.question]));
       const formattedAnswers = Array.isArray(sampleAnswers)
         ? sampleAnswers
@@ -1049,6 +1081,11 @@ export async function registerRoutes(
       const normalizedEmail = String(email).trim().toLowerCase();
       const acceptedAt = new Date();
       const numericRate = Number(expectedHourlyRateUsd);
+      const safeYearsOfExperience = Number.isFinite(Number(yearsOfExperience)) ? Number(yearsOfExperience) : 0;
+      const safeSectorExpertise = typeof sectorExpertise === "string" ? sectorExpertise.trim() : "";
+      const safeRegionalExpertise = typeof regionalExpertise === "string" ? regionalExpertise.trim() : "";
+      const safeProfessionalBio = typeof professionalBio === "string" ? professionalBio.trim() : "";
+      const safeExpertise = safeSectorExpertise || project.industry || "Professional";
       if (!Number.isFinite(numericRate) || numericRate <= 0) {
         return res.status(400).json({ error: "Expected hourly rate must be a positive USD amount" });
       }
@@ -1067,15 +1104,15 @@ export async function registerRoutes(
           city: city || null,
           jobTitle: currentTitle || null,
           company: currentCompany || null,
-          expertise: "Professional",
-          sectorExpertise: sectorExpertise || null,
-          regionalExpertise: regionalExpertise || null,
-          industry: sectorExpertise || project.industry || "General",
-          yearsOfExperience: Number(yearsOfExperience),
+          expertise: safeExpertise,
+          sectorExpertise: safeSectorExpertise,
+          regionalExpertise: safeRegionalExpertise,
+          industry: safeExpertise,
+          yearsOfExperience: safeYearsOfExperience,
           hourlyRate: String(numericRate),
-          workHistory: Array.isArray(workHistory) ? workHistory : [],
-          biography: professionalBio || null,
-          bio: professionalBio || null,
+          workHistory: normalizedWorkHistory,
+          biography: safeProfessionalBio,
+          bio: safeProfessionalBio,
           status: "available",
           sourcedByRaId: link.raId || undefined,
           sourcedAt: link.raId ? new Date() : undefined,
@@ -1091,15 +1128,15 @@ export async function registerRoutes(
           city: city || expert.city,
           jobTitle: currentTitle || expert.jobTitle,
           company: currentCompany || expert.company,
-          sectorExpertise: sectorExpertise || (expert as any).sectorExpertise,
-          regionalExpertise: regionalExpertise || (expert as any).regionalExpertise,
-          industry: sectorExpertise || expert.industry,
-          expertise: sectorExpertise || expert.expertise,
-          yearsOfExperience: Number(yearsOfExperience),
+          sectorExpertise: safeSectorExpertise || (expert as any).sectorExpertise || "",
+          regionalExpertise: safeRegionalExpertise || (expert as any).regionalExpertise || "",
+          industry: safeSectorExpertise || expert.industry || project.industry || "Professional",
+          expertise: safeSectorExpertise || expert.expertise || project.industry || "Professional",
+          yearsOfExperience: safeYearsOfExperience,
           hourlyRate: String(numericRate),
-          workHistory: Array.isArray(workHistory) ? workHistory : expert.workHistory,
-          biography: professionalBio || expert.biography,
-          bio: professionalBio || expert.bio,
+          workHistory: normalizedWorkHistory,
+          biography: safeProfessionalBio || expert.biography || "",
+          bio: safeProfessionalBio || expert.bio || "",
           termsAccepted: true,
           lgpdAccepted: true,
           ...(link.raId && !expert.sourcedByRaId
