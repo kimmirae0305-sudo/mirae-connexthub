@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { canAccessPage, type PageKey } from "./permissions";
+import { resolveApiUrl } from "./apiUrl";
 
 interface AuthUser {
   id: number;
@@ -79,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUser = async (authToken: string) => {
     try {
-      const response = await fetch("/api/auth/me", {
+      const response = await fetch(resolveApiUrl("/api/auth/me"), {
         headers: {
           Authorization: `Bearer ${authToken}`,
         },
@@ -100,7 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = useCallback(async (email: string, password: string) => {
-    const response = await fetch("/api/auth/login", {
+    const response = await fetch(resolveApiUrl("/api/auth/login"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
