@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { resolveApiUrl } from "@/lib/apiUrl";
 import logoPath from "@assets/Logo_1764384177823.png";
 
 interface WorkHistoryItem {
@@ -81,7 +82,7 @@ export default function QuickInviteOnboarding() {
   const { data: inviteData, isLoading, error } = useQuery<InviteData>({
     queryKey: [`/api/quick-invite/${token}`],
     queryFn: async () => {
-      const res = await fetch(`/api/quick-invite/${token}`);
+      const res = await fetch(resolveApiUrl(`/api/quick-invite/${token}`));
       if (!res.ok) throw new Error("Invalid invite link");
       return res.json();
     },
@@ -105,7 +106,7 @@ export default function QuickInviteOnboarding() {
 
   const submitMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/quick-invite/${token}/onboard`, {
+      const res = await fetch(resolveApiUrl(`/api/quick-invite/${token}/onboard`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
