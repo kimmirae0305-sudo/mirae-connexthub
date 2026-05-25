@@ -70,10 +70,6 @@ export default function QuickInviteOnboarding() {
     currentCompany: "",
     expectedHourlyRateUsd: "",
     workHistory: [emptyWorkHistoryItem()],
-    yearsOfExperience: "",
-    sectorExpertise: "",
-    regionalExpertise: "",
-    professionalBio: "",
     availability: "",
     conflictCheck: "",
     sampleAnswers: [] as Array<{ questionId: number; answerText: string }>,
@@ -112,7 +108,10 @@ export default function QuickInviteOnboarding() {
         body: JSON.stringify({
           ...formData,
           expectedHourlyRateUsd: Number(formData.expectedHourlyRateUsd),
-          yearsOfExperience: Number(formData.yearsOfExperience),
+          yearsOfExperience: 0,
+          sectorExpertise: "",
+          regionalExpertise: "",
+          professionalBio: "",
         }),
       });
       if (!res.ok) {
@@ -166,15 +165,9 @@ export default function QuickInviteOnboarding() {
     formData.city.trim() &&
     formData.currentTitle.trim() &&
     formData.currentCompany.trim() &&
-    Number(formData.expectedHourlyRateUsd) > 0;
-
-  const canContinueStep2 =
+    Number(formData.expectedHourlyRateUsd) > 0 &&
     formData.workHistory.length > 0 &&
-    formData.workHistory.every((item) => item.company.trim() && item.jobTitle.trim()) &&
-    Number(formData.yearsOfExperience) >= 0 &&
-    formData.sectorExpertise.trim() &&
-    formData.regionalExpertise.trim() &&
-    formData.professionalBio.trim();
+    formData.workHistory.every((item) => item.company.trim() && item.jobTitle.trim());
 
   const requiredQuestionsAnswered =
     inviteData?.vettingQuestions
@@ -183,7 +176,7 @@ export default function QuickInviteOnboarding() {
         formData.sampleAnswers.find((answer) => answer.questionId === question.id)?.answerText.trim()
       ) ?? true;
 
-  const canSubmit = canContinueStep1 && canContinueStep2 && requiredQuestionsAnswered && formData.availability.trim();
+  const canSubmit = canContinueStep1 && requiredQuestionsAnswered && formData.availability.trim();
 
   if (isLoading) {
     return (
@@ -237,7 +230,7 @@ export default function QuickInviteOnboarding() {
       <div className="mx-auto max-w-3xl space-y-6">
         <div className="flex items-center justify-between">
           <img src={logoPath} alt="Mirae Connext" className="h-10 w-auto" />
-          <Badge variant="outline">Step {step} of 3</Badge>
+          <Badge variant="outline">Step {step} of 2</Badge>
         </div>
 
         <Card>
@@ -252,7 +245,7 @@ export default function QuickInviteOnboarding() {
         {step === 1 && (
           <Card>
             <CardHeader>
-              <CardTitle>Consent and basic details</CardTitle>
+              <CardTitle>Consent, basic details, and work history</CardTitle>
               <CardDescription>All rates are collected in USD for this project application.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -362,17 +355,7 @@ export default function QuickInviteOnboarding() {
                   />
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        )}
 
-        {step === 2 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Work history and expertise</CardTitle>
-              <CardDescription>Summarize the experience that qualifies you for this project.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label>Work history</Label>
@@ -401,7 +384,7 @@ export default function QuickInviteOnboarding() {
                       data-testid={`input-work-company-${index}`}
                     />
                     <Input
-                      placeholder="Title"
+                      placeholder="Job title"
                       value={item.jobTitle}
                       onChange={(event) => updateWorkHistory(index, { jobTitle: event.target.value })}
                       data-testid={`input-work-title-${index}`}
@@ -434,57 +417,15 @@ export default function QuickInviteOnboarding() {
                   </div>
                 ))}
               </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="yearsOfExperience">Years of experience</Label>
-                  <Input
-                    id="yearsOfExperience"
-                    type="number"
-                    min="0"
-                    value={formData.yearsOfExperience}
-                    onChange={(event) => setFormData({ ...formData, yearsOfExperience: event.target.value })}
-                    data-testid="input-years-experience"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="sectorExpertise">Sector expertise</Label>
-                  <Input
-                    id="sectorExpertise"
-                    value={formData.sectorExpertise}
-                    onChange={(event) => setFormData({ ...formData, sectorExpertise: event.target.value })}
-                    data-testid="input-sector-expertise"
-                  />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="regionalExpertise">Regional expertise</Label>
-                  <Input
-                    id="regionalExpertise"
-                    value={formData.regionalExpertise}
-                    onChange={(event) => setFormData({ ...formData, regionalExpertise: event.target.value })}
-                    data-testid="input-regional-expertise"
-                  />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="professionalBio">Short professional bio</Label>
-                  <Textarea
-                    id="professionalBio"
-                    className="min-h-[120px]"
-                    value={formData.professionalBio}
-                    onChange={(event) => setFormData({ ...formData, professionalBio: event.target.value })}
-                    data-testid="input-professional-bio"
-                  />
-                </div>
-              </div>
             </CardContent>
           </Card>
         )}
 
-        {step === 3 && (
+        {step === 2 && (
           <Card>
             <CardHeader>
-              <CardTitle>Project agenda and sample answers</CardTitle>
-              <CardDescription>Client identity is not shown at this stage.</CardDescription>
+              <CardTitle>Availability, conflict check, and vetting answers</CardTitle>
+              <CardDescription>Answer the project-specific questions so Mirae Connext can review your fit.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="space-y-3 rounded-md border p-4">
@@ -505,6 +446,31 @@ export default function QuickInviteOnboarding() {
                   </div>
                 )}
               </div>
+
+              <div className="space-y-4">
+                <Label htmlFor="availability">Availability</Label>
+                <Textarea
+                  id="availability"
+                  className="min-h-[90px]"
+                  placeholder="Share windows of availability, timezone, and any scheduling constraints."
+                  value={formData.availability}
+                  onChange={(event) => setFormData({ ...formData, availability: event.target.value })}
+                  data-testid="input-availability"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="conflictCheck">Conflict check, if applicable</Label>
+                <Textarea
+                  id="conflictCheck"
+                  className="min-h-[90px]"
+                  placeholder="Mention any conflicts, restrictions, or sensitive relationships relevant to this project."
+                  value={formData.conflictCheck}
+                  onChange={(event) => setFormData({ ...formData, conflictCheck: event.target.value })}
+                  data-testid="input-conflict-check"
+                />
+              </div>
+
+              <Separator />
 
               <div className="space-y-4">
                 <Label>Vetting questions</Label>
@@ -538,31 +504,6 @@ export default function QuickInviteOnboarding() {
                     ))
                 )}
               </div>
-
-              <Separator />
-
-              <div className="space-y-2">
-                <Label htmlFor="availability">Availability</Label>
-                <Textarea
-                  id="availability"
-                  className="min-h-[90px]"
-                  placeholder="Share windows of availability, timezone, and any scheduling constraints."
-                  value={formData.availability}
-                  onChange={(event) => setFormData({ ...formData, availability: event.target.value })}
-                  data-testid="input-availability"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="conflictCheck">Conflict check, if applicable</Label>
-                <Textarea
-                  id="conflictCheck"
-                  className="min-h-[90px]"
-                  placeholder="Mention any conflicts, restrictions, or sensitive relationships relevant to this project."
-                  value={formData.conflictCheck}
-                  onChange={(event) => setFormData({ ...formData, conflictCheck: event.target.value })}
-                  data-testid="input-conflict-check"
-                />
-              </div>
             </CardContent>
           </Card>
         )}
@@ -579,11 +520,11 @@ export default function QuickInviteOnboarding() {
             Back
           </Button>
 
-          {step < 3 ? (
+          {step < 2 ? (
             <Button
               type="button"
-              disabled={step === 1 ? !canContinueStep1 : !canContinueStep2}
-              onClick={() => setStep((current) => Math.min(3, current + 1))}
+              disabled={!canContinueStep1}
+              onClick={() => setStep((current) => Math.min(2, current + 1))}
               data-testid="button-next"
             >
               Continue
