@@ -677,7 +677,12 @@ export async function registerRoutes(
 
       // Separate experts by source type
       const internalExperts = enrichedExperts.filter(e => e.sourceType === "internal_db");
-      const raSourcedExperts = enrichedExperts.filter(e => e.sourceType === "ra_external");
+      const raSourcedExperts = enrichedExperts.filter(e =>
+        e.sourceType === "ra_external" ||
+        e.sourceType === "ra_sourced" ||
+        e.sourceType === "quick_invite" ||
+        e.applicationStatus === "submitted"
+      );
 
       // Get RA invite links (including quick invites)
       const raInviteLinks = inviteLinks.filter(l => (l.inviteType === "ra" || l.inviteType === "quick") && l.isActive);
@@ -1185,7 +1190,7 @@ export async function registerRoutes(
       }
 
       await db.update(expertInvitationLinks)
-        .set({ status: "accepted", usedAt: new Date(), updatedAt: new Date() })
+        .set({ status: "onboarded", usedAt: new Date(), updatedAt: new Date() })
         .where(eq(expertInvitationLinks.token, token));
 
       // Log activity
