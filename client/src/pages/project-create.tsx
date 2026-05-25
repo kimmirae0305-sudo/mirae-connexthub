@@ -167,7 +167,7 @@ export default function ProjectCreate() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
       toast({ title: "Project created successfully" });
-      setLocation("/projects");
+      setLocation(window.location.pathname.startsWith("/app/") ? "/app/projects" : "/projects");
     },
     onError: (error: Error) => {
       toast({

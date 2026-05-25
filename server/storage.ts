@@ -622,7 +622,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createProjectAngle(angle: InsertProjectAngle): Promise<ProjectAngle> {
-    const [newAngle] = await db.insert(projectAngles).values(angle).returning();
+    const now = new Date();
+    const [newAngle] = await db.insert(projectAngles).values({
+      ...angle,
+      createdAt: now,
+      updatedAt: now,
+    } as any).returning();
     return newAngle;
   }
 
