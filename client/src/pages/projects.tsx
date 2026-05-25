@@ -159,48 +159,6 @@ export default function Projects() {
     name: "vettingQuestions",
   });
 
-  const createMutation = useMutation({
-    mutationFn: async (data: ProjectFormData) => {
-      const { vettingQuestions, ...projectData } = data;
-      const projectPayload: InsertProject = {
-        ...projectData,
-        projectOverview: projectData.projectOverview || null,
-        clientOrganizationId: projectData.clientOrganizationId || null,
-        clientPocName: projectData.clientPocName || null,
-        clientPocEmail: projectData.clientPocEmail || null,
-        description: projectData.description || null,
-        startDate: projectData.startDate ? new Date(projectData.startDate) : null,
-        endDate: projectData.endDate ? new Date(projectData.endDate) : null,
-      };
-      
-      const project = await apiRequest("POST", "/api/projects", projectPayload);
-      const projectResult = await project.json();
-      
-      if (vettingQuestions && vettingQuestions.length > 0) {
-        for (let i = 0; i < vettingQuestions.length; i++) {
-          await apiRequest("POST", "/api/vetting-questions", {
-            projectId: projectResult.id,
-            question: vettingQuestions[i].question,
-            orderIndex: i,
-            isRequired: true,
-          });
-        }
-      }
-      
-      return projectResult;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vetting-questions"] });
-      setIsDialogOpen(false);
-      form.reset();
-      toast({ title: "Project created successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to create project", variant: "destructive" });
-    },
-  });
-
   const updateMutation = useMutation({
     mutationFn: async (data: ProjectFormData & { id: number }) => {
       const { vettingQuestions, id, ...projectData } = data;
@@ -269,39 +227,22 @@ export default function Projects() {
     return matchesSearch && matchesStatus;
   });
 
-  const handleOpenDialog = (project?: Project) => {
-    if (project) {
-      setEditingProject(project);
-      form.reset({
-        name: project.name,
-        projectOverview: project.projectOverview || "",
-        clientOrganizationId: project.clientOrganizationId || undefined,
-        clientName: project.clientName,
-        clientPocName: project.clientPocName || "",
-        clientPocEmail: project.clientPocEmail || "",
-        description: project.description || "",
-        industry: project.industry,
-        status: project.status,
-        startDate: project.startDate ? format(new Date(project.startDate), "yyyy-MM-dd") : "",
-        endDate: project.endDate ? format(new Date(project.endDate), "yyyy-MM-dd") : "",
-        vettingQuestions: [],
-      });
-    } else {
-      setEditingProject(null);
-      form.reset({
-        name: "",
-        projectOverview: "",
-        clientName: "",
-        clientPocName: "",
-        clientPocEmail: "",
-        description: "",
-        industry: "",
-        status: "new",
-        startDate: "",
-        endDate: "",
-        vettingQuestions: [],
-      });
-    }
+  const handleOpenDialog = (project: Project) => {
+    setEditingProject(project);
+    form.reset({
+      name: project.name,
+      projectOverview: project.projectOverview || "",
+      clientOrganizationId: project.clientOrganizationId || undefined,
+      clientName: project.clientName,
+      clientPocName: project.clientPocName || "",
+      clientPocEmail: project.clientPocEmail || "",
+      description: project.description || "",
+      industry: project.industry,
+      status: project.status,
+      startDate: project.startDate ? format(new Date(project.startDate), "yyyy-MM-dd") : "",
+      endDate: project.endDate ? format(new Date(project.endDate), "yyyy-MM-dd") : "",
+      vettingQuestions: [],
+    });
     setIsDialogOpen(true);
   };
 
@@ -314,8 +255,6 @@ export default function Projects() {
   const onSubmit = (data: ProjectFormData) => {
     if (editingProject) {
       updateMutation.mutate({ ...data, id: editingProject.id });
-    } else {
-      createMutation.mutate(data);
     }
   };
 
@@ -511,11 +450,9 @@ export default function Projects() {
       }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingProject ? "Edit Project" : "Create New Project"}</DialogTitle>
+            <DialogTitle>Edit Project</DialogTitle>
             <DialogDescription>
-              {editingProject
-                ? "Update the project details below."
-                : "Fill in the details to create a new project request."}
+              Update the project details below.
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
@@ -815,14 +752,12 @@ export default function Projects() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={createMutation.isPending || updateMutation.isPending}
+                  disabled={updateMutation.isPending}
                   data-testid="button-save-project"
                 >
-                  {createMutation.isPending || updateMutation.isPending
+                  {updateMutation.isPending
                     ? "Saving..."
-                    : editingProject
-                      ? "Update Project"
-                      : "Create Project"}
+                    : "Update Project"}
                 </Button>
               </DialogFooter>
             </form>
