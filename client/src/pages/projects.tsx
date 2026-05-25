@@ -114,7 +114,7 @@ const statuses = [
 export default function Projects() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -123,6 +123,9 @@ export default function Projects() {
   
   // Check if user is RA (Research Associate)
   const isRA = user && normalizeRole(user.role) === "ra";
+
+  const getProjectDetailPath = (projectId: number) =>
+    location.startsWith("/app/") ? `/app/projects/${projectId}` : `/projects/${projectId}`;
 
   const { data: projects, isLoading } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
@@ -379,7 +382,7 @@ export default function Projects() {
                 <TableBody>
                   {filteredProjects?.map((project) => (
                     <TableRow key={project.id} className="hover-elevate cursor-pointer" data-testid={`row-project-${project.id}`}>
-                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)}>
+                      <TableCell onClick={() => setLocation(getProjectDetailPath(project.id))}>
                         <div>
                           <p className="font-medium">{project.name}</p>
                           {project.clientPocName && (
@@ -387,17 +390,17 @@ export default function Projects() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="text-muted-foreground">{project.clientName}</TableCell>
-                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="text-muted-foreground">{project.industry}</TableCell>
-                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)}>
+                      <TableCell onClick={() => setLocation(getProjectDetailPath(project.id))} className="text-muted-foreground">{project.clientName}</TableCell>
+                      <TableCell onClick={() => setLocation(getProjectDetailPath(project.id))} className="text-muted-foreground">{project.industry}</TableCell>
+                      <TableCell onClick={() => setLocation(getProjectDetailPath(project.id))}>
                         <StatusBadge status={project.status} type="project" />
                       </TableCell>
                       {!isRA && (
-                        <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="font-mono text-sm">
+                        <TableCell onClick={() => setLocation(getProjectDetailPath(project.id))} className="font-mono text-sm">
                           {parseFloat(project.totalCuUsed || "0").toFixed(1)}
                         </TableCell>
                       )}
-                      <TableCell onClick={() => setLocation(`/projects/${project.id}`)} className="font-mono text-xs text-muted-foreground">
+                      <TableCell onClick={() => setLocation(getProjectDetailPath(project.id))} className="font-mono text-xs text-muted-foreground">
                         {format(new Date(project.createdAt), "MMM dd, yyyy")}
                       </TableCell>
                       <TableCell className="text-right">
@@ -405,7 +408,7 @@ export default function Projects() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setLocation(`/projects/${project.id}`)}
+                            onClick={() => setLocation(getProjectDetailPath(project.id))}
                             data-testid={`button-view-project-${project.id}`}
                           >
                             <Eye className="h-4 w-4" />
