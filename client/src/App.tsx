@@ -99,14 +99,14 @@ function Router() {
       <Route path="/app/dashboard">
         <MainLayout><Dashboard /></MainLayout>
       </Route>
-      <Route path="/app/projects">
-        <MainLayout><Projects /></MainLayout>
-      </Route>
       <Route path="/app/projects/new">
         <MainLayout><ProjectCreate /></MainLayout>
       </Route>
       <Route path="/app/projects/:id">
         <MainLayout><ProjectDetail /></MainLayout>
+      </Route>
+      <Route path="/app/projects">
+        <MainLayout><Projects /></MainLayout>
       </Route>
       <Route path="/app/experts">
         <MainLayout><Experts /></MainLayout>
@@ -129,20 +129,20 @@ function Router() {
       <Route path="/app/system-admin">
         <MainLayout><Employees /></MainLayout>
       </Route>
-      <Route path="/projects">
-        <MainLayout><Projects /></MainLayout>
-      </Route>
       <Route path="/projects/new">
         <MainLayout><ProjectCreate /></MainLayout>
+      </Route>
+      <Route path="/projects/:projectId/client-shortlist">
+        <MainLayout><ClientShortlist /></MainLayout>
       </Route>
       <Route path="/projects/:id">
         <MainLayout><ProjectDetail /></MainLayout>
       </Route>
+      <Route path="/projects">
+        <MainLayout><Projects /></MainLayout>
+      </Route>
       <Route path="/">
         <MainLayout><Dashboard /></MainLayout>
-      </Route>
-      <Route path="/projects/:projectId/client-shortlist">
-        <MainLayout><ClientShortlist /></MainLayout>
       </Route>
       <Route path="/experts">
         <MainLayout><Experts /></MainLayout>
