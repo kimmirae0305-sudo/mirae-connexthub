@@ -80,6 +80,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { resolveApiUrl } from "@/lib/apiUrl";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
@@ -192,7 +193,7 @@ export default function ProjectDetail() {
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
     queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/detail`, {
+      const res = await fetch(resolveApiUrl(`/api/projects/${projectId}/detail`), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
@@ -207,7 +208,7 @@ export default function ProjectDetail() {
     queryKey: ["/api/users/ras"],
     queryFn: async () => {
       console.log("[RA DEBUG] Frontend: Fetching RAs from /api/users/ras");
-      const res = await fetch("/api/users/ras", {
+      const res = await fetch(resolveApiUrl("/api/users/ras"), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
@@ -225,7 +226,7 @@ export default function ProjectDetail() {
   const { data: allExperts } = useQuery<Expert[]>({
     queryKey: ["/api/experts"],
     queryFn: async () => {
-      const res = await fetch("/api/experts", {
+      const res = await fetch(resolveApiUrl("/api/experts"), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
@@ -239,7 +240,7 @@ export default function ProjectDetail() {
   const { data: projectCallRecords, isLoading: callRecordsLoading } = useQuery<CallRecord[]>({
     queryKey: ["/api/call-records", { projectId }],
     queryFn: async () => {
-      const res = await fetch(`/api/call-records?projectId=${projectId}`, {
+      const res = await fetch(resolveApiUrl(`/api/call-records?projectId=${projectId}`), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
@@ -280,7 +281,7 @@ export default function ProjectDetail() {
       if (searchMinAcceptanceRate) params.append("minAcceptanceRate", searchMinAcceptanceRate);
       if (searchHasPriorProjects) params.append("hasPriorProjects", "true");
       if (projectId) params.append("excludeProjectId", String(projectId));
-      const res = await fetch(`/api/experts/search?${params}`, {
+      const res = await fetch(resolveApiUrl(`/api/experts/search?${params}`), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
@@ -910,7 +911,7 @@ export default function ProjectDetail() {
 
     setIsExportingShortlist(true);
     try {
-      const response = await fetch(`/api/projects/${projectId}/export-shortlist`, {
+      const response = await fetch(resolveApiUrl(`/api/projects/${projectId}/export-shortlist`), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
