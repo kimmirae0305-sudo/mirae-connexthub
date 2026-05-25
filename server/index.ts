@@ -2,6 +2,7 @@ import path from "path";
 import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { ensureDatabaseCompatibility } from "./db";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { env } from 'process';
@@ -110,6 +111,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await ensureDatabaseCompatibility();
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
