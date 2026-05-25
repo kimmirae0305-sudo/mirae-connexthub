@@ -96,6 +96,39 @@ function Router() {
       <Route path="/invite/decide/:token">
         {(params) => <QuickInviteDecision />}
       </Route>
+      <Route path="/app/dashboard">
+        <MainLayout><Dashboard /></MainLayout>
+      </Route>
+      <Route path="/app/projects">
+        <MainLayout><Projects /></MainLayout>
+      </Route>
+      <Route path="/app/projects/new">
+        <MainLayout><ProjectCreate /></MainLayout>
+      </Route>
+      <Route path="/app/projects/:id">
+        <MainLayout><ProjectDetail /></MainLayout>
+      </Route>
+      <Route path="/app/experts">
+        <MainLayout><Experts /></MainLayout>
+      </Route>
+      <Route path="/app/companies">
+        <MainLayout><Clients /></MainLayout>
+      </Route>
+      <Route path="/app/consultations">
+        <MainLayout><Consultations /></MainLayout>
+      </Route>
+      <Route path="/app/finance">
+        <MainLayout><Usage /></MainLayout>
+      </Route>
+      <Route path="/app/compliance-center">
+        <MainLayout><NotFound /></MainLayout>
+      </Route>
+      <Route path="/app/expertise-coverage">
+        <MainLayout><NotFound /></MainLayout>
+      </Route>
+      <Route path="/app/system-admin">
+        <MainLayout><Employees /></MainLayout>
+      </Route>
       <Route path="/projects">
         <MainLayout><Projects /></MainLayout>
       </Route>
