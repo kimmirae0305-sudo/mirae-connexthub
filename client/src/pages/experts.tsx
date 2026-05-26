@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Dialog,
@@ -60,9 +61,52 @@ interface ExpertWithRecruiter extends Expert {
 interface WorkExperience {
   company: string;
   jobTitle: string;
+  fromMonth: number;
   fromYear: number;
+  toMonth: number;
   toYear: number;
+  isCurrent: boolean;
 }
+
+const monthOptions = [
+  { value: 1, label: "Jan" },
+  { value: 2, label: "Feb" },
+  { value: 3, label: "Mar" },
+  { value: 4, label: "Apr" },
+  { value: 5, label: "May" },
+  { value: 6, label: "Jun" },
+  { value: 7, label: "Jul" },
+  { value: 8, label: "Aug" },
+  { value: 9, label: "Sep" },
+  { value: 10, label: "Oct" },
+  { value: 11, label: "Nov" },
+  { value: 12, label: "Dec" },
+];
+
+const getMonthLabel = (month?: number) =>
+  monthOptions.find((option) => option.value === month)?.label || "Jan";
+
+const normalizeWorkExperience = (experience: Partial<WorkExperience>): WorkExperience => {
+  const currentYear = new Date().getFullYear();
+  return {
+    company: experience.company ?? "",
+    jobTitle: experience.jobTitle ?? "",
+    fromMonth: experience.fromMonth ?? 1,
+    fromYear: experience.fromYear ?? currentYear,
+    toMonth: experience.toMonth ?? 12,
+    toYear: experience.toYear ?? currentYear,
+    isCurrent: experience.isCurrent ?? false,
+  };
+};
+
+const formatWorkPeriod = (experience: Partial<WorkExperience>) => {
+  const normalized = normalizeWorkExperience(experience);
+  const start = `${getMonthLabel(normalized.fromMonth)} ${normalized.fromYear}`;
+  const end = normalized.isCurrent
+    ? "Present"
+    : `${getMonthLabel(normalized.toMonth)} ${normalized.toYear}`;
+  return `${start} - ${end}`;
+};
 
 const expertFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -80,11 +124,14 @@ const expertFormSchema = z.object({
   workHistory: z.array(z.object({
     company: z.string().min(1, "Company name required"),
     jobTitle: z.string().min(1, "Job title required"),
+    fromMonth: z.coerce.number().min(1).max(12).default(1),
     fromYear: z.coerce.number().min(1900, "Year must be 1900 or later"),
+    toMonth: z.coerce.number().min(1).max(12).default(12),
     toYear: z.coerce.number().min(1900, "Year must be 1900 or later"),
+    isCurrent: z.boolean().default(false),
   }).refine(
-    (exp) => exp.fromYear <= exp.toYear,
-    { message: "Start year must be before end year", path: ["toYear"] }
+    (exp) => exp.isCurrent || exp.fromYear < exp.toYear || (exp.fromYear === exp.toYear && exp.fromMonth <= exp.toMonth),
+    { message: "Start date must be before end date", path: ["toYear"] }
   )).default([]),
 }).refine(
   (data) => {
@@ -232,7 +279,9 @@ export default function Experts() {
     setViewingExpert(null);
     if (expert) {
       setEditingExpert(expert);
-      const expertWorkHistory = (expert.workHistory as WorkExperience[]) || [];
+      const expertWorkHistory = Array.isArray(expert.workHistory)
+        ? (expert.workHistory as Partial<WorkExperience>[]).map(normalizeWorkExperience)
+        : [];
       setWorkHistory(expertWorkHistory);
       form.reset({
         name: expert.name ?? "",
@@ -711,8 +760,11 @@ export default function Experts() {
                         {
                           company: "",
                           jobTitle: "",
+                          fromMonth: 1,
                           fromYear: currentYear,
+                          toMonth: 12,
                           toYear: currentYear,
+                          isCurrent: false,
                         },
                       ]);
                     }}
@@ -733,8 +785,9 @@ export default function Experts() {
                       <TableRow>
                         <TableHead>Company</TableHead>
                         <TableHead>Job Title</TableHead>
-                        <TableHead>From Year</TableHead>
-                        <TableHead>To Year</TableHead>
+                        <TableHead>From</TableHead>
+                        <TableHead>To</TableHead>
+                        <TableHead>Current</TableHead>
                         <TableHead className="w-10"></TableHead>
                       </TableRow>
                     </TableHeader>
@@ -768,6 +821,26 @@ export default function Experts() {
                             />
                           </TableCell>
                           <TableCell>
+                            <div className="flex gap-2">
+                              <Select
+                                value={String(exp.fromMonth)}
+                                onValueChange={(value) => {
+                                  const updated = [...workHistory];
+                                  updated[idx].fromMonth = Number(value);
+                                  setWorkHistory(updated);
+                                }}
+                              >
+                                <SelectTrigger className="h-8 w-24" data-testid={`select-work-frommonth-${idx}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {monthOptions.map((month) => (
+                                    <SelectItem key={month.value} value={String(month.value)}>
+                                      {month.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             <Input
                               type="number"
                               value={exp.fromYear}
@@ -781,8 +854,32 @@ export default function Experts() {
                               data-testid={`input-work-fromyear-${idx}`}
                               min="1900"
                             />
+                            </div>
                           </TableCell>
                           <TableCell>
+                            {exp.isCurrent ? (
+                              <span className="text-sm text-muted-foreground">Present</span>
+                            ) : (
+                              <div className="flex gap-2">
+                                <Select
+                                  value={String(exp.toMonth)}
+                                  onValueChange={(value) => {
+                                    const updated = [...workHistory];
+                                    updated[idx].toMonth = Number(value);
+                                    setWorkHistory(updated);
+                                  }}
+                                >
+                                  <SelectTrigger className="h-8 w-24" data-testid={`select-work-tomonth-${idx}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {monthOptions.map((month) => (
+                                      <SelectItem key={month.value} value={String(month.value)}>
+                                        {month.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                             <Input
                               type="number"
                               value={exp.toYear}
@@ -795,6 +892,19 @@ export default function Experts() {
                               className="border-0 p-1 w-24 h-8"
                               data-testid={`input-work-toyear-${idx}`}
                               min="1900"
+                            />
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Checkbox
+                              checked={exp.isCurrent}
+                              onCheckedChange={(checked) => {
+                                const updated = [...workHistory];
+                                updated[idx].isCurrent = checked === true;
+                                setWorkHistory(updated);
+                              }}
+                              data-testid={`checkbox-work-current-${idx}`}
                             />
                           </TableCell>
                           <TableCell className="text-right">
@@ -1001,13 +1111,11 @@ export default function Experts() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(viewingExpert.workHistory as WorkExperience[]).map((experience, index) => (
+                        {(viewingExpert.workHistory as Partial<WorkExperience>[]).map((experience, index) => (
                           <TableRow key={`${experience.company}-${experience.jobTitle}-${index}`}>
                             <TableCell>{experience.company}</TableCell>
                             <TableCell>{experience.jobTitle}</TableCell>
-                            <TableCell>
-                              {experience.fromYear} - {experience.toYear}
-                            </TableCell>
+                            <TableCell>{formatWorkPeriod(experience)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

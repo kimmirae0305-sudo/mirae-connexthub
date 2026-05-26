@@ -46,6 +46,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -106,6 +107,22 @@ interface EnrichedExpert extends ProjectExpert {
   sourcedByRa?: { id: number; fullName: string; email?: string } | null;
 }
 
+type ExpertWorkHistoryItem = {
+  company?: string;
+  jobTitle?: string;
+  fromMonth?: number;
+  fromYear?: number;
+  toMonth?: number;
+  toYear?: number;
+  isCurrent?: boolean;
+};
+
+type ExpertWithMetrics = Expert & {
+  priorProjectCount?: number;
+  acceptanceRate?: number;
+  matchedWorkHistory?: ExpertWorkHistoryItem[];
+};
+
 interface ProjectDetailData extends Project {
   createdByPm?: { id: number; fullName: string; email: string } | null;
   assignedRas?: { id: number; fullName: string; email: string }[];
@@ -163,6 +180,12 @@ export default function ProjectDetail() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchCurrentEmployer, setSearchCurrentEmployer] = useState("");
   const [searchPastEmployers, setSearchPastEmployers] = useState("");
+  const [includeCurrentEmployer, setIncludeCurrentEmployer] = useState(true);
+  const [includePastEmployers, setIncludePastEmployers] = useState(true);
+  const currentDate = new Date();
+  const maxEmploymentMonthIndex = (currentDate.getFullYear() - 1970) * 12 + currentDate.getMonth();
+  const [employmentPeriodEnabled, setEmploymentPeriodEnabled] = useState(false);
+  const [employmentPeriodRange, setEmploymentPeriodRange] = useState<[number, number]>([0, maxEmploymentMonthIndex]);
   const [searchMinExp, setSearchMinExp] = useState("");
   const [searchMaxExp, setSearchMaxExp] = useState("");
   const [searchAvailableOnly, setSearchAvailableOnly] = useState(false);
@@ -190,6 +213,29 @@ export default function ProjectDetail() {
   // Auth for role-based UI
   const { user } = useAuth();
   const isRA = user?.role === "ra" || user?.role?.toLowerCase() === "research associate";
+
+  const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const formatEmploymentMonthIndex = (index: number) => {
+    if (index >= maxEmploymentMonthIndex) return "Present";
+    const year = 1970 + Math.floor(index / 12);
+    const month = index % 12;
+    return `${monthLabels[month]} ${year}`;
+  };
+  const monthIndexToYearMonth = (index: number) => ({
+    year: 1970 + Math.floor(index / 12),
+    month: (index % 12) + 1,
+  });
+  const formatWorkHistoryPeriod = (item: ExpertWorkHistoryItem) => {
+    const fromMonth = item.fromMonth ?? 1;
+    const fromYear = item.fromYear ?? "";
+    const start = fromYear ? `${monthLabels[fromMonth - 1] || "Jan"} ${fromYear}` : "Unknown";
+    const end = item.isCurrent
+      ? "Present"
+      : item.toYear
+      ? `${monthLabels[(item.toMonth ?? 12) - 1] || "Dec"} ${item.toYear}`
+      : "Present";
+    return `${start} - ${end}`;
+  };
 
   const { data: projectDetail, isLoading: projectLoading, refetch: refetchProject } = useQuery<ProjectDetailData>({
     queryKey: ["/api/projects", projectId, "detail"],
@@ -253,15 +299,20 @@ export default function ProjectDetail() {
   });
 
   // Expert search results query with metrics
-  type ExpertWithMetrics = Expert & { priorProjectCount?: number; acceptanceRate?: number };
   const { data: expertSearchResults, isLoading: expertSearchLoading } = useQuery<ExpertWithMetrics[]>({
     queryKey: [
       "/api/experts/search",
       { 
         query: searchQuery, country: searchCountry, minExp: searchMinExp, maxExp: searchMaxExp, 
         jobTitle: searchJobTitle, industry: searchIndustry, language: searchLanguage,
-        hasPriorProjects: searchHasPriorProjects, currentEmployer: searchCurrentEmployer,
-        pastEmployers: searchPastEmployers, availableOnly: searchAvailableOnly,
+        hasPriorProjects: searchHasPriorProjects,
+        currentEmployer: includeCurrentEmployer ? searchCurrentEmployer : "",
+        pastEmployers: includePastEmployers ? searchPastEmployers : "",
+        includeCurrentEmployer,
+        includePastEmployers,
+        employmentPeriodEnabled,
+        employmentPeriodRange,
+        availableOnly: searchAvailableOnly,
         minHoursWorked: searchMinHoursWorked, minAcceptanceRate: searchMinAcceptanceRate,
         excludeProjectId: projectId
       },
@@ -269,8 +320,16 @@ export default function ProjectDetail() {
     queryFn: async () => {
       const params = new URLSearchParams();
       if (searchQuery) params.append("q", searchQuery);
-      if (searchCurrentEmployer) params.append("currentEmployer", searchCurrentEmployer);
-      if (searchPastEmployers) params.append("pastEmployers", searchPastEmployers);
+      if (includeCurrentEmployer && searchCurrentEmployer) params.append("currentEmployer", searchCurrentEmployer);
+      if (includePastEmployers && searchPastEmployers) params.append("pastEmployers", searchPastEmployers);
+      if (employmentPeriodEnabled && (searchCurrentEmployer || searchPastEmployers)) {
+        const from = monthIndexToYearMonth(employmentPeriodRange[0]);
+        const to = monthIndexToYearMonth(employmentPeriodRange[1]);
+        params.append("employmentFromMonth", String(from.month));
+        params.append("employmentFromYear", String(from.year));
+        params.append("employmentToMonth", String(to.month));
+        params.append("employmentToYear", String(to.year));
+      }
       if (searchCountry) params.append("country", searchCountry);
       if (searchMinExp) params.append("minYearsExperience", searchMinExp);
       if (searchMaxExp) params.append("maxYearsExperience", searchMaxExp);
@@ -1048,7 +1107,7 @@ export default function ProjectDetail() {
   ].filter((pe) => pe.applicationStatus === "submitted" || pe.acceptedAt || pe.expectedHourlyRateUsd);
 
   const reviewedWorkHistory = Array.isArray(reviewingApplication?.expert?.workHistory)
-    ? reviewingApplication.expert.workHistory as Array<{ company?: string; jobTitle?: string; fromYear?: string; toYear?: string }>
+    ? reviewingApplication.expert.workHistory as ExpertWorkHistoryItem[]
     : [];
   const reviewedAnswers = Array.isArray(reviewingApplication?.vqAnswers)
     ? reviewingApplication.vqAnswers as Array<{ questionText?: string; answerText?: string }>
@@ -2799,23 +2858,83 @@ export default function ProjectDetail() {
                   <p className="text-xs text-muted-foreground">Multiple keywords separated by space or comma</p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Current Employer</label>
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-sm font-medium">Current Employer</label>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="include-current-employer"
+                        checked={includeCurrentEmployer}
+                        onCheckedChange={(checked) => setIncludeCurrentEmployer(checked === true)}
+                        data-testid="checkbox-include-current-employer"
+                      />
+                      <label htmlFor="include-current-employer" className="text-xs text-muted-foreground">
+                        Search current employer
+                      </label>
+                    </div>
+                  </div>
                   <Input
                     placeholder="e.g., Google, Tesla"
                     value={searchCurrentEmployer}
                     onChange={(e) => setSearchCurrentEmployer(e.target.value)}
+                    disabled={!includeCurrentEmployer}
                     data-testid="input-current-employer"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Past Employers</label>
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-sm font-medium">Past Employers</label>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="include-past-employers"
+                        checked={includePastEmployers}
+                        onCheckedChange={(checked) => setIncludePastEmployers(checked === true)}
+                        data-testid="checkbox-include-past-employers"
+                      />
+                      <label htmlFor="include-past-employers" className="text-xs text-muted-foreground">
+                        Search past employers
+                      </label>
+                    </div>
+                  </div>
                   <Input
                     placeholder="e.g., Apple, Microsoft, Amazon"
                     value={searchPastEmployers}
                     onChange={(e) => setSearchPastEmployers(e.target.value)}
+                    disabled={!includePastEmployers}
                     data-testid="input-past-employers"
                   />
                   <p className="text-xs text-muted-foreground">Comma-separated list of company names</p>
+                </div>
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-sm font-medium">Employment Period</label>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="employment-period-enabled"
+                        checked={employmentPeriodEnabled}
+                        onCheckedChange={(checked) => setEmploymentPeriodEnabled(checked === true)}
+                        data-testid="checkbox-employment-period"
+                      />
+                      <label htmlFor="employment-period-enabled" className="text-xs text-muted-foreground">
+                        Filter by period
+                      </label>
+                    </div>
+                  </div>
+                  <Slider
+                    min={0}
+                    max={maxEmploymentMonthIndex}
+                    step={1}
+                    value={employmentPeriodRange}
+                    onValueChange={(value) => setEmploymentPeriodRange(value as [number, number])}
+                    disabled={!employmentPeriodEnabled}
+                    data-testid="slider-employment-period"
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>{formatEmploymentMonthIndex(employmentPeriodRange[0])}</span>
+                    <span>{formatEmploymentMonthIndex(employmentPeriodRange[1])}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Applies only when a current or past employer search term is entered.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Years of Experience</label>
@@ -2948,6 +3067,18 @@ export default function ProjectDetail() {
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-sm truncate" data-testid={`text-expert-name-${expert.id}`}>{expert.name}</p>
                           <p className="text-xs text-muted-foreground truncate">{expert.jobTitle || expert.expertise} {expert.company ? `at ${expert.company}` : ""}</p>
+                          {expert.matchedWorkHistory && expert.matchedWorkHistory.length > 0 && (
+                            <div className="mt-2 space-y-1 rounded-md bg-muted/40 p-2">
+                              {expert.matchedWorkHistory.slice(0, 2).map((item, index) => (
+                                <p key={`${item.company}-${item.jobTitle}-${index}`} className="text-xs text-muted-foreground">
+                                  <span className="font-medium text-foreground">{item.company || "Unknown company"}</span>
+                                  {item.jobTitle ? ` | ${item.jobTitle}` : ""}
+                                  {" | "}
+                                  {formatWorkHistoryPeriod(item)}
+                                </p>
+                              ))}
+                            </div>
+                          )}
                           <div className="flex gap-2 mt-1 flex-wrap">
                             {expert.country && (
                               <Badge variant="secondary" className="text-xs">{expert.country}</Badge>
@@ -3001,6 +3132,10 @@ export default function ProjectDetail() {
                 setSearchQuery("");
                 setSearchCurrentEmployer("");
                 setSearchPastEmployers("");
+                setIncludeCurrentEmployer(true);
+                setIncludePastEmployers(true);
+                setEmploymentPeriodEnabled(false);
+                setEmploymentPeriodRange([0, maxEmploymentMonthIndex]);
                 setSearchCountry("");
                 setSearchMinExp("");
                 setSearchMaxExp("");
@@ -3104,11 +3239,7 @@ export default function ProjectDetail() {
                       <div key={index} className="rounded-md border p-3">
                         <p className="font-medium">{item.jobTitle || "-"}</p>
                         <p className="text-sm text-muted-foreground">{item.company || "-"}</p>
-                        {(item.fromYear || item.toYear) && (
-                          <p className="text-xs text-muted-foreground">
-                            {[item.fromYear, item.toYear].filter(Boolean).join(" - ")}
-                          </p>
-                        )}
+                        <p className="text-xs text-muted-foreground">{formatWorkHistoryPeriod(item)}</p>
                       </div>
                     ))}
                   </div>
