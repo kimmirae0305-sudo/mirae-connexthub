@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Search, Users, Mail, Phone, Briefcase, DollarSign, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Users, Briefcase, DollarSign, X } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -160,12 +160,25 @@ export default function Experts() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: InsertExpert & { id: number }) =>
-      apiRequest("PATCH", `/api/experts/${data.id}`, data),
-    onSuccess: () => {
+    mutationFn: async (data: InsertExpert & { id: number }) => {
+      const res = await apiRequest("PATCH", `/api/experts/${data.id}`, data);
+      return (await res.json()) as Expert;
+    },
+    onSuccess: (updatedExpert) => {
+      let mergedExpert: ExpertWithRecruiter | null = null;
+      queryClient.setQueryData<ExpertWithRecruiter[]>(["/api/experts-with-recruiter"], (currentExperts) =>
+        currentExperts?.map((expert) => {
+          if (expert.id !== updatedExpert.id) {
+            return expert;
+          }
+          mergedExpert = { ...expert, ...updatedExpert };
+          return mergedExpert;
+        })
+      );
       queryClient.invalidateQueries({ queryKey: ["/api/experts-with-recruiter"] });
       setIsDialogOpen(false);
       setEditingExpert(null);
+      setViewingExpert(mergedExpert || ({ ...updatedExpert, recruiterName: null, recruiterEmail: null } as ExpertWithRecruiter));
       form.reset();
       toast({ title: "Expert updated successfully" });
     },
@@ -216,23 +229,24 @@ export default function Experts() {
   };
 
   const handleOpenDialog = (expert?: Expert) => {
+    setViewingExpert(null);
     if (expert) {
       setEditingExpert(expert);
       const expertWorkHistory = (expert.workHistory as WorkExperience[]) || [];
       setWorkHistory(expertWorkHistory);
       form.reset({
-        name: expert.name,
-        email: expert.email,
-        phone: expert.phone || "",
-        expertise: expert.expertise,
-        industry: expert.industry,
-        yearsOfExperience: expert.yearsOfExperience,
-        hourlyRate: expert.hourlyRate.toString(),
-        bio: expert.bio || "",
-        status: expert.status,
-        company: expert.company || "",
-        jobTitle: expert.jobTitle || "",
-        linkedinUrl: expert.linkedinUrl || "",
+        name: expert.name ?? "",
+        email: expert.email ?? "",
+        phone: expert.phone ?? "",
+        expertise: expert.expertise ?? "",
+        industry: expert.industry ?? "",
+        yearsOfExperience: expert.yearsOfExperience ?? 0,
+        hourlyRate: String(expert.hourlyRate ?? ""),
+        bio: expert.bio ?? "",
+        status: expert.status ?? "available",
+        company: expert.company ?? "",
+        jobTitle: expert.jobTitle ?? "",
+        linkedinUrl: expert.linkedinUrl ?? "",
         workHistory: expertWorkHistory,
       });
     } else {
@@ -241,6 +255,12 @@ export default function Experts() {
       form.reset();
     }
     setIsDialogOpen(true);
+  };
+
+  const handleViewExpert = (expert: ExpertWithRecruiter) => {
+    setIsDialogOpen(false);
+    setEditingExpert(null);
+    setViewingExpert(expert);
   };
 
   const onSubmit = (data: ExpertFormData) => {
@@ -397,7 +417,7 @@ export default function Experts() {
             <Card
               key={expert.id}
               className="cursor-pointer transition-colors hover-elevate"
-              onClick={() => handleOpenDialog(expert)}
+              onClick={() => handleViewExpert(expert)}
               data-testid={`card-expert-${expert.id}`}
             >
               <CardContent className="p-6">
@@ -467,7 +487,15 @@ export default function Experts() {
         </div>
       )}
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog
+        open={isDialogOpen}
+        onOpenChange={(open) => {
+          setIsDialogOpen(open);
+          if (!open) {
+            setEditingExpert(null);
+          }
+        }}
+      >
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingExpert ? "Edit Expert" : "Register New Expert"}</DialogTitle>
@@ -855,7 +883,7 @@ export default function Experts() {
       </Dialog>
 
       <Dialog open={!!viewingExpert} onOpenChange={() => setViewingExpert(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Expert Profile</DialogTitle>
           </DialogHeader>
@@ -878,6 +906,32 @@ export default function Experts() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Email
+                  </p>
+                  <a href={`mailto:${viewingExpert.email}`} className="font-medium text-primary hover:underline">
+                    {viewingExpert.email}
+                  </a>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Phone
+                  </p>
+                  <p className="font-medium">{viewingExpert.phone || "-"}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Company
+                  </p>
+                  <p className="font-medium">{viewingExpert.company || "-"}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Job Title
+                  </p>
+                  <p className="font-medium">{viewingExpert.jobTitle || "-"}</p>
+                </div>
                 <div className="space-y-1">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
                     Expertise
@@ -904,31 +958,64 @@ export default function Experts() {
                     ${Number(viewingExpert.hourlyRate).toFixed(2)}
                   </p>
                 </div>
-              </div>
-
-              {viewingExpert.bio && (
                 <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Bio</p>
-                  <p className="text-sm">{viewingExpert.bio}</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Status
+                  </p>
+                  <StatusBadge status={viewingExpert.status} type="expert" />
                 </div>
-              )}
-
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Contact</p>
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                    <a href={`mailto:${viewingExpert.email}`} className="text-primary hover:underline">
-                      {viewingExpert.email}
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    LinkedIn
+                  </p>
+                  {viewingExpert.linkedinUrl ? (
+                    <a
+                      href={viewingExpert.linkedinUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-primary hover:underline"
+                    >
+                      {viewingExpert.linkedinUrl}
                     </a>
-                  </div>
-                  {viewingExpert.phone && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <span>{viewingExpert.phone}</span>
-                    </div>
+                  ) : (
+                    <p className="font-medium">-</p>
                   )}
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Bio</p>
+                <p className="whitespace-pre-wrap text-sm">{viewingExpert.bio || "No bio added yet."}</p>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Work History</p>
+                {Array.isArray(viewingExpert.workHistory) && viewingExpert.workHistory.length > 0 ? (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Company</TableHead>
+                          <TableHead>Job Title</TableHead>
+                          <TableHead>Years</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(viewingExpert.workHistory as WorkExperience[]).map((experience, index) => (
+                          <TableRow key={`${experience.company}-${experience.jobTitle}-${index}`}>
+                            <TableCell>{experience.company}</TableCell>
+                            <TableCell>{experience.jobTitle}</TableCell>
+                            <TableCell>
+                              {experience.fromYear} - {experience.toYear}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No work history added yet.</p>
+                )}
               </div>
 
               {viewingExpert.recruiterName && (
@@ -949,6 +1036,21 @@ export default function Experts() {
                   </div>
                 </div>
               )}
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const expertToEdit = viewingExpert;
+                    setViewingExpert(null);
+                    handleOpenDialog(expertToEdit);
+                  }}
+                  data-testid={`button-edit-viewing-expert-${viewingExpert.id}`}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit Expert
+                </Button>
+              </DialogFooter>
             </div>
           )}
         </DialogContent>
