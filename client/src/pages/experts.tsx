@@ -116,7 +116,7 @@ export default function Experts() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>(["available", "busy", "inactive"]);
-  const [rateRange, setRateRange] = useState<[number, number]>([0, 500]);
+  const [rateRange, setRateRange] = useState<[number, number]>([0, 2000]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingExpert, setEditingExpert] = useState<Expert | null>(null);
   const [deletingExpert, setDeletingExpert] = useState<Expert | null>(null);
@@ -206,13 +206,13 @@ export default function Experts() {
   const hasActiveFilters =
     statusFilter.length < statuses.length ||
     rateRange[0] > 0 ||
-    rateRange[1] < 500 ||
+    rateRange[1] < 2000 ||
     searchQuery.length > 0;
 
   const resetFilters = () => {
     setSearchQuery("");
     setStatusFilter(["available", "busy", "inactive"]);
-    setRateRange([0, 500]);
+    setRateRange([0, 2000]);
   };
 
   const handleOpenDialog = (expert?: Expert) => {
@@ -334,7 +334,7 @@ export default function Experts() {
                   setRateRange([value[0], value[1]])
                 }
                 min={0}
-                max={500}
+                max={2000}
                 step={10}
                 className="w-full"
                 data-testid="slider-rate-range"

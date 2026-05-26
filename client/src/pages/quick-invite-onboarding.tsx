@@ -10,6 +10,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { resolveApiUrl } from "@/lib/apiUrl";
 import logoPath from "@assets/Logo_1764384177823.png";
@@ -53,6 +60,22 @@ const emptyWorkHistoryItem = (): WorkHistoryItem => ({
   toYear: "",
 });
 
+const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const availabilityBlocks = [
+  { id: "09:00-12:00", label: "Morning", time: "09:00-12:00" },
+  { id: "13:00-17:00", label: "Afternoon", time: "13:00-17:00" },
+  { id: "18:00-21:00", label: "Evening", time: "18:00-21:00" },
+];
+
+const timezones = [
+  "Asia/Seoul",
+  "America/Sao_Paulo",
+  "America/New_York",
+  "Europe/London",
+  "Europe/Paris",
+  "UTC",
+];
+
 export default function QuickInviteOnboarding() {
   const { token } = useParams<{ token: string }>();
   const { toast } = useToast();
@@ -70,8 +93,11 @@ export default function QuickInviteOnboarding() {
     currentCompany: "",
     expectedHourlyRateUsd: "",
     workHistory: [emptyWorkHistoryItem()],
-    availability: "",
-    conflictCheck: "",
+    availabilityTimezone: "Asia/Seoul",
+    availabilitySlots: [] as string[],
+    availabilityNotes: "",
+    conflictChoice: "" as "" | "yes" | "no",
+    conflictDetails: "",
     sampleAnswers: [] as Array<{ questionId: number; answerText: string }>,
   });
 
@@ -102,11 +128,18 @@ export default function QuickInviteOnboarding() {
 
   const submitMutation = useMutation({
     mutationFn: async () => {
+      const availability = buildAvailabilitySummary();
+      const conflictCheck =
+        formData.conflictChoice === "no"
+          ? "No conflict declared"
+          : `Conflict declared: ${formData.conflictDetails.trim()}`;
       const res = await fetch(resolveApiUrl(`/api/quick-invite/${token}/onboard`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
+          availability,
+          conflictCheck,
           expectedHourlyRateUsd: Number(formData.expectedHourlyRateUsd),
           yearsOfExperience: 0,
           sectorExpertise: "",
@@ -155,6 +188,29 @@ export default function QuickInviteOnboarding() {
     }));
   };
 
+  const toggleAvailabilitySlot = (slot: string) => {
+    setFormData((current) => ({
+      ...current,
+      availabilitySlots: current.availabilitySlots.includes(slot)
+        ? current.availabilitySlots.filter((item) => item !== slot)
+        : [...current.availabilitySlots, slot],
+    }));
+  };
+
+  const buildAvailabilitySummary = () => {
+    const groupedSlots = weekDays
+      .map((day) => {
+        const times = formData.availabilitySlots
+          .filter((slot) => slot.startsWith(`${day} `))
+          .map((slot) => slot.replace(`${day} `, ""));
+        return times.length > 0 ? `${day} ${times.join(", ")}` : null;
+      })
+      .filter(Boolean)
+      .join("; ");
+    const notes = formData.availabilityNotes.trim();
+    return `Timezone: ${formData.availabilityTimezone}; ${groupedSlots}${notes ? `; Notes: ${notes}` : ""}`;
+  };
+
   const canContinueStep1 =
     formData.termsAccepted &&
     formData.lgpdAccepted &&
@@ -176,7 +232,15 @@ export default function QuickInviteOnboarding() {
         formData.sampleAnswers.find((answer) => answer.questionId === question.id)?.answerText.trim()
       ) ?? true;
 
-  const canSubmit = canContinueStep1 && requiredQuestionsAnswered && formData.availability.trim();
+  const conflictCheckComplete =
+    formData.conflictChoice === "no" ||
+    (formData.conflictChoice === "yes" && Boolean(formData.conflictDetails.trim()));
+
+  const canSubmit =
+    canContinueStep1 &&
+    formData.availabilitySlots.length > 0 &&
+    conflictCheckComplete &&
+    requiredQuestionsAnswered;
 
   if (isLoading) {
     return (
@@ -448,26 +512,100 @@ export default function QuickInviteOnboarding() {
               </div>
 
               <div className="space-y-4">
-                <Label htmlFor="availability">Availability</Label>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <Label>Weekly availability</Label>
+                  <Select
+                    value={formData.availabilityTimezone}
+                    onValueChange={(value) => setFormData({ ...formData, availabilityTimezone: value })}
+                  >
+                    <SelectTrigger className="w-full sm:w-[220px]" data-testid="select-availability-timezone">
+                      <SelectValue placeholder="Timezone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {timezones.map((timezone) => (
+                        <SelectItem key={timezone} value={timezone}>
+                          {timezone}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="overflow-x-auto rounded-md border">
+                  <div className="min-w-[560px]">
+                    <div className="grid grid-cols-8 border-b bg-muted/40 text-xs font-medium">
+                      <div className="p-2">Block</div>
+                      {weekDays.map((day) => (
+                        <div key={day} className="p-2 text-center">
+                          {day}
+                        </div>
+                      ))}
+                    </div>
+                    {availabilityBlocks.map((block) => (
+                      <div key={block.id} className="grid grid-cols-8 border-b last:border-b-0">
+                        <div className="p-2 text-sm">
+                          <p className="font-medium">{block.label}</p>
+                          <p className="text-xs text-muted-foreground">{block.time}</p>
+                        </div>
+                        {weekDays.map((day) => {
+                          const slot = `${day} ${block.time}`;
+                          const selected = formData.availabilitySlots.includes(slot);
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              className={`m-1 rounded border px-2 py-3 text-xs transition-colors ${
+                                selected
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "border-border bg-background hover:bg-muted"
+                              }`}
+                              onClick={() => toggleAvailabilitySlot(slot)}
+                              data-testid={`button-availability-${day}-${block.label.toLowerCase()}`}
+                            >
+                              {selected ? "Available" : "Select"}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <Textarea
-                  id="availability"
-                  className="min-h-[90px]"
-                  placeholder="Share windows of availability, timezone, and any scheduling constraints."
-                  value={formData.availability}
-                  onChange={(event) => setFormData({ ...formData, availability: event.target.value })}
-                  data-testid="input-availability"
+                  className="min-h-[80px]"
+                  placeholder="Optional notes, e.g. flexible with advance notice."
+                  value={formData.availabilityNotes}
+                  onChange={(event) => setFormData({ ...formData, availabilityNotes: event.target.value })}
+                  data-testid="input-availability-notes"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="conflictCheck">Conflict check, if applicable</Label>
-                <Textarea
-                  id="conflictCheck"
-                  className="min-h-[90px]"
-                  placeholder="Mention any conflicts, restrictions, or sensitive relationships relevant to this project."
-                  value={formData.conflictCheck}
-                  onChange={(event) => setFormData({ ...formData, conflictCheck: event.target.value })}
-                  data-testid="input-conflict-check"
-                />
+              <div className="space-y-3">
+                <Label>Conflict check</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button
+                    type="button"
+                    variant={formData.conflictChoice === "no" ? "default" : "outline"}
+                    onClick={() => setFormData({ ...formData, conflictChoice: "no", conflictDetails: "" })}
+                    data-testid="button-conflict-no"
+                  >
+                    No conflict
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={formData.conflictChoice === "yes" ? "default" : "outline"}
+                    onClick={() => setFormData({ ...formData, conflictChoice: "yes" })}
+                    data-testid="button-conflict-yes"
+                  >
+                    Yes, I have a conflict
+                  </Button>
+                </div>
+                {formData.conflictChoice === "yes" && (
+                  <Textarea
+                    className="min-h-[90px]"
+                    placeholder="Please describe the conflict, restriction, or sensitive relationship."
+                    value={formData.conflictDetails}
+                    onChange={(event) => setFormData({ ...formData, conflictDetails: event.target.value })}
+                    data-testid="input-conflict-details"
+                  />
+                )}
               </div>
 
               <Separator />
