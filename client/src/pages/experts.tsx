@@ -397,7 +397,7 @@ export default function Experts() {
             <Card
               key={expert.id}
               className="cursor-pointer transition-colors hover-elevate"
-              onClick={() => setViewingExpert(expert)}
+              onClick={() => handleOpenDialog(expert)}
               data-testid={`card-expert-${expert.id}`}
             >
               <CardContent className="p-6">
