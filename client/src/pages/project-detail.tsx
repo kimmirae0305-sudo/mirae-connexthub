@@ -103,7 +103,7 @@ import { useAuth } from "@/lib/auth";
 
 interface EnrichedExpert extends ProjectExpert {
   expert?: Expert;
-  sourcedByRa?: { id: number; fullName: string } | null;
+  sourcedByRa?: { id: number; fullName: string; email?: string } | null;
 }
 
 interface ProjectDetailData extends Project {
@@ -135,6 +135,7 @@ export default function ProjectDetail() {
   const [activityNote, setActivityNote] = useState("");
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [isQuickInviteModalOpen, setIsQuickInviteModalOpen] = useState(false);
+  const [reviewingApplication, setReviewingApplication] = useState<EnrichedExpert | null>(null);
   
   // Angles & VQ state
   const [expandedAngles, setExpandedAngles] = useState<Set<number>>(new Set());
@@ -1045,6 +1046,13 @@ export default function ProjectDetail() {
     ...(projectDetail.internalExperts || []),
     ...(projectDetail.raSourcedExperts || []),
   ].filter((pe) => pe.applicationStatus === "submitted" || pe.acceptedAt || pe.expectedHourlyRateUsd);
+
+  const reviewedWorkHistory = Array.isArray(reviewingApplication?.expert?.workHistory)
+    ? reviewingApplication.expert.workHistory as Array<{ company?: string; jobTitle?: string; fromYear?: string; toYear?: string }>
+    : [];
+  const reviewedAnswers = Array.isArray(reviewingApplication?.vqAnswers)
+    ? reviewingApplication.vqAnswers as Array<{ questionText?: string; answerText?: string }>
+    : [];
 
   return (
     <div className="space-y-6 p-8">
@@ -2072,6 +2080,10 @@ export default function ProjectDetail() {
                                         </Button>
                                       </DropdownMenuTrigger>
                                       <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => setReviewingApplication(pe)}>
+                                          <Eye className="h-4 w-4 mr-2" />
+                                          Review application
+                                        </DropdownMenuItem>
                                         <DropdownMenuItem
                                           onClick={() => removeExpertMutation.mutate(pe.id)}
                                           className="text-destructive"
@@ -2126,6 +2138,7 @@ export default function ProjectDetail() {
                         <TableHead className="text-xs font-semibold uppercase">Availability</TableHead>
                         <TableHead className="text-xs font-semibold uppercase">Conflict Check</TableHead>
                         <TableHead className="text-xs font-semibold uppercase">Submitted</TableHead>
+                        <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2170,6 +2183,17 @@ export default function ProjectDetail() {
                               : pe.respondedAt
                               ? formatDistanceToNow(new Date(pe.respondedAt), { addSuffix: true })
                               : "-"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setReviewingApplication(pe)}
+                              data-testid={`button-review-application-${pe.id}`}
+                            >
+                              <Eye className="h-3 w-3 mr-1" />
+                              Review
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -3009,6 +3033,118 @@ export default function ProjectDetail() {
             }}
             onCancel={() => setIsQuickInviteModalOpen(false)}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!reviewingApplication} onOpenChange={(open) => !open && setReviewingApplication(null)}>
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Submitted Application</DialogTitle>
+            <DialogDescription>
+              Review the expert's public onboarding details and project answers.
+            </DialogDescription>
+          </DialogHeader>
+          {reviewingApplication && (
+            <div className="space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs text-muted-foreground">Full name</p>
+                  <p className="font-medium">{reviewingApplication.expert?.name || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Email</p>
+                  <p className="font-medium">{reviewingApplication.expert?.email || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Phone / WhatsApp</p>
+                  <p className="font-medium">{reviewingApplication.expert?.whatsapp || reviewingApplication.expert?.phone || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Location</p>
+                  <p className="font-medium">
+                    {[reviewingApplication.expert?.city, reviewingApplication.expert?.country].filter(Boolean).join(", ") || "-"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Current title</p>
+                  <p className="font-medium">{reviewingApplication.expert?.jobTitle || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Current company</p>
+                  <p className="font-medium">{reviewingApplication.expert?.company || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Expected hourly rate</p>
+                  <p className="font-mono font-medium">
+                    {reviewingApplication.expectedHourlyRateUsd ? `$${Number(reviewingApplication.expectedHourlyRateUsd).toFixed(0)}/hr` : "-"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Sourced by</p>
+                  <p className="font-medium">{reviewingApplication.sourcedByRa?.fullName || "-"}</p>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold">Work history</h3>
+                {reviewedWorkHistory.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No work history submitted.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {reviewedWorkHistory.map((item, index) => (
+                      <div key={index} className="rounded-md border p-3">
+                        <p className="font-medium">{item.jobTitle || "-"}</p>
+                        <p className="text-sm text-muted-foreground">{item.company || "-"}</p>
+                        {(item.fromYear || item.toYear) && (
+                          <p className="text-xs text-muted-foreground">
+                            {[item.fromYear, item.toYear].filter(Boolean).join(" - ")}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold">Availability</h3>
+                  <p className="whitespace-pre-wrap rounded-md border p-3 text-sm">
+                    {reviewingApplication.availabilityNote || "-"}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold">Conflict check</h3>
+                  <p className="whitespace-pre-wrap rounded-md border p-3 text-sm">
+                    {reviewingApplication.conflictCheck || "-"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold">Vetting question answers</h3>
+                {reviewedAnswers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No vetting answers submitted.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {reviewedAnswers.map((answer, index) => (
+                      <div key={index} className="rounded-md border p-3">
+                        <p className="text-sm font-medium">{answer.questionText || `Question ${index + 1}`}</p>
+                        <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{answer.answerText || "-"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReviewingApplication(null)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

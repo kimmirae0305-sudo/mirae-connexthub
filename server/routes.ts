@@ -645,13 +645,19 @@ export async function registerRoutes(
         projectExperts.map(async (pe) => {
           const expert = await storage.getExpert(pe.expertId);
           let sourcedByRa = null;
-          if (pe.sourcedByRaId) {
-            sourcedByRa = await storage.getUser(pe.sourcedByRaId);
+          const inviteLink = inviteLinks.find((link) =>
+            link.token === pe.invitationToken ||
+            (expert?.email && link.candidateEmail === expert.email)
+          );
+          if (pe.sourcedByRaId || inviteLink?.raId || inviteLink?.recruitedBy) {
+            sourcedByRa = pe.sourcedByRaId || inviteLink?.raId
+              ? await storage.getUser(pe.sourcedByRaId || inviteLink!.raId!)
+              : await storage.getUserByEmail(inviteLink!.recruitedBy);
           }
           return {
             ...pe,
             expert,
-            sourcedByRa: sourcedByRa ? { id: sourcedByRa.id, fullName: sourcedByRa.fullName } : null,
+            sourcedByRa: sourcedByRa ? { id: sourcedByRa.id, fullName: sourcedByRa.fullName, email: sourcedByRa.email } : null,
           };
         })
       );
@@ -1086,6 +1092,12 @@ export async function registerRoutes(
       const normalizedEmail = String(email).trim().toLowerCase();
       const acceptedAt = new Date();
       const numericRate = Number(expectedHourlyRateUsd);
+      const sourceOwner = link.raId
+        ? await storage.getUser(link.raId)
+        : link.recruitedBy
+        ? await storage.getUserByEmail(link.recruitedBy)
+        : null;
+      const sourceOwnerId = sourceOwner?.id;
       const safeYearsOfExperience = Number.isFinite(Number(yearsOfExperience)) ? Number(yearsOfExperience) : 0;
       const safeSectorExpertise = typeof sectorExpertise === "string" ? sectorExpertise.trim() : "";
       const safeRegionalExpertise = typeof regionalExpertise === "string" ? regionalExpertise.trim() : "";
@@ -1119,8 +1131,8 @@ export async function registerRoutes(
           biography: safeProfessionalBio,
           bio: safeProfessionalBio,
           status: "available",
-          sourcedByRaId: link.raId || undefined,
-          sourcedAt: link.raId ? new Date() : undefined,
+          sourcedByRaId: sourceOwnerId || undefined,
+          sourcedAt: sourceOwnerId ? new Date() : undefined,
           termsAccepted: true,
           lgpdAccepted: true,
         });
@@ -1144,8 +1156,8 @@ export async function registerRoutes(
           bio: safeProfessionalBio || expert.bio || "",
           termsAccepted: true,
           lgpdAccepted: true,
-          ...(link.raId && !expert.sourcedByRaId
-            ? { sourcedByRaId: link.raId, sourcedAt: new Date() }
+          ...(sourceOwnerId && !expert.sourcedByRaId
+            ? { sourcedByRaId: sourceOwnerId, sourcedAt: new Date() }
             : {}),
         });
         expert = await storage.getExpert(expert.id) || expert;
@@ -1165,7 +1177,7 @@ export async function registerRoutes(
         invitationStatus: "submitted",
         pipelineStatus: "interested",
         sourceType: "ra_external",
-        sourcedByRaId: link.raId || undefined,
+        sourcedByRaId: sourceOwnerId || undefined,
         invitedAt: link.createdAt || new Date(),
         respondedAt: new Date(),
         invitationToken: token,
