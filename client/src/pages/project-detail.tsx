@@ -3088,6 +3088,13 @@ export default function ProjectDetail() {
               <Separator />
 
               <div className="space-y-2">
+                <h3 className="text-sm font-semibold">Bio</h3>
+                <p className="whitespace-pre-wrap rounded-md border p-3 text-sm text-muted-foreground">
+                  {reviewingApplication.expert?.bio || "No bio added yet."}
+                </p>
+              </div>
+
+              <div className="space-y-2">
                 <h3 className="text-sm font-semibold">Work history</h3>
                 {reviewedWorkHistory.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No work history submitted.</p>
