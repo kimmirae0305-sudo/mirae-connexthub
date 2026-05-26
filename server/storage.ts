@@ -98,6 +98,10 @@ export interface IStorage {
     maxRate?: number;
     minYearsExperience?: number;
     maxYearsExperience?: number;
+    employmentFromMonth?: number;
+    employmentFromYear?: number;
+    employmentToMonth?: number;
+    employmentToYear?: number;
     jobTitle?: string;
     industry?: string;
     language?: string;
@@ -106,7 +110,7 @@ export interface IStorage {
     minHoursWorked?: number;
     availableOnly?: boolean;
     excludeProjectId?: number;
-  }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number })[]>;
+  }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number; matchedWorkHistory?: any[] })[]>;
   createExpert(expert: InsertExpert): Promise<Expert>;
   updateExpert(id: number, expert: Partial<InsertExpert>): Promise<Expert | undefined>;
   deleteExpert(id: number): Promise<boolean>;
@@ -397,6 +401,10 @@ export class DatabaseStorage implements IStorage {
     maxRate?: number;
     minYearsExperience?: number;
     maxYearsExperience?: number;
+    employmentFromMonth?: number;
+    employmentFromYear?: number;
+    employmentToMonth?: number;
+    employmentToYear?: number;
     jobTitle?: string;
     industry?: string;
     language?: string;
@@ -405,7 +413,7 @@ export class DatabaseStorage implements IStorage {
     minHoursWorked?: number;
     availableOnly?: boolean;
     excludeProjectId?: number;
-  }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number })[]> {
+  }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number; matchedWorkHistory?: any[] })[]> {
     const conditions = [];
     
     // 1) Domain Expertise / Skills (Keywords) - search across name, title, skills, bio
@@ -446,12 +454,15 @@ export class DatabaseStorage implements IStorage {
       conditions.push(ilike(experts.company, employerPattern));
     }
     
-    // 4) Past Employers - match if any provided name appears in pastEmployers array
+    // 4) Past Employers - match if any provided name appears in pastEmployers array or JSON work history
     if (params.pastEmployers) {
       const pastEmps = params.pastEmployers.split(',').map(e => e.trim().toLowerCase()).filter(e => e);
       if (pastEmps.length > 0) {
         const pastEmpConditions = pastEmps.map(emp =>
-          sql`array_to_string(${experts.pastEmployers}, ',') ILIKE ${'%' + emp + '%'}`
+          or(
+            sql`array_to_string(${experts.pastEmployers}, ',') ILIKE ${'%' + emp + '%'}`,
+            sql`${experts.workHistory}::text ILIKE ${'%' + emp + '%'}`
+          )
         );
         conditions.push(or(...pastEmpConditions));
       }
@@ -518,6 +529,49 @@ export class DatabaseStorage implements IStorage {
         .orderBy(experts.name);
     }
 
+    const monthToIndex = (year?: number | null, month?: number | null, fallbackMonth = 1) => {
+      if (!year || !Number.isFinite(Number(year))) return null;
+      const normalizedMonth = Number.isFinite(Number(month)) ? Number(month) : fallbackMonth;
+      return Number(year) * 12 + Math.min(Math.max(normalizedMonth, 1), 12) - 1;
+    };
+    const normalizeHistory = (history: unknown) =>
+      Array.isArray(history)
+        ? history.map((item: any) => ({
+            company: String(item?.company || ""),
+            jobTitle: String(item?.jobTitle || ""),
+            fromMonth: Number(item?.fromMonth || 1),
+            fromYear: Number(item?.fromYear || 0),
+            toMonth: Number(item?.toMonth || 12),
+            toYear: Number(item?.toYear || 0),
+            isCurrent: item?.isCurrent === true,
+          }))
+        : [];
+    const employerTerms = (value?: string) =>
+      value?.split(',').map((term) => term.trim().toLowerCase()).filter(Boolean) || [];
+    const currentEmployerTerms = employerTerms(params.currentEmployer);
+    const pastEmployerTerms = employerTerms(params.pastEmployers);
+    const hasEmploymentRange =
+      params.employmentFromYear !== undefined &&
+      params.employmentFromMonth !== undefined &&
+      params.employmentToYear !== undefined &&
+      params.employmentToMonth !== undefined &&
+      (currentEmployerTerms.length > 0 || pastEmployerTerms.length > 0);
+    const rangeStart = hasEmploymentRange ? monthToIndex(params.employmentFromYear, params.employmentFromMonth, 1) : null;
+    const rangeEnd = hasEmploymentRange ? monthToIndex(params.employmentToYear, params.employmentToMonth, 12) : null;
+    const currentMonthIndex = new Date().getFullYear() * 12 + new Date().getMonth();
+    const overlapsRange = (item: any) => {
+      if (!hasEmploymentRange || rangeStart === null || rangeEnd === null) return true;
+      const start = monthToIndex(item.fromYear, item.fromMonth, 1);
+      if (start === null) return false;
+      const end = item.isCurrent ? currentMonthIndex : monthToIndex(item.toYear, item.toMonth, 12) ?? start;
+      return start <= rangeEnd && end >= rangeStart;
+    };
+    const matchesTerms = (company: string | null | undefined, terms: string[]) => {
+      if (terms.length === 0) return false;
+      const normalizedCompany = String(company || "").toLowerCase();
+      return terms.some((term) => normalizedCompany.includes(term));
+    };
+
     // Compute metrics for each expert (prior projects + acceptance rate)
     const expertsWithMetrics = await Promise.all(
       baseExperts.map(async (expert) => {
@@ -542,10 +596,32 @@ export class DatabaseStorage implements IStorage {
         ).length;
         const acceptanceRate = invitedCount > 0 ? Math.round((acceptedCount / invitedCount) * 100) : null;
 
+        const history = normalizeHistory(expert.workHistory);
+        const currentMatches = currentEmployerTerms.length > 0 && matchesTerms(expert.company, currentEmployerTerms)
+          ? [
+              {
+                company: expert.company || "",
+                jobTitle: expert.jobTitle || "",
+                fromMonth: 1,
+                fromYear: expert.yearsOfExperience
+                  ? new Date().getFullYear() - expert.yearsOfExperience
+                  : undefined,
+                toMonth: new Date().getMonth() + 1,
+                toYear: new Date().getFullYear(),
+                isCurrent: true,
+              },
+              ...history.filter((item) => item.isCurrent && matchesTerms(item.company, currentEmployerTerms)),
+            ].filter(overlapsRange)
+          : [];
+        const pastMatches = pastEmployerTerms.length > 0
+          ? history.filter((item) => matchesTerms(item.company, pastEmployerTerms) && !item.isCurrent && overlapsRange(item))
+          : [];
+
         return {
           ...expert,
           priorProjectCount,
           acceptanceRate: acceptanceRate ?? undefined,
+          matchedWorkHistory: [...currentMatches, ...pastMatches],
         };
       })
     );
@@ -583,6 +659,10 @@ export class DatabaseStorage implements IStorage {
       filtered = filtered.filter(
         e => e.acceptanceRate !== undefined && e.acceptanceRate >= params.minAcceptanceRate!
       );
+    }
+
+    if (hasEmploymentRange) {
+      filtered = filtered.filter((e) => (e.matchedWorkHistory?.length ?? 0) > 0);
     }
 
     return filtered;

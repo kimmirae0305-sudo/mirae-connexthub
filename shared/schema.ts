@@ -104,7 +104,15 @@ export const experts = pgTable("experts", {
   yearsOfExperience: integer("years_of_experience").notNull(),
   hourlyRate: decimal("hourly_rate", { precision: 10, scale: 2 }).notNull(),
   bio: text("bio"),
-  workHistory: jsonb("work_history").$type<Array<{ company: string; jobTitle: string; fromYear: number; toYear: number }>>(), // Work history entries
+  workHistory: jsonb("work_history").$type<Array<{
+    company: string;
+    jobTitle: string;
+    fromMonth?: number;
+    fromYear: number;
+    toMonth?: number;
+    toYear?: number;
+    isCurrent?: boolean;
+  }>>(), // Work history entries
   biography: text("biography"), // Detailed biography for RA review/editing
   status: text("status").notNull().default("available"), // available, busy, inactive
   availableNow: boolean("available_now").default(true), // Whether expert is currently available
