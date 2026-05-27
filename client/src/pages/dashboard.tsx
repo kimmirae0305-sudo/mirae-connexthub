@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Briefcase, ArrowRight, Plus, TrendingUp, Phone, DollarSign, AlertCircle } from "lucide-react";
+import { Briefcase, ArrowRight, Plus, TrendingUp, Phone, DollarSign, AlertCircle, ClipboardList, UserPlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -91,6 +91,10 @@ function getKPISectionTitle(role: string): string {
   return "My CU Performance";
 }
 
+function isManagementRole(role: string): boolean {
+  return role === "admin" || role === "finance";
+}
+
 function getMonthName(month: number): string {
   const months = [
     "January", "February", "March", "April", "May", "June",
@@ -157,6 +161,7 @@ function KPISection() {
   const periodLabel = `${getMonthName(kpiData.period.month)} ${kpiData.period.year}`;
   const roleLabel = getRoleLabel(kpiData.role);
   const sectionTitle = getKPISectionTitle(kpiData.role);
+  const isManagement = isManagementRole(kpiData.role);
 
   return (
     <div className="space-y-4">
@@ -182,7 +187,7 @@ function KPISection() {
               {(kpiData.companyTotals?.totalCompanyCU ?? kpiData.totals.totalCU).toFixed(2)}
             </div>
             <p className="text-xs text-muted-foreground">
-              {kpiData.role === "admin" || kpiData.role === "finance" ? "Company CU this month" : "Credit Units this month"}
+              {isManagement ? "Company CU this month" : "Credit Units this month"}
             </p>
           </CardContent>
         </Card>
@@ -204,7 +209,7 @@ function KPISection() {
           </CardContent>
         </Card>
 
-        {(kpiData.role === "admin" || kpiData.role === "finance") ? (
+        {isManagement ? (
           <Card data-testid="card-kpi-revenue">
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -222,22 +227,23 @@ function KPISection() {
             </CardContent>
           </Card>
         ) : (
-          <Card data-testid="card-kpi-incentive">
+          <Card data-testid={kpiData.role === "ra" ? "card-kpi-sourcing-output" : "card-kpi-operational-output"}>
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Incentive
+                {kpiData.role === "ra" ? "Sourcing Output" : "Operational Output"}
               </CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
+              {kpiData.role === "ra" ? (
+                <UserPlus className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ClipboardList className="h-4 w-4 text-muted-foreground" />
+              )}
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600 dark:text-green-500" data-testid="text-incentive">
-                {formatCurrency(kpiData.totals.incentive)}
+              <div className="text-2xl font-bold" data-testid="text-operational-output">
+                {kpiData.role === "ra" ? kpiData.totals.totalCalls : kpiData.totals.totalCU.toFixed(2)}
               </div>
               <p className="text-xs text-muted-foreground">
-                {kpiData.role === "ra" 
-                  ? "R$250/call (max R$2,500)"
-                  : "R$70 per CU"
-                }
+                {kpiData.role === "ra" ? "Completed sourced consultations" : "CU delivered this month"}
               </p>
             </CardContent>
           </Card>
@@ -262,13 +268,13 @@ function KPISection() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-xs font-semibold uppercase">Interview Date</TableHead>
-                  {(kpiData.role === "admin" || kpiData.role === "finance") && (
+                  {isManagement && (
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
                   )}
                   <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
                   <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
                   <TableHead className="text-right text-xs font-semibold uppercase">CU</TableHead>
-                  {(kpiData.role === "admin" || kpiData.role === "finance") && (
+                  {isManagement && (
                     <TableHead className="text-right text-xs font-semibold uppercase">Revenue (USD)</TableHead>
                   )}
                 </TableRow>
@@ -279,7 +285,7 @@ function KPISection() {
                     <TableCell className="font-mono text-sm">
                       {formatBrazilDate(call.interviewDate)}
                     </TableCell>
-                    {(kpiData.role === "admin" || kpiData.role === "finance") && (
+                    {isManagement && (
                       <TableCell className="text-muted-foreground">{call.clientName}</TableCell>
                     )}
                     <TableCell>{call.expertName}</TableCell>
@@ -287,7 +293,7 @@ function KPISection() {
                     <TableCell className="text-right font-medium">
                       {call.cuUsed.toFixed(2)}
                     </TableCell>
-                    {(kpiData.role === "admin" || kpiData.role === "finance") && (
+                    {isManagement && (
                       <TableCell className="text-right font-medium">
                         {call.revenueUSD ? formatUSD(call.revenueUSD) : "-"}
                       </TableCell>
