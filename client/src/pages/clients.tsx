@@ -378,6 +378,10 @@ export default function Clients() {
     cuSummary && cuSummary.purchasedCu > 0
       ? Math.min(100, Math.max(0, (cuSummary.completedCu / cuSummary.purchasedCu) * 100))
       : null;
+  const prepaidUsageRatio =
+    cuSummary && cuSummary.purchasedCu > 0
+      ? `${formatCu(cuSummary.completedCu)} / ${formatCu(cuSummary.purchasedCu)} CU`
+      : "-";
   const prepaidStatusHint =
     prepaidUsagePercent === null
       ? null
@@ -540,9 +544,10 @@ export default function Clients() {
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <CommercialField label="Used CU / Completed CU" value={formatCu(cuSummary?.completedCu)} />
                     <CommercialField label="Purchased CU" value={formatCu(cuSummary?.purchasedCu)} />
+                    <CommercialField label="Used / Purchased CU" value={prepaidUsageRatio} />
                     <CommercialField label="Remaining Prepaid CU" value={formatCu(cuSummary?.remainingPrepaidCu)} />
                     <CommercialField
-                      label="Prepaid Usage"
+                      label="Usage %"
                       value={prepaidUsagePercent === null ? "-" : `${prepaidUsagePercent.toFixed(1)}%`}
                     />
                     <CommercialField label="Retainer CU Allowance" value={formatCu(cuSummary?.retainerCuAllowance)} />
@@ -809,7 +814,7 @@ export default function Clients() {
                     <TextField control={orgForm.control} name="defaultCuRate" label="Default CU Rate" placeholder="1150" type="number" />
                   )}
                   {isPrepaidPricing && (
-                    <TextField control={orgForm.control} name="purchasedCu" label="Purchased / Prepaid CU" placeholder="100" type="number" />
+                    <TextField control={orgForm.control} name="purchasedCu" label="Purchased / Prepaid CU" placeholder="e.g. 100 CU" type="number" />
                   )}
                   {isRetainerPricing && (
                     <>
