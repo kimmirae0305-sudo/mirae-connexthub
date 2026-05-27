@@ -420,6 +420,102 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/client-organizations/:id/cu-summary", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const org = await storage.getClientOrganization(id);
+      if (!org) {
+        return res.status(404).json({ error: "Client organization not found" });
+      }
+
+      const now = new Date();
+      const retainerPeriod = (org.retainerPeriod || "contract").toLowerCase();
+      const contractStart = org.contractStartDate ? new Date(org.contractStartDate) : null;
+      const contractEnd = org.contractEndDate ? new Date(org.contractEndDate) : null;
+      let periodStart: Date | null = contractStart;
+      let periodEnd: Date | null = contractEnd;
+
+      if (retainerPeriod === "monthly") {
+        periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      } else if (retainerPeriod === "quarterly") {
+        const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
+        periodStart = new Date(now.getFullYear(), quarterStartMonth, 1);
+        periodEnd = new Date(now.getFullYear(), quarterStartMonth + 3, 1);
+      } else if (retainerPeriod === "annual" || retainerPeriod === "yearly") {
+        periodStart = new Date(now.getFullYear(), 0, 1);
+        periodEnd = new Date(now.getFullYear() + 1, 0, 1);
+      }
+
+      if (contractStart && periodStart && periodStart < contractStart) periodStart = contractStart;
+      if (contractEnd && periodEnd && periodEnd > contractEnd) periodEnd = contractEnd;
+
+      const completedCalls = await db
+        .select({
+          id: callRecords.id,
+          completedAt: callRecords.completedAt,
+          callDate: callRecords.callDate,
+          cuUsed: callRecords.cuUsed,
+          projectCuRatePerCU: projects.cuRatePerCU,
+        })
+        .from(callRecords)
+        .innerJoin(projects, eq(callRecords.projectId, projects.id))
+        .where(
+          and(
+            eq(projects.clientOrganizationId, id),
+            eq(callRecords.status, "completed"),
+            sql`${callRecords.completedAt} IS NOT NULL`
+          )
+        );
+
+      const completedCu = completedCalls.reduce((sum, call) => sum + parseFloat(call.cuUsed || "0"), 0);
+      const retainerCompletedCu = completedCalls
+        .filter((call) => {
+          const completedAt = call.completedAt ? new Date(call.completedAt) : null;
+          if (!completedAt) return false;
+          if (periodStart && completedAt < periodStart) return false;
+          if (periodEnd && completedAt >= periodEnd) return false;
+          return true;
+        })
+        .reduce((sum, call) => sum + parseFloat(call.cuUsed || "0"), 0);
+
+      const purchasedCu = parseFloat(org.purchasedCu || org.creditBalance || "0");
+      const retainerCuAllowance = parseFloat(org.retainerCuAllowance || org.retainerBalance || "0");
+      const defaultCuRate = parseFloat(org.defaultCuRate || "0");
+      const pricingModel = (org.pricingModel || org.contractType || "").toLowerCase();
+      const isPayAsYouGo = pricingModel.includes("pay") || pricingModel.includes("usage");
+      const payAsYouGoBillableCu = isPayAsYouGo ? completedCu : 0;
+      const estimatedRevenue = completedCalls.reduce((sum, call) => {
+        const cuUsed = parseFloat(call.cuUsed || "0");
+        const rate = parseFloat(call.projectCuRatePerCU || "") || defaultCuRate;
+        return sum + cuUsed * rate;
+      }, 0);
+
+      res.json({
+        clientOrganizationId: id,
+        pricingModel: org.pricingModel,
+        contractType: org.contractType,
+        currency: org.currency || "USD",
+        defaultCuRate,
+        completedCu: Math.round(completedCu * 100) / 100,
+        purchasedCu,
+        remainingPrepaidCu: Math.round((purchasedCu - completedCu) * 100) / 100,
+        retainerCuAllowance,
+        retainerPeriod: org.retainerPeriod || null,
+        retainerPeriodStart: periodStart,
+        retainerPeriodEnd: periodEnd,
+        retainerCompletedCu: Math.round(retainerCompletedCu * 100) / 100,
+        remainingRetainerCu: Math.round((retainerCuAllowance - retainerCompletedCu) * 100) / 100,
+        payAsYouGoBillableCu: Math.round(payAsYouGoBillableCu * 100) / 100,
+        estimatedRevenue: Math.round(estimatedRevenue * 100) / 100,
+        completedCallCount: completedCalls.length,
+      });
+    } catch (error) {
+      console.error("Failed to calculate client CU summary:", error);
+      res.status(500).json({ error: "Failed to calculate client CU summary" });
+    }
+  });
+
   app.post("/api/client-organizations", authMiddleware, async (req, res) => {
     try {
       const result = insertClientOrganizationSchema.safeParse(req.body);
