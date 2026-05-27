@@ -681,7 +681,13 @@ export async function registerRoutes(
         }
       }
 
-      // Separate experts by source type
+      const isReviewableApplication = (assignment: typeof enrichedExperts[number]) =>
+        assignment.applicationStatus === "submitted" ||
+        Boolean(assignment.acceptedAt) ||
+        Boolean(assignment.expectedHourlyRateUsd) ||
+        (Array.isArray(assignment.vqAnswers) && assignment.vqAnswers.length > 0);
+
+      // Separate experts by source type for backward-compatible consumers.
       const internalExperts = enrichedExperts.filter(e => e.sourceType === "internal_db");
       const raSourcedExperts = enrichedExperts.filter(e =>
         e.sourceType === "ra_external" ||
@@ -689,6 +695,8 @@ export async function registerRoutes(
         e.sourceType === "quick_invite" ||
         e.applicationStatus === "submitted"
       );
+      const projectAdvisors = enrichedExperts;
+      const projectApplications = enrichedExperts.filter(isReviewableApplication);
 
       // Get RA invite links (including quick invites)
       const raInviteLinks = inviteLinks.filter(l => (l.inviteType === "ra" || l.inviteType === "quick") && l.isActive);
@@ -700,6 +708,8 @@ export async function registerRoutes(
         vettingQuestions,
         internalExperts,
         raSourcedExperts,
+        projectAdvisors,
+        projectApplications,
         activities,
         raInviteLinks,
         angles,
@@ -3161,15 +3171,18 @@ export async function registerRoutes(
       const projectExperts = await storage.getProjectExpertsByProject(link.projectId);
       let assignment = projectExperts.find(pe => pe.expertId === link.expertId);
       
-      const newStatus = response === "accept" ? "accepted" : "declined";
-      const newPipelineStatus = response === "accept" ? "accepted" : "declined";
+      const newStatus = response === "accept" ? "pending_review" : "declined";
+      const newInvitationStatus = response === "accept" ? "submitted" : "declined";
+      const newPipelineStatus = response === "accept" ? "pending_review" : "declined";
+      const newApplicationStatus = response === "accept" ? "submitted" : "declined";
       
       if (assignment) {
         // Update existing assignment
         await storage.updateProjectExpert(assignment.id, {
           status: newStatus,
-          invitationStatus: newStatus,
+          invitationStatus: newInvitationStatus,
           pipelineStatus: newPipelineStatus,
+          applicationStatus: newApplicationStatus,
           respondedAt: new Date(),
           lastActivityAt: new Date(),
           vqAnswers: formattedVqAnswers.length > 0 ? formattedVqAnswers : assignment.vqAnswers,
@@ -3181,8 +3194,9 @@ export async function registerRoutes(
           projectId: link.projectId,
           expertId: link.expertId,
           status: newStatus,
-          invitationStatus: newStatus,
+          invitationStatus: newInvitationStatus,
           pipelineStatus: newPipelineStatus,
+          applicationStatus: newApplicationStatus,
           sourceType: "internal_db",
           invitedAt: link.createdAt,
           respondedAt: new Date(),
