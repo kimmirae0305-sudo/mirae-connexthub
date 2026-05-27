@@ -78,6 +78,14 @@ const orgFormSchema = z.object({
   retainerBalance: z.string().optional(),
   commercialNotes: z.string().optional(),
   billingAddress: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.pricingModel === "Retainer" && !data.retainerPeriod) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Retainer period is required for retainer pricing",
+      path: ["retainerPeriod"],
+    });
+  }
 });
 
 const pocFormSchema = z.object({
@@ -105,10 +113,19 @@ const industries = [
 ];
 
 const clientTypes = ["Corporate", "Private Equity", "Venture Capital", "Consulting", "Law Firm", "Startup", "Other"];
-const contractTypes = ["Pay-as-you-go", "Retainer", "Prepaid Credits", "Annual Contract", "Project-based", "Custom"];
+const contractTypes = [
+  "Master Service Agreement",
+  "Statement of Work",
+  "Project Agreement",
+  "Annual Agreement",
+  "Trial / Pilot",
+  "Custom Agreement",
+];
 const pricingModels = ["Pay-as-you-go", "Prepaid Credits", "Retainer", "Annual Contract", "Project-based", "Custom"];
 const currencies = ["USD", "BRL", "EUR", "GBP", "JPY", "KRW"];
 const retainerPeriods = ["Monthly", "Quarterly", "Annual", "Contract"];
+const normalizeContractTypeForForm = (contractType?: string | null) =>
+  contractType && contractTypes.includes(contractType) ? contractType : "";
 
 type ClientCuSummary = {
   currency: string;
@@ -292,7 +309,7 @@ export default function Clients() {
         industry: org.industry || "",
         clientType: org.clientType || "",
         legalEntityName: org.legalEntityName || "",
-        contractType: org.contractType || "",
+        contractType: normalizeContractTypeForForm(org.contractType),
         pricingModel: org.pricingModel || "CU-based",
         currency: org.currency || "USD",
         defaultCuRate: org.defaultCuRate || "",
@@ -774,7 +791,7 @@ export default function Clients() {
                         name="retainerPeriod"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Retainer Period</FormLabel>
+                            <FormLabel>Retainer Period *</FormLabel>
                             <Select onValueChange={field.onChange} value={field.value}>
                               <FormControl>
                                 <SelectTrigger>
@@ -789,6 +806,9 @@ export default function Clients() {
                                 ))}
                               </SelectContent>
                             </Select>
+                            <p className="text-xs text-muted-foreground">
+                              Required for retainer pricing so CU usage can be calculated against the right period.
+                            </p>
                             <FormMessage />
                           </FormItem>
                         )}
