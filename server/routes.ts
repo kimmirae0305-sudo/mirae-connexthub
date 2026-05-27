@@ -13,6 +13,7 @@ import {
   insertClientOrganizationSchema,
   insertClientPocSchema,
   insertCallRecordSchema,
+  insertInsightSchema,
   insertExpertInvitationLinkSchema,
   insertProjectAngleSchema,
   calculateCU,
@@ -2642,6 +2643,44 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete call record" });
+    }
+  });
+
+  // ==================== INSIGHT HUB ====================
+  app.get("/api/insights", authMiddleware, async (req, res) => {
+    try {
+      const insights = await storage.getInsights();
+      res.json(insights);
+    } catch (error) {
+      console.error("Failed to fetch insights:", error);
+      res.status(500).json({ error: "Failed to fetch insights" });
+    }
+  });
+
+  app.get("/api/insights/:id", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const insight = await storage.getInsight(id);
+      if (!insight) {
+        return res.status(404).json({ error: "Insight not found" });
+      }
+      res.json(insight);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch insight" });
+    }
+  });
+
+  app.post("/api/insights", authMiddleware, async (req, res) => {
+    try {
+      const result = insertInsightSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const insight = await storage.createInsight(result.data);
+      res.status(201).json(insight);
+    } catch (error) {
+      console.error("Failed to create insight:", error);
+      res.status(500).json({ error: "Failed to create insight" });
     }
   });
 

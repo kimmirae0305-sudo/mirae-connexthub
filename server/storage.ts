@@ -9,6 +9,7 @@ import {
   clientOrganizations,
   clientPocs,
   callRecords,
+  insights,
   expertInvitationLinks,
   projectActivities,
   projectAngles,
@@ -32,6 +33,8 @@ import {
   type InsertClientPoc,
   type CallRecord,
   type InsertCallRecord,
+  type Insight,
+  type InsertInsight,
   type ExpertInvitationLink,
   type InsertExpertInvitationLink,
   type ProjectActivity,
@@ -153,6 +156,11 @@ export interface IStorage {
   createCallRecord(record: InsertCallRecord): Promise<CallRecord>;
   updateCallRecord(id: number, record: Partial<InsertCallRecord>): Promise<CallRecord | undefined>;
   deleteCallRecord(id: number): Promise<boolean>;
+
+  // Insights
+  getInsights(): Promise<Insight[]>;
+  getInsight(id: number): Promise<Insight | undefined>;
+  createInsight(insight: InsertInsight): Promise<Insight>;
 
   // Expert Invitation Links
   getExpertInvitationLinks(): Promise<ExpertInvitationLink[]>;
@@ -934,6 +942,21 @@ export class DatabaseStorage implements IStorage {
   async deleteCallRecord(id: number): Promise<boolean> {
     const result = await db.delete(callRecords).where(eq(callRecords.id, id)).returning();
     return result.length > 0;
+  }
+
+  // Insights
+  async getInsights(): Promise<Insight[]> {
+    return db.select().from(insights).orderBy(desc(insights.callDate), desc(insights.createdAt));
+  }
+
+  async getInsight(id: number): Promise<Insight | undefined> {
+    const [insight] = await db.select().from(insights).where(eq(insights.id, id));
+    return insight || undefined;
+  }
+
+  async createInsight(insight: InsertInsight): Promise<Insight> {
+    const [newInsight] = await db.insert(insights).values(insight as any).returning();
+    return newInsight;
   }
 
   // Expert Invitation Links

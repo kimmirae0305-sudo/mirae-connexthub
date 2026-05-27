@@ -204,6 +204,31 @@ export const callRecords = pgTable("call_records", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Insight Hub table (structured market signals from consultations)
+export const insights = pgTable("insights", {
+  id: serial("id").primaryKey(),
+  consultationId: text("consultation_id").notNull(),
+  callRecordId: integer("call_record_id").references(() => callRecords.id, { onDelete: "set null" }),
+  month: text("month").notNull(),
+  callDate: timestamp("call_date").notNull(),
+  clientType: text("client_type").notNull(),
+  industry: text("industry").notNull(),
+  market: text("market").notNull(),
+  geography: text("geography").notNull(),
+  clientQuestion: text("client_question").notNull(),
+  observedTrend: text("observed_trend").notNull(),
+  keyTags: text("key_tags").array(),
+  signalStrength: text("signal_strength").notNull(),
+  companyMentioned: text("company_mentioned"),
+  expertSeniority: text("expert_seniority"),
+  callDurationMin: integer("call_duration_min"),
+  recordingLink: text("recording_link"),
+  transcriptLink: text("transcript_link"),
+  internalNotes: text("internal_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Expert Invitation Links table (Extended with types)
 // Each invitation generates a UNIQUE token - tokens are never reused
 export const expertInvitationLinks = pgTable("expert_invitation_links", {
@@ -367,6 +392,13 @@ export const callRecordsRelations = relations(callRecords, ({ one }) => ({
   }),
 }));
 
+export const insightsRelations = relations(insights, ({ one }) => ({
+  callRecord: one(callRecords, {
+    fields: [insights.callRecordId],
+    references: [callRecords.id],
+  }),
+}));
+
 export const expertInvitationLinksRelations = relations(expertInvitationLinks, ({ one }) => ({
   project: one(projects, {
     fields: [expertInvitationLinks.projectId],
@@ -496,6 +528,15 @@ export const insertCallRecordSchema = createInsertSchema(callRecords).omit({
   completedAt: coerceDate.optional(),
 });
 
+export const insertInsightSchema = createInsertSchema(insights).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  callDate: coerceDateRequired,
+  keyTags: z.array(z.string()).optional(),
+});
+
 export const insertExpertInvitationLinkSchema = createInsertSchema(expertInvitationLinks).omit({
   id: true,
   createdAt: true,
@@ -547,6 +588,9 @@ export type InsertProjectExpert = z.infer<typeof insertProjectExpertSchema>;
 
 export type CallRecord = typeof callRecords.$inferSelect;
 export type InsertCallRecord = z.infer<typeof insertCallRecordSchema>;
+
+export type Insight = typeof insights.$inferSelect;
+export type InsertInsight = z.infer<typeof insertInsightSchema>;
 
 export type ExpertInvitationLink = typeof expertInvitationLinks.$inferSelect;
 export type InsertExpertInvitationLink = z.infer<typeof insertExpertInvitationLinkSchema>;
