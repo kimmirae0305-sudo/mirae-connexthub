@@ -1155,6 +1155,23 @@ export default function ProjectDetail() {
     return <Badge variant="secondary">Added</Badge>;
   };
 
+  const shouldShowAdvisorInvitationStatus = (pe: EnrichedExpert) => {
+    if (!pe.invitationStatus || pe.invitationStatus === "not_invited") return false;
+    if (pe.applicationStatus === "submitted" && pe.invitationStatus === "submitted") return false;
+    if (pe.invitationStatus === "invited" && pe.status !== "pending_review") return false;
+    if (pe.invitationStatus === pe.status) return false;
+    return true;
+  };
+
+  const shouldShowAdvisorPipelineStatus = (pe: EnrichedExpert) => {
+    if (!pe.pipelineStatus) return false;
+    if (pe.applicationStatus === "submitted" && pe.pipelineStatus === "pending_review") return false;
+    if (pe.pipelineStatus === pe.status) return false;
+    if (pe.pipelineStatus === "assigned") return false;
+    if (pe.pipelineStatus === "invited" && pe.invitationStatus === "invited") return false;
+    return true;
+  };
+
   const getActivityIcon = (type: string) => {
     switch (type) {
       case "expert_invited":
@@ -1804,7 +1821,7 @@ export default function ProjectDetail() {
                               </div>
                               <div className="flex flex-col items-end gap-1">
                                 {getAdvisorStatusBadge(pe)}
-                                {getInvitationStatusBadge(inviteStatus)}
+                                {shouldShowAdvisorInvitationStatus(pe) && getInvitationStatusBadge(inviteStatus)}
                               </div>
                             </div>
 
@@ -1812,7 +1829,7 @@ export default function ProjectDetail() {
                               <Badge variant="outline">Source: {getAdvisorSourceLabel(pe)}</Badge>
                               {pe.expert?.industry && <Badge variant="outline">{pe.expert.industry}</Badge>}
                               {pe.expert?.expertise && <Badge variant="outline">{pe.expert.expertise}</Badge>}
-                              {getPipelineStatusBadge(pe.pipelineStatus)}
+                              {shouldShowAdvisorPipelineStatus(pe) && getPipelineStatusBadge(pe.pipelineStatus)}
                             </div>
 
                             {angleNames && angleNames.length > 0 && (
