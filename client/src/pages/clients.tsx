@@ -67,6 +67,10 @@ const orgFormSchema = z.object({
   pricingModel: z.string().optional(),
   currency: z.string().optional(),
   defaultCuRate: z.string().optional(),
+  purchasedCu: z.string().optional(),
+  retainerCuAllowance: z.string().optional(),
+  retainerPeriod: z.string().optional(),
+  contractedCu: z.string().optional(),
   paymentTerms: z.string().optional(),
   contractStartDate: z.string().optional(),
   contractEndDate: z.string().optional(),
@@ -104,6 +108,24 @@ const clientTypes = ["Corporate", "Private Equity", "Venture Capital", "Consulti
 const contractTypes = ["Pay-as-you-go", "Retainer", "Prepaid Credits", "Annual Contract", "Project-based", "Custom"];
 const pricingModels = ["CU-based", "Hourly", "Fixed project fee", "Retainer drawdown", "Custom"];
 const currencies = ["USD", "BRL", "EUR", "GBP", "JPY", "KRW"];
+const retainerPeriods = ["Monthly", "Quarterly", "Annual", "Contract"];
+
+type ClientCuSummary = {
+  currency: string;
+  defaultCuRate: number;
+  completedCu: number;
+  purchasedCu: number;
+  remainingPrepaidCu: number;
+  retainerCuAllowance: number;
+  retainerPeriod?: string | null;
+  retainerPeriodStart?: string | null;
+  retainerPeriodEnd?: string | null;
+  retainerCompletedCu: number;
+  remainingRetainerCu: number;
+  payAsYouGoBillableCu: number;
+  estimatedRevenue: number;
+  completedCallCount: number;
+};
 
 const emptyOrgDefaults: OrgFormData = {
   name: "",
@@ -114,6 +136,10 @@ const emptyOrgDefaults: OrgFormData = {
   pricingModel: "CU-based",
   currency: "USD",
   defaultCuRate: "",
+  purchasedCu: "",
+  retainerCuAllowance: "",
+  retainerPeriod: "",
+  contractedCu: "",
   paymentTerms: "",
   contractStartDate: "",
   contractEndDate: "",
@@ -142,6 +168,13 @@ const formatMoney = (value?: string | number | null, currency = "USD") => {
   return `${currency} ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 };
 
+const formatCu = (value?: string | number | null) => {
+  if (value === null || value === undefined || value === "") return "-";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "-";
+  return `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} CU`;
+};
+
 export default function Clients() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -157,6 +190,11 @@ export default function Clients() {
 
   const { data: pocs } = useQuery<ClientPoc[]>({
     queryKey: ["/api/client-pocs", selectedOrg?.id],
+    enabled: !!selectedOrg,
+  });
+
+  const { data: cuSummary } = useQuery<ClientCuSummary>({
+    queryKey: ["/api/client-organizations", selectedOrg?.id, "cu-summary"],
     enabled: !!selectedOrg,
   });
 
@@ -179,6 +217,7 @@ export default function Clients() {
     mutationFn: (data: InsertClientOrganization) => apiRequest("POST", "/api/client-organizations", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/client-organizations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client-organizations", selectedOrg?.id, "cu-summary"] });
       setIsOrgDialogOpen(false);
       orgForm.reset();
       toast({ title: "Client organization created successfully" });
@@ -193,6 +232,7 @@ export default function Clients() {
       apiRequest("PATCH", `/api/client-organizations/${data.id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/client-organizations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client-organizations", selectedOrg?.id, "cu-summary"] });
       setIsOrgDialogOpen(false);
       setEditingOrg(null);
       orgForm.reset();
@@ -250,6 +290,10 @@ export default function Clients() {
         pricingModel: org.pricingModel || "CU-based",
         currency: org.currency || "USD",
         defaultCuRate: org.defaultCuRate || "",
+        purchasedCu: org.purchasedCu || org.creditBalance || "",
+        retainerCuAllowance: org.retainerCuAllowance || org.retainerBalance || "",
+        retainerPeriod: org.retainerPeriod || "",
+        contractedCu: org.contractedCu || "",
         paymentTerms: org.paymentTerms || "",
         contractStartDate: toDateInput(org.contractStartDate),
         contractEndDate: toDateInput(org.contractEndDate),
@@ -275,6 +319,10 @@ export default function Clients() {
       pricingModel: data.pricingModel || null,
       currency: data.currency || "USD",
       defaultCuRate: data.defaultCuRate || null,
+      purchasedCu: data.purchasedCu || null,
+      retainerCuAllowance: data.retainerCuAllowance || null,
+      retainerPeriod: data.retainerPeriod || null,
+      contractedCu: data.contractedCu || null,
       paymentTerms: data.paymentTerms || null,
       contractStartDate: data.contractStartDate ? new Date(`${data.contractStartDate}T00:00:00`) : null,
       contractEndDate: data.contractEndDate ? new Date(`${data.contractEndDate}T00:00:00`) : null,
@@ -420,18 +468,20 @@ export default function Clients() {
                       label="Default CU Rate"
                       value={formatMoney(selectedOrg.defaultCuRate, selectedOrg.currency || "USD")}
                     />
+                    <CommercialField
+                      label="Purchased / Prepaid CU"
+                      value={formatCu(selectedOrg.purchasedCu || selectedOrg.creditBalance)}
+                    />
+                    <CommercialField
+                      label="Retainer CU Allowance"
+                      value={formatCu(selectedOrg.retainerCuAllowance || selectedOrg.retainerBalance)}
+                    />
+                    <CommercialField label="Retainer Period" value={selectedOrg.retainerPeriod || "-"} />
+                    <CommercialField label="Contracted CU" value={formatCu(selectedOrg.contractedCu)} />
                     <CommercialField label="Payment Terms" value={selectedOrg.paymentTerms || "-"} />
                     <CommercialField
                       label="Contract Period"
                       value={`${formatDate(selectedOrg.contractStartDate)} - ${formatDate(selectedOrg.contractEndDate)}`}
-                    />
-                    <CommercialField
-                      label="Credit Balance"
-                      value={formatMoney(selectedOrg.creditBalance, selectedOrg.currency || "USD")}
-                    />
-                    <CommercialField
-                      label="Retainer Balance"
-                      value={formatMoney(selectedOrg.retainerBalance, selectedOrg.currency || "USD")}
                     />
                     <CommercialField label="Billing Address" value={selectedOrg.billingAddress || "Optional / not set"} />
                   </div>
@@ -441,6 +491,27 @@ export default function Clients() {
                       <p className="mt-1 whitespace-pre-wrap text-sm">{selectedOrg.commercialNotes}</p>
                     </div>
                   )}
+                </div>
+                <div className="mb-6 rounded-md border p-4">
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold">Calculated CU Summary</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Read-only usage math from completed consultations. No balances are deducted or mutated here.
+                    </p>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <CommercialField label="Total Completed CU" value={formatCu(cuSummary?.completedCu)} />
+                    <CommercialField label="Purchased CU" value={formatCu(cuSummary?.purchasedCu)} />
+                    <CommercialField label="Remaining Prepaid CU" value={formatCu(cuSummary?.remainingPrepaidCu)} />
+                    <CommercialField label="Retainer CU Allowance" value={formatCu(cuSummary?.retainerCuAllowance)} />
+                    <CommercialField label="Remaining Retainer CU" value={formatCu(cuSummary?.remainingRetainerCu)} />
+                    <CommercialField label="Pay-as-you-go Billable CU" value={formatCu(cuSummary?.payAsYouGoBillableCu)} />
+                    <CommercialField
+                      label="Estimated Revenue"
+                      value={formatMoney(cuSummary?.estimatedRevenue, cuSummary?.currency || selectedOrg.currency || "USD")}
+                    />
+                    <CommercialField label="Completed Calls" value={cuSummary ? String(cuSummary.completedCallCount) : "-"} />
+                  </div>
                 </div>
                 <Tabs defaultValue="pocs">
                   <TabsList>
@@ -684,11 +755,36 @@ export default function Clients() {
                     )}
                   />
                   <TextField control={orgForm.control} name="defaultCuRate" label="Default CU Rate" placeholder="1150" type="number" />
+                  <TextField control={orgForm.control} name="purchasedCu" label="Purchased / Prepaid CU" placeholder="100" type="number" />
+                  <TextField control={orgForm.control} name="retainerCuAllowance" label="Retainer CU Allowance" placeholder="25" type="number" />
+                  <FormField
+                    control={orgForm.control}
+                    name="retainerPeriod"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Retainer Period</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select retainer period" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {retainerPeriods.map((period) => (
+                              <SelectItem key={period} value={period}>
+                                {period}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <TextField control={orgForm.control} name="contractedCu" label="Contracted CU" placeholder="300" type="number" />
                   <TextField control={orgForm.control} name="paymentTerms" label="Payment Terms" placeholder="Net 30, upfront, monthly..." />
                   <TextField control={orgForm.control} name="contractStartDate" label="Contract Start Date" type="date" />
                   <TextField control={orgForm.control} name="contractEndDate" label="Contract End Date" type="date" />
-                  <TextField control={orgForm.control} name="creditBalance" label="Credit Balance" placeholder="0" type="number" />
-                  <TextField control={orgForm.control} name="retainerBalance" label="Retainer Balance" placeholder="0" type="number" />
                 </div>
                 <FormField
                   control={orgForm.control}
