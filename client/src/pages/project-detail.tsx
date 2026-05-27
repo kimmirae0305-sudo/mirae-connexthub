@@ -87,7 +87,7 @@ import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { RegisterExpertForm } from "@/components/experts/RegisterExpertForm";
 import { QuickInviteForm } from "@/components/experts/QuickInviteForm";
-import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle, CallRecord, InsertCallRecord, InsertProject, ClientOrganization } from "@shared/schema";
+import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle, CallRecord, InsertCallRecord, InsertProject, ClientOrganization, Insight } from "@shared/schema";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -406,6 +406,10 @@ export default function ProjectDetail() {
       return res.json();
     },
     enabled: !!projectId,
+  });
+
+  const { data: insights = [] } = useQuery<Insight[]>({
+    queryKey: ["/api/insights"],
   });
 
   // Expert search results query with metrics
@@ -1323,6 +1327,81 @@ export default function ProjectDetail() {
   }
 
   const projectApplications = projectDetail.projectApplications || projectAdvisors.filter(hasReviewableApplication);
+  const projectInsightCount = (() => {
+    const callIds = new Set((projectCallRecords || []).map((call) => call.id));
+    const callIdStrings = new Set((projectCallRecords || []).map((call) => String(call.id)));
+    return insights.filter((insight) => {
+      if (insight.callRecordId && callIds.has(insight.callRecordId)) return true;
+      if (insight.consultationId && callIdStrings.has(insight.consultationId)) return true;
+      return false;
+    }).length;
+  })();
+
+  const lifecycleBaseStages = [
+    {
+      label: "Client Request",
+      isComplete: Boolean(projectDetail.clientRequestNotes || projectDetail.clientName || projectDetail.id),
+      detail: projectDetail.clientRequestNotes ? "Request notes captured" : "Project record created",
+    },
+    {
+      label: "Project Setup",
+      isComplete: Boolean(projectDetail.name && projectDetail.industry),
+      detail: projectDetail.projectOverview ? "Overview and basics ready" : "Core fields available",
+    },
+    {
+      label: "RA Assignment",
+      isComplete: Boolean(projectDetail.assignedRas?.length || projectDetail.assignedRaIds?.length || projectDetail.assignedRaId),
+      detail: projectDetail.assignedRas?.length
+        ? `${projectDetail.assignedRas.length} RA${projectDetail.assignedRas.length === 1 ? "" : "s"} assigned`
+        : "No RA assigned yet",
+    },
+    {
+      label: "Expert Sourcing",
+      isComplete: Boolean((projectDetail.raSourcedExperts?.length || 0) > 0 || projectAdvisors.length > 0),
+      detail: `${projectAdvisors.length} advisor${projectAdvisors.length === 1 ? "" : "s"} connected`,
+    },
+    {
+      label: "Applications Review",
+      isComplete: projectApplications.length > 0,
+      detail: `${projectApplications.length} submitted application${projectApplications.length === 1 ? "" : "s"}`,
+    },
+    {
+      label: "Client Shortlist",
+      isComplete: projectAdvisors.length > 0,
+      detail: projectAdvisors.length > 0 ? "Advisor pool available" : "No advisors added yet",
+    },
+    {
+      label: "Calls Scheduled",
+      isComplete: projectScheduledCalls > 0 || projectCompletedCalls > 0,
+      detail: `${projectScheduledCalls} scheduled`,
+    },
+    {
+      label: "Calls Completed",
+      isComplete: projectCompletedCalls > 0,
+      detail: `${projectCompletedCalls} completed`,
+    },
+    {
+      label: "Insights Captured",
+      isComplete: projectInsightCount > 0,
+      detail: projectInsightCount > 0 ? `${projectInsightCount} linked insight${projectInsightCount === 1 ? "" : "s"}` : "No linked insights yet",
+    },
+    {
+      label: "Project Closed",
+      isComplete: ["completed", "closed"].includes((projectDetail.status || "").toLowerCase()),
+      detail: ["completed", "closed"].includes((projectDetail.status || "").toLowerCase())
+        ? "Project closed"
+        : "Project still open",
+    },
+  ];
+  const firstIncompleteLifecycleIndex = lifecycleBaseStages.findIndex((stage) => !stage.isComplete);
+  const lifecycleStages = lifecycleBaseStages.map((stage, index) => ({
+    ...stage,
+    state: stage.isComplete
+      ? "complete"
+      : index === firstIncompleteLifecycleIndex
+        ? "current"
+        : "pending",
+  }));
 
   const reviewedWorkHistory = Array.isArray(reviewingApplication?.expert?.workHistory)
     ? reviewingApplication.expert.workHistory as ExpertWorkHistoryItem[]
@@ -1443,6 +1522,58 @@ export default function ProjectDetail() {
           )}
         </div>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="h-4 w-4" />
+            Project Lifecycle
+          </CardTitle>
+          <CardDescription>
+            Read-only operational progress derived from project activity, advisor, application, call, and insight data.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {lifecycleStages.map((stage, index) => (
+              <div
+                key={stage.label}
+                className={`rounded-md border p-3 ${
+                  stage.state === "complete"
+                    ? "border-green-200 bg-green-50 dark:border-green-900/60 dark:bg-green-950/20"
+                    : stage.state === "current"
+                      ? "border-primary/30 bg-primary/5"
+                      : "bg-muted/30"
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <div
+                    className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                      stage.state === "complete"
+                        ? "bg-green-600 text-white"
+                        : stage.state === "current"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {stage.state === "complete" ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{stage.label}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{stage.detail}</p>
+                    <Badge
+                      variant={stage.state === "complete" ? "default" : stage.state === "current" ? "secondary" : "outline"}
+                      className="mt-2"
+                    >
+                      {stage.state === "complete" ? "Active" : stage.state === "current" ? "Next" : "Pending"}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <Tabs defaultValue="overview" className="space-y-4">
         <TabsList className="flex-wrap">
