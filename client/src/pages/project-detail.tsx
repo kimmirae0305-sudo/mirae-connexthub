@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation, Link } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
@@ -185,13 +185,16 @@ export default function ProjectDetail() {
   const [searchCompanyName, setSearchCompanyName] = useState("");
   const [searchCompanyScope, setSearchCompanyScope] = useState<"current" | "past" | "any">("any");
   const currentDate = new Date();
+  const currentMonthValue = String(currentDate.getMonth() + 1);
+  const currentYearValue = String(currentDate.getFullYear());
   const maxEmploymentMonthIndex = (currentDate.getFullYear() - 1970) * 12 + currentDate.getMonth();
   const [employmentPeriodEnabled, setEmploymentPeriodEnabled] = useState(false);
   const [employmentPeriodRange, setEmploymentPeriodRange] = useState<[number, number]>([0, maxEmploymentMonthIndex]);
   const [employmentStartMonth, setEmploymentStartMonth] = useState("1");
   const [employmentStartYear, setEmploymentStartYear] = useState("1990");
-  const [employmentEndMonth, setEmploymentEndMonth] = useState(String(currentDate.getMonth() + 1));
-  const [employmentEndYear, setEmploymentEndYear] = useState(String(currentDate.getFullYear()));
+  const [employmentEndMonth, setEmploymentEndMonth] = useState(currentMonthValue);
+  const [employmentEndYear, setEmploymentEndYear] = useState(currentYearValue);
+  const isCurrentRoleScope = searchCompanyScope === "current";
   const [searchMinExp, setSearchMinExp] = useState("");
   const [searchMaxExp, setSearchMaxExp] = useState("");
   const [searchSeniority, setSearchSeniority] = useState<"any" | "20" | "15" | "10" | "5" | "1-2">("any");
@@ -220,6 +223,13 @@ export default function ProjectDetail() {
   // Auth for role-based UI
   const { user } = useAuth();
   const isRA = user?.role === "ra" || user?.role?.toLowerCase() === "research associate";
+
+  useEffect(() => {
+    if (searchCompanyScope === "current") {
+      setEmploymentEndMonth(currentMonthValue);
+      setEmploymentEndYear(currentYearValue);
+    }
+  }, [searchCompanyScope, currentMonthValue, currentYearValue]);
 
   const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const seniorityOptions = [
@@ -2986,27 +2996,36 @@ export default function ProjectDetail() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-muted-foreground">End</label>
-                    <div className="flex gap-2">
-                      <Select value={employmentEndMonth} onValueChange={setEmploymentEndMonth} disabled={!employmentPeriodEnabled}>
-                        <SelectTrigger data-testid="select-employment-end-month">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {monthLabels.map((month, index) => (
-                            <SelectItem key={month} value={String(index + 1)}>{month}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        type="number"
-                        min={1970}
-                        max={currentDate.getFullYear()}
-                        value={employmentEndYear}
-                        onChange={(e) => setEmploymentEndYear(e.target.value)}
-                        disabled={!employmentPeriodEnabled}
-                        data-testid="input-employment-end-year"
-                      />
-                    </div>
+                    {isCurrentRoleScope ? (
+                      <div
+                        className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground"
+                        data-testid="text-employment-end-present"
+                      >
+                        Present
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Select value={employmentEndMonth} onValueChange={setEmploymentEndMonth} disabled={!employmentPeriodEnabled}>
+                          <SelectTrigger data-testid="select-employment-end-month">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {monthLabels.map((month, index) => (
+                              <SelectItem key={month} value={String(index + 1)}>{month}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="number"
+                          min={1970}
+                          max={currentDate.getFullYear()}
+                          value={employmentEndYear}
+                          onChange={(e) => setEmploymentEndYear(e.target.value)}
+                          disabled={!employmentPeriodEnabled}
+                          data-testid="input-employment-end-year"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -3090,8 +3109,8 @@ export default function ProjectDetail() {
                   setEmploymentPeriodEnabled(false);
                   setEmploymentStartMonth("1");
                   setEmploymentStartYear("1990");
-                  setEmploymentEndMonth(String(currentDate.getMonth() + 1));
-                  setEmploymentEndYear(String(currentDate.getFullYear()));
+                  setEmploymentEndMonth(currentMonthValue);
+                  setEmploymentEndYear(currentYearValue);
                   applySeniorityFilter("any");
                   setSearchCountry("");
                   setSearchJobTitle("");
