@@ -1337,60 +1337,69 @@ export default function ProjectDetail() {
     }).length;
   })();
 
+  const assignedRaCount = projectDetail.assignedRas?.length || projectDetail.assignedRaIds?.length || (projectDetail.assignedRaId ? 1 : 0);
+  const raSourcedCount = projectDetail.raSourcedExperts?.length || 0;
+  const projectClosed = ["completed", "closed"].includes((projectDetail.status || "").toLowerCase());
   const lifecycleBaseStages = [
     {
       label: "Client Request",
       isComplete: Boolean(projectDetail.clientRequestNotes || projectDetail.clientName || projectDetail.id),
-      detail: projectDetail.clientRequestNotes ? "Request notes captured" : "Project record created",
+      evidence: projectDetail.clientRequestNotes ? "Request notes captured" : "Project record created",
+      actionLabel: "Completed",
     },
     {
       label: "Project Setup",
       isComplete: Boolean(projectDetail.name && projectDetail.industry),
-      detail: projectDetail.projectOverview ? "Overview and basics ready" : "Core fields available",
+      evidence: projectDetail.projectOverview ? "Overview and basics ready" : "Core fields available",
+      actionLabel: projectDetail.name && projectDetail.industry ? "Completed" : "Needs Action",
     },
     {
       label: "RA Assignment",
-      isComplete: Boolean(projectDetail.assignedRas?.length || projectDetail.assignedRaIds?.length || projectDetail.assignedRaId),
-      detail: projectDetail.assignedRas?.length
-        ? `${projectDetail.assignedRas.length} RA${projectDetail.assignedRas.length === 1 ? "" : "s"} assigned`
-        : "No RA assigned yet",
+      isComplete: assignedRaCount > 0,
+      evidence: `${assignedRaCount} assigned`,
+      actionLabel: assignedRaCount > 0 ? "Completed" : "Needs Action",
     },
     {
       label: "Expert Sourcing",
       isComplete: Boolean((projectDetail.raSourcedExperts?.length || 0) > 0 || projectAdvisors.length > 0),
-      detail: `${projectAdvisors.length} advisor${projectAdvisors.length === 1 ? "" : "s"} connected`,
+      evidence: `${projectAdvisors.length} advisor${projectAdvisors.length === 1 ? "" : "s"} connected; ${raSourcedCount} RA-sourced`,
+      actionLabel: projectAdvisors.length > 0 || raSourcedCount > 0 ? "In Progress" : "Needs Action",
     },
     {
       label: "Applications Review",
       isComplete: projectApplications.length > 0,
-      detail: `${projectApplications.length} submitted application${projectApplications.length === 1 ? "" : "s"}`,
+      evidence: `${projectApplications.length} submitted`,
+      actionLabel: projectApplications.length > 0 ? "In Progress" : "Pending",
     },
     {
       label: "Client Shortlist",
       isComplete: projectAdvisors.length > 0,
-      detail: projectAdvisors.length > 0 ? "Advisor pool available" : "No advisors added yet",
+      evidence: `${projectAdvisors.length} advisor${projectAdvisors.length === 1 ? "" : "s"} in pool`,
+      actionLabel: projectAdvisors.length > 0 ? "In Progress" : "Pending",
     },
     {
       label: "Calls Scheduled",
       isComplete: projectScheduledCalls > 0 || projectCompletedCalls > 0,
-      detail: `${projectScheduledCalls} scheduled`,
+      evidence: `${projectScheduledCalls} scheduled`,
+      actionLabel: projectScheduledCalls > 0 || projectCompletedCalls > 0 ? "In Progress" : "Pending",
     },
     {
       label: "Calls Completed",
       isComplete: projectCompletedCalls > 0,
-      detail: `${projectCompletedCalls} completed`,
+      evidence: `${projectCompletedCalls} completed`,
+      actionLabel: projectCompletedCalls > 0 ? "In Progress" : "Pending",
     },
     {
       label: "Insights Captured",
       isComplete: projectInsightCount > 0,
-      detail: projectInsightCount > 0 ? `${projectInsightCount} linked insight${projectInsightCount === 1 ? "" : "s"}` : "No linked insights yet",
+      evidence: `${projectInsightCount} insight${projectInsightCount === 1 ? "" : "s"}`,
+      actionLabel: projectInsightCount > 0 ? "In Progress" : projectCompletedCalls > 0 ? "Needs Action" : "Pending",
     },
     {
       label: "Project Closed",
-      isComplete: ["completed", "closed"].includes((projectDetail.status || "").toLowerCase()),
-      detail: ["completed", "closed"].includes((projectDetail.status || "").toLowerCase())
-        ? "Project closed"
-        : "Project still open",
+      isComplete: projectClosed,
+      evidence: `Status: ${projectDetail.status || "not set"}`,
+      actionLabel: projectClosed ? "Completed" : "Pending",
     },
   ];
   const firstIncompleteLifecycleIndex = lifecycleBaseStages.findIndex((stage) => !stage.isComplete);
@@ -1401,6 +1410,11 @@ export default function ProjectDetail() {
       : index === firstIncompleteLifecycleIndex
         ? "current"
         : "pending",
+    statusLabel: stage.isComplete
+      ? stage.actionLabel
+      : index === firstIncompleteLifecycleIndex && stage.actionLabel !== "Pending"
+        ? stage.actionLabel
+        : "Pending",
   }));
 
   const reviewedWorkHistory = Array.isArray(reviewingApplication?.expert?.workHistory)
@@ -1560,12 +1574,20 @@ export default function ProjectDetail() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium">{stage.label}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{stage.detail}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{stage.evidence}</p>
                     <Badge
-                      variant={stage.state === "complete" ? "default" : stage.state === "current" ? "secondary" : "outline"}
+                      variant={
+                        stage.statusLabel === "Completed"
+                          ? "default"
+                          : stage.statusLabel === "Needs Action"
+                            ? "destructive"
+                            : stage.statusLabel === "In Progress"
+                              ? "secondary"
+                              : "outline"
+                      }
                       className="mt-2"
                     >
-                      {stage.state === "complete" ? "Active" : stage.state === "current" ? "Next" : "Pending"}
+                      {stage.statusLabel}
                     </Badge>
                   </div>
                 </div>
