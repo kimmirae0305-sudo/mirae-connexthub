@@ -1,14 +1,13 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { format } from "date-fns";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, FileQuestion } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { BarChart3, CalendarDays, Database, ExternalLink, Plus, Search, Tags, TrendingUp } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +24,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -33,144 +33,295 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/empty-state";
-import type { Project, VettingQuestion, InsertVettingQuestion } from "@shared/schema";
+import { DataTableSkeleton } from "@/components/data-table-skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import type { CallRecord, Insight, InsertInsight } from "@shared/schema";
 
-const questionFormSchema = z.object({
-  projectId: z.coerce.number().min(1, "Please select a project"),
-  question: z.string().min(1, "Question is required"),
-  isRequired: z.boolean().default(true),
+const ALL = "all";
+
+const insightFormSchema = z.object({
+  consultationId: z.string().min(1, "Consultation ID is required"),
+  callRecordId: z.string().optional(),
+  month: z.string().min(1, "Month is required"),
+  callDate: z.string().min(1, "Call date is required"),
+  clientType: z.string().min(1, "Client type is required"),
+  industry: z.string().min(1, "Industry is required"),
+  market: z.string().min(1, "Market is required"),
+  geography: z.string().min(1, "Geography is required"),
+  clientQuestion: z.string().min(1, "Client question is required"),
+  observedTrend: z.string().min(1, "Observed trend is required"),
+  keyTagsText: z.string().optional(),
+  signalStrength: z.string().min(1, "Signal strength is required"),
+  companyMentioned: z.string().optional(),
+  expertSeniority: z.string().optional(),
+  callDurationMin: z.string().optional(),
+  recordingLink: z.string().optional(),
+  transcriptLink: z.string().optional(),
+  internalNotes: z.string().optional(),
 });
 
-type QuestionFormData = z.infer<typeof questionFormSchema>;
+type InsightFormData = z.infer<typeof insightFormSchema>;
+
+type Filters = {
+  industry: string;
+  market: string;
+  geography: string;
+  clientType: string;
+  signalStrength: string;
+  companyMentioned: string;
+  tag: string;
+  month: string;
+  search: string;
+};
+
+const defaultFilters: Filters = {
+  industry: ALL,
+  market: ALL,
+  geography: ALL,
+  clientType: ALL,
+  signalStrength: ALL,
+  companyMentioned: ALL,
+  tag: ALL,
+  month: ALL,
+  search: "",
+};
+
+const signalStrengthOptions = ["Strong", "Medium", "Weak", "Emerging"];
+
+const uniqueValues = (values: Array<string | null | undefined>) =>
+  Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+const toInputDate = (value: Date | string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return format(date, "yyyy-MM-dd");
+};
+
+const formatDate = (value: Date | string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return format(date, "MMM dd, yyyy");
+};
+
+const formatMonth = (value: string) => {
+  if (!value) return "-";
+  const date = new Date(`${value}-01T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return format(date, "MMM yyyy");
+};
+
+const isStrongSignal = (value?: string | null) => {
+  const normalized = (value || "").toLowerCase();
+  return normalized.includes("strong") || normalized.includes("high");
+};
 
 export default function InsightHub() {
   const { toast } = useToast();
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingQuestion, setEditingQuestion] = useState<VettingQuestion | null>(null);
-  const [deletingQuestion, setDeletingQuestion] = useState<VettingQuestion | null>(null);
+  const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [selectedInsight, setSelectedInsight] = useState<Insight | null>(null);
 
-  const { data: projects, isLoading: projectsLoading } = useQuery<Project[]>({
-    queryKey: ["/api/projects"],
+  const { data: insights = [], isLoading } = useQuery<Insight[]>({
+    queryKey: ["/api/insights"],
   });
 
-  const { data: questions, isLoading: questionsLoading } = useQuery<VettingQuestion[]>({
-    queryKey: ["/api/vetting-questions"],
+  const { data: callRecords = [] } = useQuery<CallRecord[]>({
+    queryKey: ["/api/call-records"],
   });
 
-  const form = useForm<QuestionFormData>({
-    resolver: zodResolver(questionFormSchema),
+  const form = useForm<InsightFormData>({
+    resolver: zodResolver(insightFormSchema),
     defaultValues: {
-      projectId: 0,
-      question: "",
-      isRequired: true,
+      consultationId: "",
+      callRecordId: ALL,
+      month: format(new Date(), "yyyy-MM"),
+      callDate: format(new Date(), "yyyy-MM-dd"),
+      clientType: "",
+      industry: "",
+      market: "",
+      geography: "",
+      clientQuestion: "",
+      observedTrend: "",
+      keyTagsText: "",
+      signalStrength: "Strong",
+      companyMentioned: "",
+      expertSeniority: "",
+      callDurationMin: "",
+      recordingLink: "",
+      transcriptLink: "",
+      internalNotes: "",
     },
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: InsertVettingQuestion) =>
-      apiRequest("POST", "/api/vetting-questions", data),
+    mutationFn: async (data: InsertInsight) => {
+      const res = await apiRequest("POST", "/api/insights", data);
+      return res.json();
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/vetting-questions"] });
-      setIsDialogOpen(false);
-      form.reset();
-      toast({ title: "Question added successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to add question", variant: "destructive" });
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: (data: InsertVettingQuestion & { id: number }) =>
-      apiRequest("PATCH", `/api/vetting-questions/${data.id}`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/vetting-questions"] });
-      setIsDialogOpen(false);
-      setEditingQuestion(null);
-      form.reset();
-      toast({ title: "Question updated successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to update question", variant: "destructive" });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/vetting-questions/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/vetting-questions"] });
-      setDeletingQuestion(null);
-      toast({ title: "Question deleted successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to delete question", variant: "destructive" });
-    },
-  });
-
-  const filteredQuestions = selectedProjectId
-    ? questions?.filter((q) => q.projectId === selectedProjectId)
-    : questions;
-
-  const getProjectName = (projectId: number) => {
-    return projects?.find((p) => p.id === projectId)?.name || "Unknown Project";
-  };
-
-  const handleOpenDialog = (question?: VettingQuestion) => {
-    if (question) {
-      setEditingQuestion(question);
+      queryClient.invalidateQueries({ queryKey: ["/api/insights"] });
+      setIsCreateOpen(false);
       form.reset({
-        projectId: question.projectId,
-        question: question.question,
-        isRequired: question.isRequired,
+        consultationId: "",
+        callRecordId: ALL,
+        month: format(new Date(), "yyyy-MM"),
+        callDate: format(new Date(), "yyyy-MM-dd"),
+        clientType: "",
+        industry: "",
+        market: "",
+        geography: "",
+        clientQuestion: "",
+        observedTrend: "",
+        keyTagsText: "",
+        signalStrength: "Strong",
+        companyMentioned: "",
+        expertSeniority: "",
+        callDurationMin: "",
+        recordingLink: "",
+        transcriptLink: "",
+        internalNotes: "",
       });
-    } else {
-      setEditingQuestion(null);
-      form.reset({
-        projectId: selectedProjectId || 0,
-        question: "",
-        isRequired: true,
-      });
-    }
-    setIsDialogOpen(true);
-  };
+      toast({ title: "Insight added" });
+    },
+    onError: () => {
+      toast({ title: "Failed to add insight", variant: "destructive" });
+    },
+  });
 
-  const onSubmit = (data: QuestionFormData) => {
-    const questionData: InsertVettingQuestion = {
-      ...data,
-      orderIndex: filteredQuestions?.length || 0,
+  const filterOptions = useMemo(() => {
+    const tags = insights.flatMap((insight) => insight.keyTags || []);
+    return {
+      industries: uniqueValues(insights.map((insight) => insight.industry)),
+      markets: uniqueValues(insights.map((insight) => insight.market)),
+      geographies: uniqueValues(insights.map((insight) => insight.geography)),
+      clientTypes: uniqueValues(insights.map((insight) => insight.clientType)),
+      signalStrengths: uniqueValues(insights.map((insight) => insight.signalStrength)),
+      companies: uniqueValues(insights.map((insight) => insight.companyMentioned)),
+      tags: uniqueValues(tags),
+      months: uniqueValues(insights.map((insight) => insight.month)),
+    };
+  }, [insights]);
+
+  const filteredInsights = useMemo(() => {
+    const search = filters.search.trim().toLowerCase();
+    return insights.filter((insight) => {
+      const matchesSearch =
+        !search ||
+        [
+          insight.consultationId,
+          insight.clientQuestion,
+          insight.observedTrend,
+          insight.industry,
+          insight.market,
+          insight.geography,
+          insight.companyMentioned,
+          insight.expertSeniority,
+          insight.internalNotes,
+          ...(insight.keyTags || []),
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(search));
+
+      return (
+        matchesSearch &&
+        (filters.industry === ALL || insight.industry === filters.industry) &&
+        (filters.market === ALL || insight.market === filters.market) &&
+        (filters.geography === ALL || insight.geography === filters.geography) &&
+        (filters.clientType === ALL || insight.clientType === filters.clientType) &&
+        (filters.signalStrength === ALL || insight.signalStrength === filters.signalStrength) &&
+        (filters.companyMentioned === ALL || insight.companyMentioned === filters.companyMentioned) &&
+        (filters.tag === ALL || (insight.keyTags || []).includes(filters.tag)) &&
+        (filters.month === ALL || insight.month === filters.month)
+      );
+    });
+  }, [filters, insights]);
+
+  const summary = useMemo(() => {
+    const topValue = (values: Array<string | null | undefined>) => {
+      const counts = new Map<string, number>();
+      values.forEach((value) => {
+        const key = value?.trim();
+        if (!key) return;
+        counts.set(key, (counts.get(key) || 0) + 1);
+      });
+      return Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || "-";
     };
 
-    if (editingQuestion) {
-      updateMutation.mutate({ ...questionData, id: editingQuestion.id });
-    } else {
-      createMutation.mutate(questionData);
-    }
+    return {
+      total: insights.length,
+      strong: insights.filter((insight) => isStrongSignal(insight.signalStrength)).length,
+      topIndustry: topValue(insights.map((insight) => insight.industry)),
+      topMarket: topValue(insights.map((insight) => insight.market)),
+      topCompany: topValue(insights.map((insight) => insight.companyMentioned)),
+    };
+  }, [insights]);
+
+  const updateFilter = (key: keyof Filters, value: string) => {
+    setFilters((current) => ({ ...current, [key]: value }));
   };
 
-  const groupedQuestions = questions?.reduce(
-    (acc, q) => {
-      if (!acc[q.projectId]) {
-        acc[q.projectId] = [];
-      }
-      acc[q.projectId].push(q);
-      return acc;
-    },
-    {} as Record<number, VettingQuestion[]>
+  const onSubmit = (data: InsightFormData) => {
+    const tags = (data.keyTagsText || "")
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+    createMutation.mutate({
+      consultationId: data.consultationId.trim(),
+      callRecordId: data.callRecordId && data.callRecordId !== ALL ? Number(data.callRecordId) : undefined,
+      month: data.month,
+      callDate: new Date(`${data.callDate}T00:00:00`),
+      clientType: data.clientType.trim(),
+      industry: data.industry.trim(),
+      market: data.market.trim(),
+      geography: data.geography.trim(),
+      clientQuestion: data.clientQuestion.trim(),
+      observedTrend: data.observedTrend.trim(),
+      keyTags: tags,
+      signalStrength: data.signalStrength,
+      companyMentioned: data.companyMentioned?.trim() || undefined,
+      expertSeniority: data.expertSeniority?.trim() || undefined,
+      callDurationMin: data.callDurationMin ? Number(data.callDurationMin) : undefined,
+      recordingLink: data.recordingLink?.trim() || undefined,
+      transcriptLink: data.transcriptLink?.trim() || undefined,
+      internalNotes: data.internalNotes?.trim() || undefined,
+    });
+  };
+
+  const renderSelectFilter = (
+    label: string,
+    value: string,
+    options: string[],
+    onChange: (value: string) => void
+  ) => (
+    <div className="space-y-2">
+      <label className="text-sm font-medium">{label}</label>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>All</SelectItem>
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {label === "Month" ? formatMonth(option) : option}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 
   return (
@@ -179,331 +330,524 @@ export default function InsightHub() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Insight Hub</h1>
           <p className="text-sm text-muted-foreground">
-            Create and manage screening insights for each project.
+            Structured market signals captured from expert consultations.
           </p>
         </div>
-        <Button
-          onClick={() => handleOpenDialog()}
-          className="gap-2"
-          disabled={!projects?.length}
-          data-testid="button-add-question"
-        >
-          <Plus className="h-4 w-4" /> Add Question
+        <Button onClick={() => setIsCreateOpen(true)} className="gap-2" data-testid="button-add-insight">
+          <Plus className="h-4 w-4" />
+          Add Insight
         </Button>
       </div>
 
-      <div className="flex items-center gap-4">
-        <Select
-          value={selectedProjectId?.toString() || "all"}
-          onValueChange={(val) => setSelectedProjectId(val === "all" ? null : Number(val))}
-        >
-          <SelectTrigger className="w-64" data-testid="select-project-filter">
-            <SelectValue placeholder="Filter by project" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Projects</SelectItem>
-            {projects?.map((project) => (
-              <SelectItem key={project.id} value={project.id.toString()}>
-                {project.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {projectsLoading || questionsLoading ? (
-        <div className="space-y-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Card key={i}>
-              <CardContent className="p-6">
-                <Skeleton className="h-24 w-full" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : !projects?.length ? (
-        <EmptyState
-          icon={FileQuestion}
-          title="No projects available"
-          description="Create a project first before adding screening questions."
-        />
-      ) : selectedProjectId ? (
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-4">
-            <CardTitle className="text-base font-medium">
-              {getProjectName(selectedProjectId)}
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium">
+              <Database className="h-4 w-4" />
+              Total Insights
             </CardTitle>
-            <Badge variant="secondary" className="no-default-hover-elevate no-default-active-elevate">
-              {filteredQuestions?.length || 0} questions
-            </Badge>
           </CardHeader>
           <CardContent>
-            {!filteredQuestions?.length ? (
-              <EmptyState
-                icon={FileQuestion}
-                title="No questions yet"
-                description="Add screening questions for this project."
-                action={
-                  <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-add-first-question">
-                    <Plus className="h-4 w-4" /> Add Question
-                  </Button>
-                }
-              />
-            ) : (
-              <div className="space-y-3">
-                {filteredQuestions
-                  .sort((a, b) => a.orderIndex - b.orderIndex)
-                  .map((question, index) => (
-                    <div
-                      key={question.id}
-                      className="flex items-start gap-3 rounded-lg border border-border bg-card p-4"
-                      data-testid={`question-item-${question.id}`}
-                    >
-                      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
-                        {index + 1}
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <p className="font-medium text-foreground">{question.question}</p>
-                        <div className="flex items-center gap-2">
-                          {question.isRequired ? (
-                            <Badge
-                              variant="secondary"
-                              className="bg-primary/10 text-primary no-default-hover-elevate no-default-active-elevate"
-                            >
-                              Required
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary" className="no-default-hover-elevate no-default-active-elevate">
-                              Optional
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleOpenDialog(question)}
-                          data-testid={`button-edit-question-${question.id}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeletingQuestion(question)}
-                          data-testid={`button-delete-question-${question.id}`}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            )}
+            <p className="text-2xl font-semibold">{summary.total}</p>
           </CardContent>
         </Card>
-      ) : (
-        <div className="space-y-4">
-          {Object.entries(groupedQuestions || {}).length === 0 ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium">
+              <TrendingUp className="h-4 w-4" />
+              Strong Signals
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold">{summary.strong}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Top Industry</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="truncate text-lg font-semibold">{summary.topIndustry}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Top Market</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="truncate text-lg font-semibold">{summary.topMarket}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Most Mentioned Company</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="truncate text-lg font-semibold">{summary.topCompany}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Search className="h-4 w-4" />
+            Filters
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Input
+            placeholder="Search questions, trends, companies, notes, or tags..."
+            value={filters.search}
+            onChange={(event) => updateFilter("search", event.target.value)}
+            data-testid="input-insight-search"
+          />
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {renderSelectFilter("Industry", filters.industry, filterOptions.industries, (value) =>
+              updateFilter("industry", value)
+            )}
+            {renderSelectFilter("Market", filters.market, filterOptions.markets, (value) =>
+              updateFilter("market", value)
+            )}
+            {renderSelectFilter("Geography", filters.geography, filterOptions.geographies, (value) =>
+              updateFilter("geography", value)
+            )}
+            {renderSelectFilter("Client Type", filters.clientType, filterOptions.clientTypes, (value) =>
+              updateFilter("clientType", value)
+            )}
+            {renderSelectFilter("Signal Strength", filters.signalStrength, filterOptions.signalStrengths, (value) =>
+              updateFilter("signalStrength", value)
+            )}
+            {renderSelectFilter("Company", filters.companyMentioned, filterOptions.companies, (value) =>
+              updateFilter("companyMentioned", value)
+            )}
+            {renderSelectFilter("Tags", filters.tag, filterOptions.tags, (value) => updateFilter("tag", value))}
+            {renderSelectFilter("Month", filters.month, filterOptions.months, (value) => updateFilter("month", value))}
+          </div>
+          <Button variant="outline" onClick={() => setFilters(defaultFilters)} data-testid="button-clear-insight-filters">
+            Clear Filters
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <BarChart3 className="h-4 w-4" />
+            Insight Log
+          </CardTitle>
+          <Badge variant="secondary">{filteredInsights.length} shown</Badge>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <DataTableSkeleton columns={11} rows={6} />
+          ) : filteredInsights.length === 0 ? (
             <EmptyState
-              icon={FileQuestion}
-              title="No screening questions yet"
-              description="Add screening questions to any of your projects."
+              icon={Tags}
+              title={insights.length === 0 ? "No insights yet" : "No insights match these filters"}
+              description={
+                insights.length === 0
+                  ? "Add the first structured consultation insight to start building the signal database."
+                  : "Try clearing filters or searching another term."
+              }
               action={
-                <Button onClick={() => handleOpenDialog()} className="gap-2" data-testid="button-add-first-question-all">
-                  <Plus className="h-4 w-4" /> Add Question
-                </Button>
+                insights.length === 0 ? (
+                  <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add Insight
+                  </Button>
+                ) : undefined
               }
             />
           ) : (
-            Object.entries(groupedQuestions || {}).map(([projectId, projectQuestions]) => (
-              <Card key={projectId}>
-                <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-4">
-                  <CardTitle className="text-base font-medium">
-                    {getProjectName(Number(projectId))}
-                  </CardTitle>
-                  <Badge variant="secondary" className="no-default-hover-elevate no-default-active-elevate">
-                    {projectQuestions.length} questions
-                  </Badge>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {projectQuestions
-                      .sort((a, b) => a.orderIndex - b.orderIndex)
-                      .map((question, index) => (
-                        <div
-                          key={question.id}
-                          className="flex items-start gap-3 rounded-lg border border-border bg-background p-4"
-                          data-testid={`question-item-${question.id}`}
-                        >
-                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
-                            {index + 1}
-                          </div>
-                          <div className="flex-1 space-y-1">
-                            <p className="font-medium text-foreground">{question.question}</p>
-                            {question.isRequired && (
-                              <Badge
-                                variant="secondary"
-                                className="bg-primary/10 text-primary no-default-hover-elevate no-default-active-elevate"
-                              >
-                                Required
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleOpenDialog(question)}
-                              data-testid={`button-edit-question-${question.id}`}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setDeletingQuestion(question)}
-                              data-testid={`button-delete-question-${question.id}`}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs font-semibold uppercase">Call Date</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Industry</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Market</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Geography</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Client Type</TableHead>
+                    <TableHead className="min-w-[240px] text-xs font-semibold uppercase">Client Question</TableHead>
+                    <TableHead className="min-w-[260px] text-xs font-semibold uppercase">Observed Trend</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Key Tags</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Signal Strength</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Company</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Expert Seniority</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredInsights.map((insight) => (
+                    <TableRow
+                      key={insight.id}
+                      className="cursor-pointer"
+                      onClick={() => setSelectedInsight(insight)}
+                      data-testid={`row-insight-${insight.id}`}
+                    >
+                      <TableCell className="font-mono text-xs">{formatDate(insight.callDate)}</TableCell>
+                      <TableCell>{insight.industry}</TableCell>
+                      <TableCell>{insight.market}</TableCell>
+                      <TableCell>{insight.geography}</TableCell>
+                      <TableCell>{insight.clientType}</TableCell>
+                      <TableCell className="max-w-[280px] truncate">{insight.clientQuestion}</TableCell>
+                      <TableCell className="max-w-[320px] truncate">{insight.observedTrend}</TableCell>
+                      <TableCell>
+                        <div className="flex max-w-[220px] flex-wrap gap-1">
+                          {(insight.keyTags || []).slice(0, 3).map((tag) => (
+                            <Badge key={tag} variant="outline" className="text-xs">
+                              {tag}
+                            </Badge>
+                          ))}
+                          {(insight.keyTags || []).length > 3 && (
+                            <Badge variant="secondary" className="text-xs">
+                              +{(insight.keyTags || []).length - 3}
+                            </Badge>
+                          )}
                         </div>
-                      ))}
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          className={
+                            isStrongSignal(insight.signalStrength)
+                              ? "bg-green-500/10 text-green-600 border-green-500/20"
+                              : ""
+                          }
+                          variant={isStrongSignal(insight.signalStrength) ? "default" : "secondary"}
+                        >
+                          {insight.signalStrength}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{insight.companyMentioned || "-"}</TableCell>
+                      <TableCell>{insight.expertSeniority || "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
-        </div>
-      )}
+        </CardContent>
+      </Card>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-lg">
+      <Dialog open={!!selectedInsight} onOpenChange={(open) => !open && setSelectedInsight(null)}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {editingQuestion ? "Edit Question" : "Add Question"}
-            </DialogTitle>
+            <DialogTitle>Insight Detail</DialogTitle>
+            <DialogDescription>Read-only structured market signal record.</DialogDescription>
+          </DialogHeader>
+          {selectedInsight && (
+            <div className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-3">
+                <DetailField label="Consultation ID" value={selectedInsight.consultationId} />
+                <DetailField label="Call Date" value={formatDate(selectedInsight.callDate)} />
+                <DetailField label="Month" value={formatMonth(selectedInsight.month)} />
+                <DetailField label="Client Type" value={selectedInsight.clientType} />
+                <DetailField label="Industry" value={selectedInsight.industry} />
+                <DetailField label="Market" value={selectedInsight.market} />
+                <DetailField label="Geography" value={selectedInsight.geography} />
+                <DetailField label="Signal Strength" value={selectedInsight.signalStrength} />
+                <DetailField label="Company Mentioned" value={selectedInsight.companyMentioned || "-"} />
+                <DetailField label="Expert Seniority" value={selectedInsight.expertSeniority || "-"} />
+                <DetailField
+                  label="Call Duration"
+                  value={selectedInsight.callDurationMin ? `${selectedInsight.callDurationMin} min` : "-"}
+                />
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Consultation Link</p>
+                  {selectedInsight.callRecordId ? (
+                    <a className="inline-flex items-center gap-1 text-sm text-primary hover:underline" href="/consultations">
+                      Open consultations <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    <p className="text-sm">Stored as text only</p>
+                  )}
+                </div>
+              </div>
+
+              <DetailBlock label="Client Question" value={selectedInsight.clientQuestion} />
+              <DetailBlock label="Observed Trend" value={selectedInsight.observedTrend} />
+
+              <div>
+                <p className="text-xs font-medium uppercase text-muted-foreground">Key Tags</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(selectedInsight.keyTags || []).length > 0 ? (
+                    selectedInsight.keyTags!.map((tag) => (
+                      <Badge key={tag} variant="outline">
+                        {tag}
+                      </Badge>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No tags</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <LinkField label="Recording Link" url={selectedInsight.recordingLink} />
+                <LinkField label="Transcript Link" url={selectedInsight.transcriptLink} />
+              </div>
+
+              <DetailBlock label="Internal Notes" value={selectedInsight.internalNotes || "-"} />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Insight</DialogTitle>
             <DialogDescription>
-              {editingQuestion
-                ? "Update the question details."
-                : "Create a new screening question for the project."}
+              Manually add a structured market signal from an expert consultation.
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="projectId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Project *</FormLabel>
-                    <Select
-                      onValueChange={(val) => field.onChange(Number(val))}
-                      value={field.value?.toString() || ""}
-                    >
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-3">
+                <FormField
+                  control={form.control}
+                  name="consultationId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Consultation ID *</FormLabel>
                       <FormControl>
-                        <SelectTrigger data-testid="select-question-project">
-                          <SelectValue placeholder="Select a project" />
-                        </SelectTrigger>
+                        <Input placeholder="CONS-001" {...field} />
                       </FormControl>
-                      <SelectContent>
-                        {projects?.map((project) => (
-                          <SelectItem key={project.id} value={project.id.toString()}>
-                            {project.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="callRecordId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Related Consultation</FormLabel>
+                      <Select value={field.value || ALL} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value={ALL}>Text ID only</SelectItem>
+                          {callRecords.map((record) => (
+                            <SelectItem key={record.id} value={record.id.toString()}>
+                              #{record.id} - {formatDate(record.callDate)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="month"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Month *</FormLabel>
+                      <FormControl>
+                        <Input type="month" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="callDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Call Date *</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} onChange={(event) => {
+                          field.onChange(event);
+                          if (event.target.value) form.setValue("month", event.target.value.slice(0, 7));
+                        }} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <TextInputField control={form.control} name="clientType" label="Client Type *" placeholder="Corporate, PE, VC..." />
+                <TextInputField control={form.control} name="industry" label="Industry *" placeholder="Payments, Healthcare..." />
+                <TextInputField control={form.control} name="market" label="Market *" placeholder="Digital wallets" />
+                <TextInputField control={form.control} name="geography" label="Geography *" placeholder="Brazil, LATAM..." />
+                <FormField
+                  control={form.control}
+                  name="signalStrength"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Signal Strength *</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {signalStrengthOptions.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <TextInputField control={form.control} name="companyMentioned" label="Company Mentioned" placeholder="Company name" />
+                <TextInputField control={form.control} name="expertSeniority" label="Expert Seniority" placeholder="VP, C-level, Director..." />
+                <FormField
+                  control={form.control}
+                  name="callDurationMin"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Call Duration Min</FormLabel>
+                      <FormControl>
+                        <Input type="number" min="0" placeholder="60" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
               <FormField
                 control={form.control}
-                name="question"
+                name="clientQuestion"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Question *</FormLabel>
+                    <FormLabel>Client Question *</FormLabel>
                     <FormControl>
-                      <Textarea
-                        placeholder="Enter your screening question..."
-                        className="resize-none"
-                        rows={3}
-                        {...field}
-                        data-testid="input-question-text"
-                      />
+                      <Textarea rows={3} placeholder="What was the client trying to learn?" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="observedTrend"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Observed Trend *</FormLabel>
+                    <FormControl>
+                      <Textarea rows={3} placeholder="What market signal or pattern was observed?" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="keyTagsText"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Key Tags</FormLabel>
+                    <FormControl>
+                      <Input placeholder="payments, regulation, churn" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
 
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextInputField control={form.control} name="recordingLink" label="Recording Link" placeholder="https://..." />
+                <TextInputField control={form.control} name="transcriptLink" label="Transcript Link" placeholder="https://..." />
+              </div>
+
               <FormField
                 control={form.control}
-                name="isRequired"
+                name="internalNotes"
                 render={({ field }) => (
-                  <FormItem className="flex flex-row items-center gap-3 space-y-0">
+                  <FormItem>
+                    <FormLabel>Internal Notes</FormLabel>
                     <FormControl>
-                      <Checkbox
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                        data-testid="checkbox-required"
-                      />
+                      <Textarea rows={3} placeholder="Internal interpretation, caveats, or follow-up notes..." {...field} />
                     </FormControl>
-                    <FormLabel className="font-normal">This question is required</FormLabel>
+                    <FormMessage />
                   </FormItem>
                 )}
               />
 
               <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsDialogOpen(false)}
-                  data-testid="button-cancel-question"
-                >
+                <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
                   Cancel
                 </Button>
-                <Button
-                  type="submit"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                  data-testid="button-save-question"
-                >
-                  {createMutation.isPending || updateMutation.isPending
-                    ? "Saving..."
-                    : editingQuestion
-                      ? "Update Question"
-                      : "Add Question"}
+                <Button type="submit" disabled={createMutation.isPending}>
+                  {createMutation.isPending ? "Saving..." : "Save Insight"}
                 </Button>
               </DialogFooter>
             </form>
           </Form>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={!!deletingQuestion} onOpenChange={() => setDeletingQuestion(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Question</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this question? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-cancel-delete-question">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => deletingQuestion && deleteMutation.mutate(deletingQuestion.id)}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              data-testid="button-confirm-delete-question"
-            >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
+  );
+}
+
+function DetailField({ label, value }: { label: string; value: string | number | null | undefined }) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
+      <p className="text-sm">{value || "-"}</p>
+    </div>
+  );
+}
+
+function DetailBlock({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 whitespace-pre-wrap text-sm">{value || "-"}</p>
+    </div>
+  );
+}
+
+function LinkField({ label, url }: { label: string; url?: string | null }) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
+      {url ? (
+        <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
+          Open link <ExternalLink className="h-3 w-3" />
+        </a>
+      ) : (
+        <p className="text-sm">-</p>
+      )}
+    </div>
+  );
+}
+
+function TextInputField({
+  control,
+  name,
+  label,
+  placeholder,
+}: {
+  control: any;
+  name: keyof InsightFormData;
+  label: string;
+  placeholder?: string;
+}) {
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{label}</FormLabel>
+          <FormControl>
+            <Input placeholder={placeholder} {...field} />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
   );
 }
