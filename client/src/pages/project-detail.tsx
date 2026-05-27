@@ -87,7 +87,7 @@ import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { RegisterExpertForm } from "@/components/experts/RegisterExpertForm";
 import { QuickInviteForm } from "@/components/experts/QuickInviteForm";
-import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle, CallRecord, InsertCallRecord } from "@shared/schema";
+import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle, CallRecord, InsertCallRecord, InsertProject, ClientOrganization } from "@shared/schema";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -142,6 +142,42 @@ interface RAUser {
   email: string;
 }
 
+const projectEditSchema = z.object({
+  name: z.string().min(1, "Project title is required"),
+  clientOrganizationId: z.string().optional(),
+  clientName: z.string().min(1, "Client name is required"),
+  industry: z.string().min(1, "Industry is required"),
+  status: z.string().min(1, "Status is required"),
+  startDate: z.string().optional(),
+  dueDate: z.string().optional(),
+  cuRatePerCU: z.string().optional(),
+  projectOverview: z.string().optional(),
+  description: z.string().optional(),
+});
+
+type ProjectEditFormData = z.infer<typeof projectEditSchema>;
+
+const projectStatusOptions = ["new", "sourcing", "shortlisted", "confirmed", "completed", "cancelled"];
+const projectIndustryOptions = [
+  "Technology",
+  "Healthcare",
+  "Finance",
+  "Manufacturing",
+  "Energy",
+  "Retail",
+  "Consulting",
+  "Legal",
+  "Real Estate",
+  "Education",
+  "Other",
+];
+
+const toDateInput = (value?: Date | string | null) => {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : format(date, "yyyy-MM-dd");
+};
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
@@ -156,6 +192,7 @@ export default function ProjectDetail() {
   const [isQuickInviteModalOpen, setIsQuickInviteModalOpen] = useState(false);
   const [reviewingApplication, setReviewingApplication] = useState<EnrichedExpert | null>(null);
   const [viewingAdvisor, setViewingAdvisor] = useState<EnrichedExpert | null>(null);
+  const [isProjectEditMode, setIsProjectEditMode] = useState(false);
   
   // Angles & VQ state
   const [expandedAngles, setExpandedAngles] = useState<Set<number>>(new Set());
@@ -287,6 +324,42 @@ export default function ProjectDetail() {
     },
     enabled: !!projectId,
   });
+
+  const { data: clientOrganizations } = useQuery<ClientOrganization[]>({
+    queryKey: ["/api/client-organizations"],
+  });
+
+  const projectEditForm = useForm<ProjectEditFormData>({
+    resolver: zodResolver(projectEditSchema),
+    defaultValues: {
+      name: "",
+      clientOrganizationId: "",
+      clientName: "",
+      industry: "",
+      status: "new",
+      startDate: "",
+      dueDate: "",
+      cuRatePerCU: "",
+      projectOverview: "",
+      description: "",
+    },
+  });
+
+  useEffect(() => {
+    if (!projectDetail || isProjectEditMode) return;
+    projectEditForm.reset({
+      name: projectDetail.name || "",
+      clientOrganizationId: projectDetail.clientOrganizationId ? String(projectDetail.clientOrganizationId) : "",
+      clientName: projectDetail.clientName || "",
+      industry: projectDetail.industry || "",
+      status: projectDetail.status || "new",
+      startDate: toDateInput(projectDetail.startDate),
+      dueDate: toDateInput(projectDetail.dueDate || projectDetail.endDate),
+      cuRatePerCU: projectDetail.cuRatePerCU || "",
+      projectOverview: projectDetail.projectOverview || "",
+      description: projectDetail.description || "",
+    });
+  }, [projectDetail, isProjectEditMode, projectEditForm]);
 
   const { data: allRAs } = useQuery<RAUser[]>({
     queryKey: ["/api/users/ras"],
@@ -442,6 +515,37 @@ export default function ProjectDetail() {
     },
     onError: () => {
       toast({ title: "Failed to generate invite link", variant: "destructive" });
+    },
+  });
+
+  const updateProjectMutation = useMutation({
+    mutationFn: async (data: ProjectEditFormData) => {
+      const selectedClientOrg = clientOrganizations?.find(
+        (org) => String(org.id) === data.clientOrganizationId
+      );
+      const payload: Partial<InsertProject> = {
+        name: data.name,
+        clientOrganizationId: data.clientOrganizationId ? Number(data.clientOrganizationId) : null,
+        clientName: selectedClientOrg?.name || data.clientName,
+        industry: data.industry,
+        status: data.status,
+        startDate: data.startDate ? new Date(`${data.startDate}T00:00:00`) : null,
+        dueDate: data.dueDate ? new Date(`${data.dueDate}T00:00:00`) : null,
+        cuRatePerCU: data.cuRatePerCU || null,
+        projectOverview: data.projectOverview || null,
+        description: data.description || null,
+      };
+      return apiRequest("PATCH", `/api/projects/${projectId}`, payload);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      await refetchProject();
+      setIsProjectEditMode(false);
+      toast({ title: "Project updated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update project", variant: "destructive" });
     },
   });
 
@@ -1227,6 +1331,38 @@ export default function ProjectDetail() {
     ? reviewingApplication.vqAnswers as Array<{ questionText?: string; answerText?: string }>
     : [];
 
+  const startProjectEdit = () => {
+    projectEditForm.reset({
+      name: projectDetail.name || "",
+      clientOrganizationId: projectDetail.clientOrganizationId ? String(projectDetail.clientOrganizationId) : "",
+      clientName: projectDetail.clientName || "",
+      industry: projectDetail.industry || "",
+      status: projectDetail.status || "new",
+      startDate: toDateInput(projectDetail.startDate),
+      dueDate: toDateInput(projectDetail.dueDate || projectDetail.endDate),
+      cuRatePerCU: projectDetail.cuRatePerCU || "",
+      projectOverview: projectDetail.projectOverview || "",
+      description: projectDetail.description || "",
+    });
+    setIsProjectEditMode(true);
+  };
+
+  const cancelProjectEdit = () => {
+    projectEditForm.reset({
+      name: projectDetail.name || "",
+      clientOrganizationId: projectDetail.clientOrganizationId ? String(projectDetail.clientOrganizationId) : "",
+      clientName: projectDetail.clientName || "",
+      industry: projectDetail.industry || "",
+      status: projectDetail.status || "new",
+      startDate: toDateInput(projectDetail.startDate),
+      dueDate: toDateInput(projectDetail.dueDate || projectDetail.endDate),
+      cuRatePerCU: projectDetail.cuRatePerCU || "",
+      projectOverview: projectDetail.projectOverview || "",
+      description: projectDetail.description || "",
+    });
+    setIsProjectEditMode(false);
+  };
+
   return (
     <div className="space-y-6 p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1240,9 +1376,35 @@ export default function ProjectDetail() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-2xl font-semibold text-foreground">{projectDetail.name}</h1>
+            {isProjectEditMode ? (
+              <Input
+                className="h-10 max-w-xl text-2xl font-semibold"
+                aria-label="Project title"
+                {...projectEditForm.register("name")}
+              />
+            ) : (
+              <h1 className="text-2xl font-semibold text-foreground">{projectDetail.name}</h1>
+            )}
             <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <StatusBadge status={projectDetail.status} type="project" />
+              {isProjectEditMode ? (
+                <Select
+                  value={projectEditForm.watch("status")}
+                  onValueChange={(value) => projectEditForm.setValue("status", value, { shouldDirty: true })}
+                >
+                  <SelectTrigger className="h-8 w-36">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projectStatusOptions.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {status}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <StatusBadge status={projectDetail.status} type="project" />
+              )}
               <span className="text-sm text-muted-foreground">{projectDetail.clientName}</span>
               <span className="text-sm text-muted-foreground">•</span>
               <span className="text-sm text-muted-foreground">{projectDetail.industry}</span>
@@ -1254,6 +1416,31 @@ export default function ProjectDetail() {
               )}
             </div>
           </div>
+        </div>
+        <div className="flex gap-2">
+          {isProjectEditMode ? (
+            <>
+              <Button
+                variant="outline"
+                onClick={cancelProjectEdit}
+                disabled={updateProjectMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={projectEditForm.handleSubmit((data) => updateProjectMutation.mutate(data))}
+                disabled={updateProjectMutation.isPending}
+              >
+                <Check className="mr-2 h-4 w-4" />
+                Save
+              </Button>
+            </>
+          ) : (
+            <Button onClick={startProjectEdit}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1293,11 +1480,56 @@ export default function ProjectDetail() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-muted-foreground">Client</p>
-                    <p className="font-medium">{projectDetail.clientName}</p>
+                    {isProjectEditMode ? (
+                      <div className="space-y-2">
+                        <Select
+                          value={projectEditForm.watch("clientOrganizationId")}
+                          onValueChange={(value) => {
+                            const selectedOrg = clientOrganizations?.find((org) => String(org.id) === value);
+                            projectEditForm.setValue("clientOrganizationId", value, { shouldDirty: true });
+                            if (selectedOrg) {
+                              projectEditForm.setValue("clientName", selectedOrg.name, { shouldDirty: true });
+                            }
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select client organization" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {clientOrganizations?.map((org) => (
+                              <SelectItem key={org.id} value={String(org.id)}>
+                                {org.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input placeholder="Client name" {...projectEditForm.register("clientName")} />
+                      </div>
+                    ) : (
+                      <p className="font-medium">{projectDetail.clientName}</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Industry</p>
-                    <p className="font-medium">{projectDetail.industry}</p>
+                    {isProjectEditMode ? (
+                      <Select
+                        value={projectEditForm.watch("industry")}
+                        onValueChange={(value) => projectEditForm.setValue("industry", value, { shouldDirty: true })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Industry" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {projectIndustryOptions.map((industry) => (
+                            <SelectItem key={industry} value={industry}>
+                              {industry}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="font-medium">{projectDetail.industry}</p>
+                    )}
                   </div>
                   {projectDetail.clientCompany && (
                     <div>
@@ -1338,19 +1570,27 @@ export default function ProjectDetail() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-muted-foreground">Start Date</p>
-                    <p className="font-medium">
-                      {projectDetail.startDate
-                        ? format(new Date(projectDetail.startDate), "MMM dd, yyyy")
-                        : "Not set"}
-                    </p>
+                    {isProjectEditMode ? (
+                      <Input type="date" {...projectEditForm.register("startDate")} />
+                    ) : (
+                      <p className="font-medium">
+                        {projectDetail.startDate
+                          ? format(new Date(projectDetail.startDate), "MMM dd, yyyy")
+                          : "Not set"}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Due Date</p>
-                    <p className="font-medium">
-                      {projectDetail.dueDate
-                        ? format(new Date(projectDetail.dueDate), "MMM dd, yyyy")
-                        : "Not set"}
-                    </p>
+                    {isProjectEditMode ? (
+                      <Input type="date" {...projectEditForm.register("dueDate")} />
+                    ) : (
+                      <p className="font-medium">
+                        {projectDetail.dueDate
+                          ? format(new Date(projectDetail.dueDate), "MMM dd, yyyy")
+                          : "Not set"}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">CU Used</p>
@@ -1358,7 +1598,11 @@ export default function ProjectDetail() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Rate per CU</p>
-                    <p className="font-mono font-medium">${parseFloat(projectDetail.cuRatePerCU || "1150").toFixed(0)}</p>
+                    {isProjectEditMode ? (
+                      <Input type="number" min="0" step="0.01" {...projectEditForm.register("cuRatePerCU")} />
+                    ) : (
+                      <p className="font-mono font-medium">${parseFloat(projectDetail.cuRatePerCU || "1150").toFixed(0)}</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Created</p>
@@ -1375,13 +1619,40 @@ export default function ProjectDetail() {
             </Card>
           </div>
 
-          {projectDetail.projectOverview && (
+          {(isProjectEditMode || projectDetail.projectOverview) && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Project Overview</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm whitespace-pre-wrap">{projectDetail.projectOverview}</p>
+                {isProjectEditMode ? (
+                  <Textarea
+                    rows={5}
+                    placeholder="Summarize the project context, objectives, and scope..."
+                    {...projectEditForm.register("projectOverview")}
+                  />
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap">{projectDetail.projectOverview}</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {(isProjectEditMode || projectDetail.description) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Description</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isProjectEditMode ? (
+                  <Textarea
+                    rows={4}
+                    placeholder="Add internal project description..."
+                    {...projectEditForm.register("description")}
+                  />
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap">{projectDetail.description}</p>
+                )}
               </CardContent>
             </Card>
           )}
