@@ -374,6 +374,21 @@ export default function Clients() {
     createPocMutation.mutate(pocData);
   };
 
+  const prepaidUsagePercent =
+    cuSummary && cuSummary.purchasedCu > 0
+      ? Math.min(100, Math.max(0, (cuSummary.completedCu / cuSummary.purchasedCu) * 100))
+      : null;
+  const prepaidStatusHint =
+    prepaidUsagePercent === null
+      ? null
+      : cuSummary && cuSummary.remainingPrepaidCu <= 0
+        ? "Renewal Opportunity"
+        : prepaidUsagePercent >= 90
+          ? "Low Balance"
+          : "Healthy Balance";
+  const prepaidStatusVariant =
+    prepaidStatusHint === "Healthy Balance" ? "secondary" : prepaidStatusHint ? "destructive" : "outline";
+
   return (
     <div className="space-y-6 p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -523,9 +538,13 @@ export default function Clients() {
                     </p>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <CommercialField label="Total Completed CU" value={formatCu(cuSummary?.completedCu)} />
+                    <CommercialField label="Used CU / Completed CU" value={formatCu(cuSummary?.completedCu)} />
                     <CommercialField label="Purchased CU" value={formatCu(cuSummary?.purchasedCu)} />
                     <CommercialField label="Remaining Prepaid CU" value={formatCu(cuSummary?.remainingPrepaidCu)} />
+                    <CommercialField
+                      label="Prepaid Usage"
+                      value={prepaidUsagePercent === null ? "-" : `${prepaidUsagePercent.toFixed(1)}%`}
+                    />
                     <CommercialField label="Retainer CU Allowance" value={formatCu(cuSummary?.retainerCuAllowance)} />
                     <CommercialField label="Remaining Retainer CU" value={formatCu(cuSummary?.remainingRetainerCu)} />
                     <CommercialField label="Pay-as-you-go Billable CU" value={formatCu(cuSummary?.payAsYouGoBillableCu)} />
@@ -533,8 +552,17 @@ export default function Clients() {
                       label="Estimated Revenue"
                       value={formatMoney(cuSummary?.estimatedRevenue, cuSummary?.currency || selectedOrg.currency || "USD")}
                     />
+                    <CommercialField label="Contract End Date" value={formatDate(selectedOrg.contractEndDate)} />
                     <CommercialField label="Completed Calls" value={cuSummary ? String(cuSummary.completedCallCount) : "-"} />
                   </div>
+                  {prepaidStatusHint && (
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <Badge variant={prepaidStatusVariant}>{prepaidStatusHint}</Badge>
+                      <p className="text-xs text-muted-foreground">
+                        Prepaid CU is calculated from purchased CU minus completed consultation CU.
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <Tabs defaultValue="pocs">
                   <TabsList>
