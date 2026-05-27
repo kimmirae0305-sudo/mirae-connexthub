@@ -106,7 +106,7 @@ const industries = [
 
 const clientTypes = ["Corporate", "Private Equity", "Venture Capital", "Consulting", "Law Firm", "Startup", "Other"];
 const contractTypes = ["Pay-as-you-go", "Retainer", "Prepaid Credits", "Annual Contract", "Project-based", "Custom"];
-const pricingModels = ["CU-based", "Hourly", "Fixed project fee", "Retainer drawdown", "Custom"];
+const pricingModels = ["Pay-as-you-go", "Prepaid Credits", "Retainer", "Annual Contract", "Project-based", "Custom"];
 const currencies = ["USD", "BRL", "EUR", "GBP", "JPY", "KRW"];
 const retainerPeriods = ["Monthly", "Quarterly", "Annual", "Contract"];
 
@@ -133,7 +133,7 @@ const emptyOrgDefaults: OrgFormData = {
   clientType: "",
   legalEntityName: "",
   contractType: "",
-  pricingModel: "CU-based",
+  pricingModel: "Pay-as-you-go",
   currency: "USD",
   defaultCuRate: "",
   purchasedCu: "",
@@ -202,6 +202,12 @@ export default function Clients() {
     resolver: zodResolver(orgFormSchema),
     defaultValues: emptyOrgDefaults,
   });
+  const selectedPricingModel = orgForm.watch("pricingModel");
+  const normalizedPricingModel = selectedPricingModel || "Pay-as-you-go";
+  const isPayAsYouGoPricing = normalizedPricingModel === "Pay-as-you-go" || normalizedPricingModel === "CU-based";
+  const isPrepaidPricing = normalizedPricingModel === "Prepaid Credits";
+  const isRetainerPricing = normalizedPricingModel === "Retainer" || normalizedPricingModel === "Retainer drawdown";
+  const isContractPricing = normalizedPricingModel === "Annual Contract" || normalizedPricingModel === "Custom";
 
   const pocForm = useForm<PocFormData>({
     resolver: zodResolver(pocFormSchema),
@@ -754,56 +760,87 @@ export default function Clients() {
                       </FormItem>
                     )}
                   />
-                  <TextField control={orgForm.control} name="defaultCuRate" label="Default CU Rate" placeholder="1150" type="number" />
-                  <TextField control={orgForm.control} name="purchasedCu" label="Purchased / Prepaid CU" placeholder="100" type="number" />
-                  <TextField control={orgForm.control} name="retainerCuAllowance" label="Retainer CU Allowance" placeholder="25" type="number" />
+                  {(isPayAsYouGoPricing || isPrepaidPricing || isRetainerPricing) && (
+                    <TextField control={orgForm.control} name="defaultCuRate" label="Default CU Rate" placeholder="1150" type="number" />
+                  )}
+                  {isPrepaidPricing && (
+                    <TextField control={orgForm.control} name="purchasedCu" label="Purchased / Prepaid CU" placeholder="100" type="number" />
+                  )}
+                  {isRetainerPricing && (
+                    <>
+                      <TextField control={orgForm.control} name="retainerCuAllowance" label="Retainer CU Allowance" placeholder="25" type="number" />
+                      <FormField
+                        control={orgForm.control}
+                        name="retainerPeriod"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Retainer Period</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select retainer period" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {retainerPeriods.map((period) => (
+                                  <SelectItem key={period} value={period}>
+                                    {period}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </>
+                  )}
+                  {isContractPricing && (
+                    <TextField control={orgForm.control} name="contractedCu" label="Contracted CU" placeholder="300" type="number" />
+                  )}
+                  <TextField control={orgForm.control} name="paymentTerms" label="Payment Terms" placeholder="Net 30, upfront, monthly..." />
+                  {isContractPricing && (
+                    <>
+                      <TextField control={orgForm.control} name="contractStartDate" label="Contract Start Date" type="date" />
+                      <TextField control={orgForm.control} name="contractEndDate" label="Contract End Date" type="date" />
+                    </>
+                  )}
+                </div>
+                {isPayAsYouGoPricing && (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    CU will be calculated and billed after completed consultations.
+                  </p>
+                )}
+                {isPrepaidPricing && (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Completed consultations will consume from purchased CU.
+                  </p>
+                )}
+                {isRetainerPricing && (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Completed consultations will consume from retainer CU during the selected period.
+                  </p>
+                )}
+                {isContractPricing && (
                   <FormField
                     control={orgForm.control}
-                    name="retainerPeriod"
+                    name="commercialNotes"
                     render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Retainer Period</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select retainer period" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {retainerPeriods.map((period) => (
-                              <SelectItem key={period} value={period}>
-                                {period}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                      <FormItem className="mt-4">
+                        <FormLabel>Commercial Notes</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Contract caveats, negotiated terms, invoicing notes..."
+                            className="resize-none"
+                            rows={3}
+                            {...field}
+                          />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  <TextField control={orgForm.control} name="contractedCu" label="Contracted CU" placeholder="300" type="number" />
-                  <TextField control={orgForm.control} name="paymentTerms" label="Payment Terms" placeholder="Net 30, upfront, monthly..." />
-                  <TextField control={orgForm.control} name="contractStartDate" label="Contract Start Date" type="date" />
-                  <TextField control={orgForm.control} name="contractEndDate" label="Contract End Date" type="date" />
-                </div>
-                <FormField
-                  control={orgForm.control}
-                  name="commercialNotes"
-                  render={({ field }) => (
-                    <FormItem className="mt-4">
-                      <FormLabel>Commercial Notes</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder="Contract caveats, negotiated terms, invoicing notes..."
-                          className="resize-none"
-                          rows={3}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                )}
               </div>
 
               <FormField
