@@ -182,12 +182,19 @@ export default function ProjectDetail() {
   const [searchPastEmployers, setSearchPastEmployers] = useState("");
   const [includeCurrentEmployer, setIncludeCurrentEmployer] = useState(true);
   const [includePastEmployers, setIncludePastEmployers] = useState(true);
+  const [searchCompanyName, setSearchCompanyName] = useState("");
+  const [searchCompanyScope, setSearchCompanyScope] = useState<"current" | "past" | "any">("any");
   const currentDate = new Date();
   const maxEmploymentMonthIndex = (currentDate.getFullYear() - 1970) * 12 + currentDate.getMonth();
   const [employmentPeriodEnabled, setEmploymentPeriodEnabled] = useState(false);
   const [employmentPeriodRange, setEmploymentPeriodRange] = useState<[number, number]>([0, maxEmploymentMonthIndex]);
+  const [employmentStartMonth, setEmploymentStartMonth] = useState("1");
+  const [employmentStartYear, setEmploymentStartYear] = useState("1990");
+  const [employmentEndMonth, setEmploymentEndMonth] = useState(String(currentDate.getMonth() + 1));
+  const [employmentEndYear, setEmploymentEndYear] = useState(String(currentDate.getFullYear()));
   const [searchMinExp, setSearchMinExp] = useState("");
   const [searchMaxExp, setSearchMaxExp] = useState("");
+  const [searchSeniority, setSearchSeniority] = useState<"any" | "20" | "15" | "10" | "5" | "1-2">("any");
   const [searchAvailableOnly, setSearchAvailableOnly] = useState(false);
   const [searchCountry, setSearchCountry] = useState("");
   const [searchJobTitle, setSearchJobTitle] = useState("");
@@ -215,16 +222,33 @@ export default function ProjectDetail() {
   const isRA = user?.role === "ra" || user?.role?.toLowerCase() === "research associate";
 
   const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const seniorityOptions = [
+    { value: "any", label: "Any" },
+    { value: "20", label: "20+ yrs" },
+    { value: "15", label: "15+ yrs" },
+    { value: "10", label: "10+ yrs" },
+    { value: "5", label: "5+ yrs" },
+    { value: "1-2", label: "1-2 yrs" },
+  ] as const;
+  const applySeniorityFilter = (value: typeof searchSeniority) => {
+    setSearchSeniority(value);
+    if (value === "any") {
+      setSearchMinExp("");
+      setSearchMaxExp("");
+    } else if (value === "1-2") {
+      setSearchMinExp("1");
+      setSearchMaxExp("2");
+    } else {
+      setSearchMinExp(value);
+      setSearchMaxExp("");
+    }
+  };
   const formatEmploymentMonthIndex = (index: number) => {
     if (index >= maxEmploymentMonthIndex) return "Present";
     const year = 1970 + Math.floor(index / 12);
     const month = index % 12;
     return `${monthLabels[month]} ${year}`;
   };
-  const monthIndexToYearMonth = (index: number) => ({
-    year: 1970 + Math.floor(index / 12),
-    month: (index % 12) + 1,
-  });
   const formatWorkHistoryPeriod = (item: ExpertWorkHistoryItem) => {
     const fromMonth = item.fromMonth ?? 1;
     const fromYear = item.fromYear ?? "";
@@ -299,19 +323,20 @@ export default function ProjectDetail() {
   });
 
   // Expert search results query with metrics
-  const { data: expertSearchResults, isLoading: expertSearchLoading } = useQuery<ExpertWithMetrics[]>({
+  const { data: expertSearchResults, isLoading: expertSearchLoading, refetch: refetchExpertSearch } = useQuery<ExpertWithMetrics[]>({
     queryKey: [
       "/api/experts/search",
       { 
         query: searchQuery, country: searchCountry, minExp: searchMinExp, maxExp: searchMaxExp, 
         jobTitle: searchJobTitle, industry: searchIndustry, language: searchLanguage,
         hasPriorProjects: searchHasPriorProjects,
-        currentEmployer: includeCurrentEmployer ? searchCurrentEmployer : "",
-        pastEmployers: includePastEmployers ? searchPastEmployers : "",
-        includeCurrentEmployer,
-        includePastEmployers,
+        companyName: searchCompanyName,
+        companyScope: searchCompanyScope,
         employmentPeriodEnabled,
-        employmentPeriodRange,
+        employmentStartMonth,
+        employmentStartYear,
+        employmentEndMonth,
+        employmentEndYear,
         availableOnly: searchAvailableOnly,
         minHoursWorked: searchMinHoursWorked, minAcceptanceRate: searchMinAcceptanceRate,
         excludeProjectId: projectId
@@ -320,15 +345,15 @@ export default function ProjectDetail() {
     queryFn: async () => {
       const params = new URLSearchParams();
       if (searchQuery) params.append("q", searchQuery);
-      if (includeCurrentEmployer && searchCurrentEmployer) params.append("currentEmployer", searchCurrentEmployer);
-      if (includePastEmployers && searchPastEmployers) params.append("pastEmployers", searchPastEmployers);
-      if (employmentPeriodEnabled && (searchCurrentEmployer || searchPastEmployers)) {
-        const from = monthIndexToYearMonth(employmentPeriodRange[0]);
-        const to = monthIndexToYearMonth(employmentPeriodRange[1]);
-        params.append("employmentFromMonth", String(from.month));
-        params.append("employmentFromYear", String(from.year));
-        params.append("employmentToMonth", String(to.month));
-        params.append("employmentToYear", String(to.year));
+      if (searchCompanyName) {
+        params.append("companyName", searchCompanyName);
+        params.append("companyScope", searchCompanyScope);
+      }
+      if (employmentPeriodEnabled && searchCompanyName) {
+        params.append("employmentFromMonth", employmentStartMonth);
+        params.append("employmentFromYear", employmentStartYear);
+        params.append("employmentToMonth", employmentEndMonth);
+        params.append("employmentToYear", employmentEndYear);
       }
       if (searchCountry) params.append("country", searchCountry);
       if (searchMinExp) params.append("minYearsExperience", searchMinExp);
@@ -2835,16 +2860,262 @@ export default function ProjectDetail() {
 
       {/* Expert Search Modal */}
       <Dialog open={isExpertSearchModalOpen} onOpenChange={setIsExpertSearchModalOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Search & Add Experts</DialogTitle>
+            <DialogTitle>Filter Experts</DialogTitle>
             <DialogDescription>
-              Find experts from your database with advanced filters (all filters work together)
+              Use keywords, location, seniority, company scope, and employment period to narrow down experts.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4 overflow-y-auto flex-1">
-            {/* Two-column filter layout */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-5 py-4 overflow-y-auto flex-1">
+            <div className="space-y-5 rounded-md border p-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Biography keywords</label>
+                <Input
+                  placeholder='e.g. "energy AND logistics NOT oil"'
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  data-testid="input-search-query"
+                />
+                <p className="text-xs text-muted-foreground">Searches name, expertise, title, company, industry, and bio.</p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-sm font-medium">Location</label>
+                  <Input
+                    placeholder="Brazil, Japan, United States..."
+                    value={searchCountry}
+                    onChange={(e) => setSearchCountry(e.target.value)}
+                    data-testid="input-search-country"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Job title / role</label>
+                  <Input
+                    placeholder="Director, VP, Manager"
+                    value={searchJobTitle}
+                    onChange={(e) => setSearchJobTitle(e.target.value)}
+                    data-testid="input-search-job-title"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Seniority (work experience)</label>
+                <div className="flex flex-wrap gap-2">
+                  {seniorityOptions.map((option) => (
+                    <Button
+                      key={option.value}
+                      type="button"
+                      variant={searchSeniority === option.value ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => applySeniorityFilter(option.value)}
+                      data-testid={`button-seniority-${option.value}`}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_240px]">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Company name</label>
+                  <Input
+                    placeholder="e.g. McKinsey, Amazon..."
+                    value={searchCompanyName}
+                    onChange={(e) => setSearchCompanyName(e.target.value)}
+                    data-testid="input-company-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Scope</label>
+                  <Select value={searchCompanyScope} onValueChange={(value) => setSearchCompanyScope(value as typeof searchCompanyScope)}>
+                    <SelectTrigger data-testid="select-company-scope">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="current">Current role only</SelectItem>
+                      <SelectItem value="past">Past roles</SelectItem>
+                      <SelectItem value="any">Any</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="employment-period-enabled"
+                    checked={employmentPeriodEnabled}
+                    onCheckedChange={(checked) => setEmploymentPeriodEnabled(checked === true)}
+                    data-testid="checkbox-employment-period"
+                  />
+                  <label htmlFor="employment-period-enabled" className="text-sm font-medium cursor-pointer">
+                    Employment period
+                  </label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Filter for experts who were at the selected company during this month-level range.
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground">Start</label>
+                    <div className="flex gap-2">
+                      <Select value={employmentStartMonth} onValueChange={setEmploymentStartMonth} disabled={!employmentPeriodEnabled}>
+                        <SelectTrigger data-testid="select-employment-start-month">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {monthLabels.map((month, index) => (
+                            <SelectItem key={month} value={String(index + 1)}>{month}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min={1970}
+                        max={currentDate.getFullYear()}
+                        value={employmentStartYear}
+                        onChange={(e) => setEmploymentStartYear(e.target.value)}
+                        disabled={!employmentPeriodEnabled}
+                        data-testid="input-employment-start-year"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground">End</label>
+                    <div className="flex gap-2">
+                      <Select value={employmentEndMonth} onValueChange={setEmploymentEndMonth} disabled={!employmentPeriodEnabled}>
+                        <SelectTrigger data-testid="select-employment-end-month">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {monthLabels.map((month, index) => (
+                            <SelectItem key={month} value={String(index + 1)}>{month}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min={1970}
+                        max={currentDate.getFullYear()}
+                        value={employmentEndYear}
+                        onChange={(e) => setEmploymentEndYear(e.target.value)}
+                        disabled={!employmentPeriodEnabled}
+                        data-testid="input-employment-end-year"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Industry / sector</label>
+                  <Input
+                    placeholder="Energy, Mining, Healthcare"
+                    value={searchIndustry}
+                    onChange={(e) => setSearchIndustry(e.target.value)}
+                    data-testid="input-search-industry"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Language</label>
+                  <Input
+                    placeholder="English, Portuguese, Spanish"
+                    value={searchLanguage}
+                    onChange={(e) => setSearchLanguage(e.target.value)}
+                    data-testid="input-search-language"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Min hours worked</label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 10"
+                    value={searchMinHoursWorked}
+                    onChange={(e) => setSearchMinHoursWorked(e.target.value)}
+                    data-testid="input-min-hours-worked"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="available-only-redesign"
+                    checked={searchAvailableOnly}
+                    onCheckedChange={(checked) => setSearchAvailableOnly(checked === true)}
+                    data-testid="checkbox-available-only-redesign"
+                  />
+                  <label htmlFor="available-only-redesign" className="text-sm font-medium cursor-pointer">
+                    Available experts only
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="prior-projects-redesign"
+                    checked={searchHasPriorProjects}
+                    onCheckedChange={(checked) => setSearchHasPriorProjects(checked === true)}
+                    data-testid="checkbox-prior-projects-redesign"
+                  />
+                  <label htmlFor="prior-projects-redesign" className="text-sm font-medium cursor-pointer">
+                    Prior project involvement
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium">Min accept rate (%)</label>
+                  <Input
+                    type="number"
+                    placeholder="50"
+                    value={searchMinAcceptanceRate}
+                    onChange={(e) => setSearchMinAcceptanceRate(e.target.value)}
+                    className="h-8 w-20"
+                    data-testid="input-min-acceptance-rate-redesign"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setSearchQuery("");
+                  setSearchCompanyName("");
+                  setSearchCompanyScope("any");
+                  setEmploymentPeriodEnabled(false);
+                  setEmploymentStartMonth("1");
+                  setEmploymentStartYear("1990");
+                  setEmploymentEndMonth(String(currentDate.getMonth() + 1));
+                  setEmploymentEndYear(String(currentDate.getFullYear()));
+                  applySeniorityFilter("any");
+                  setSearchCountry("");
+                  setSearchJobTitle("");
+                  setSearchIndustry("");
+                  setSearchLanguage("");
+                  setSearchAvailableOnly(false);
+                  setSearchMinHoursWorked("");
+                  setSearchMinAcceptanceRate("");
+                  setSearchHasPriorProjects(false);
+                }}
+                data-testid="button-clear-expert-filters"
+              >
+                Clear all filters
+              </Button>
+              <Button
+                type="button"
+                onClick={() => refetchExpertSearch()}
+                data-testid="button-apply-expert-filters"
+              >
+                Apply filters
+              </Button>
+            </div>
+
+            <div className="hidden">
               {/* LEFT COLUMN */}
               <div className="space-y-4">
                 <div className="space-y-2">

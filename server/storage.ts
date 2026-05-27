@@ -92,6 +92,8 @@ export interface IStorage {
   searchExpertsAdvanced(params: {
     query?: string;
     country?: string;
+    companyName?: string;
+    companyScope?: "current" | "past" | "any";
     currentEmployer?: string;
     pastEmployers?: string;
     minRate?: number;
@@ -395,6 +397,8 @@ export class DatabaseStorage implements IStorage {
   async searchExpertsAdvanced(params: {
     query?: string;
     country?: string;
+    companyName?: string;
+    companyScope?: "current" | "past" | "any";
     currentEmployer?: string;
     pastEmployers?: string;
     minRate?: number;
@@ -445,6 +449,23 @@ export class DatabaseStorage implements IStorage {
           ilike(experts.industry, `%${ind}%`)
         );
         conditions.push(or(...industryConditions));
+      }
+    }
+
+    if (params.companyName) {
+      const companyPattern = `%${params.companyName.trim()}%`;
+      const scope = params.companyScope || "any";
+      const currentCondition = ilike(experts.company, companyPattern);
+      const pastCondition = or(
+        sql`array_to_string(${experts.pastEmployers}, ',') ILIKE ${companyPattern}`,
+        sql`${experts.workHistory}::text ILIKE ${companyPattern}`
+      );
+      if (scope === "current") {
+        conditions.push(currentCondition);
+      } else if (scope === "past") {
+        conditions.push(pastCondition);
+      } else {
+        conditions.push(or(currentCondition, pastCondition));
       }
     }
     
@@ -548,8 +569,14 @@ export class DatabaseStorage implements IStorage {
         : [];
     const employerTerms = (value?: string) =>
       value?.split(',').map((term) => term.trim().toLowerCase()).filter(Boolean) || [];
-    const currentEmployerTerms = employerTerms(params.currentEmployer);
-    const pastEmployerTerms = employerTerms(params.pastEmployers);
+    const companyTerms = employerTerms(params.companyName);
+    const companyScope = params.companyScope || "any";
+    const currentEmployerTerms = companyTerms.length > 0 && companyScope !== "past"
+      ? companyTerms
+      : employerTerms(params.currentEmployer);
+    const pastEmployerTerms = companyTerms.length > 0 && companyScope !== "current"
+      ? companyTerms
+      : employerTerms(params.pastEmployers);
     const hasEmploymentRange =
       params.employmentFromYear !== undefined &&
       params.employmentFromMonth !== undefined &&
