@@ -129,6 +129,8 @@ interface ProjectDetailData extends Project {
   vettingQuestions?: VettingQuestion[];
   internalExperts?: EnrichedExpert[];
   raSourcedExperts?: EnrichedExpert[];
+  projectAdvisors?: EnrichedExpert[];
+  projectApplications?: EnrichedExpert[];
   activities?: ProjectActivity[];
   raInviteLinks?: any[];
   angles?: ProjectAngle[];
@@ -977,16 +979,25 @@ export default function ProjectDetail() {
     return angleNames;
   };
 
-  // Filter internal experts by angle
+  const projectAdvisors = useMemo(() => {
+    if (projectDetail?.projectAdvisors) return projectDetail.projectAdvisors;
+    const byId = new Map<number, EnrichedExpert>();
+    [...(projectDetail?.internalExperts || []), ...(projectDetail?.raSourcedExperts || [])].forEach((advisor) => {
+      byId.set(advisor.id, advisor);
+    });
+    return Array.from(byId.values());
+  }, [projectDetail?.projectAdvisors, projectDetail?.internalExperts, projectDetail?.raSourcedExperts]);
+
+  // Filter project advisors by angle
   const filteredInternalExperts = useMemo(() => {
-    const experts = projectDetail?.internalExperts || [];
+    const experts = projectAdvisors;
     if (internalExpertsAngleFilter === "all") return experts;
     if (internalExpertsAngleFilter === "none") {
       return experts.filter(pe => !pe.angleIds || pe.angleIds.length === 0);
     }
     const angleId = parseInt(internalExpertsAngleFilter);
     return experts.filter(pe => pe.angleIds?.includes(angleId));
-  }, [projectDetail?.internalExperts, internalExpertsAngleFilter]);
+  }, [projectAdvisors, internalExpertsAngleFilter]);
 
   const handleSelectExpert = (expertId: number, checked: boolean) => {
     const newSelected = new Set(selectedExperts);
@@ -1078,6 +1089,8 @@ export default function ProjectDetail() {
 
   const getInvitationStatusBadge = (status?: string) => {
     switch (status) {
+      case "submitted":
+        return <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20">Application Submitted</Badge>;
       case "accepted":
         return <Badge className="bg-green-500/10 text-green-600 border-green-500/20">Accepted</Badge>;
       case "declined":
@@ -1093,6 +1106,8 @@ export default function ProjectDetail() {
 
   const getPipelineStatusBadge = (status?: string) => {
     switch (status) {
+      case "pending_review":
+        return <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20">Pending Review</Badge>;
       case "interested":
         return <Badge className="bg-purple-500/10 text-purple-600 border-purple-500/20">Interested</Badge>;
       case "shortlisted":
@@ -1112,6 +1127,32 @@ export default function ProjectDetail() {
       default:
         return <Badge variant="secondary">-</Badge>;
     }
+  };
+
+  const hasReviewableApplication = (pe: EnrichedExpert) =>
+    pe.applicationStatus === "submitted" ||
+    Boolean(pe.acceptedAt) ||
+    Boolean(pe.expectedHourlyRateUsd) ||
+    (Array.isArray(pe.vqAnswers) && pe.vqAnswers.length > 0);
+
+  const getAdvisorSourceLabel = (pe: EnrichedExpert) => {
+    if (pe.sourceType === "internal_db") return "Internal DB";
+    if (pe.sourceType === "ra_external" || pe.sourceType === "ra_sourced" || pe.sourceType === "quick_invite") return "RA-sourced";
+    if (pe.sourcedByRa) return "RA-sourced";
+    return "Admin";
+  };
+
+  const getAdvisorStatusBadge = (pe: EnrichedExpert) => {
+    if (pe.applicationStatus === "submitted") {
+      return <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20">Application Submitted</Badge>;
+    }
+    if (pe.status === "pending_review" || pe.pipelineStatus === "pending_review") {
+      return <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20">Pending Review</Badge>;
+    }
+    if (pe.invitationStatus === "invited") {
+      return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">Invited</Badge>;
+    }
+    return <Badge variant="secondary">Added</Badge>;
   };
 
   const getActivityIcon = (type: string) => {
@@ -1160,10 +1201,7 @@ export default function ProjectDetail() {
     );
   }
 
-  const projectApplications = [
-    ...(projectDetail.internalExperts || []),
-    ...(projectDetail.raSourcedExperts || []),
-  ].filter((pe) => pe.applicationStatus === "submitted" || pe.acceptedAt || pe.expectedHourlyRateUsd);
+  const projectApplications = projectDetail.projectApplications || projectAdvisors.filter(hasReviewableApplication);
 
   const reviewedWorkHistory = Array.isArray(reviewingApplication?.expert?.workHistory)
     ? reviewingApplication.expert.workHistory as ExpertWorkHistoryItem[]
@@ -1209,7 +1247,7 @@ export default function ProjectDetail() {
             Angles & VQ {projectDetail.angles?.length ? `(${projectDetail.angles.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="existing-experts" data-testid="tab-existing-experts">
-            Existing Experts {projectDetail.internalExperts?.length ? `(${projectDetail.internalExperts.length})` : ""}
+            Existing Experts {projectAdvisors.length ? `(${projectAdvisors.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="ra-sourcing" data-testid="tab-ra-sourcing">
             RA Sourcing {projectDetail.raSourcedExperts?.length ? `(${projectDetail.raSourcedExperts.length})` : ""}
@@ -1765,12 +1803,13 @@ export default function ProjectDetail() {
                                 <p className="text-xs text-muted-foreground">{location || "Location not set"}</p>
                               </div>
                               <div className="flex flex-col items-end gap-1">
-                                <Badge variant="secondary">Added</Badge>
+                                {getAdvisorStatusBadge(pe)}
                                 {getInvitationStatusBadge(inviteStatus)}
                               </div>
                             </div>
 
                             <div className="flex flex-wrap gap-2">
+                              <Badge variant="outline">Source: {getAdvisorSourceLabel(pe)}</Badge>
                               {pe.expert?.industry && <Badge variant="outline">{pe.expert.industry}</Badge>}
                               {pe.expert?.expertise && <Badge variant="outline">{pe.expert.expertise}</Badge>}
                               {getPipelineStatusBadge(pe.pipelineStatus)}
@@ -1797,6 +1836,17 @@ export default function ProjectDetail() {
                                 <Eye className="h-4 w-4 mr-2" />
                                 View Profile
                               </Button>
+                              {hasReviewableApplication(pe) && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setReviewingApplication(pe)}
+                                  data-testid={`button-view-advisor-application-${pe.id}`}
+                                >
+                                  <ClipboardList className="h-4 w-4 mr-2" />
+                                  View Application
+                                </Button>
+                              )}
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -2270,7 +2320,7 @@ export default function ProjectDetail() {
                 Project Applications
               </CardTitle>
               <CardDescription>
-                Experts who submitted the public onboarding application for this project
+                Review submitted onboarding forms and project VQ answers from RA-sourced experts or existing advisors.
               </CardDescription>
             </CardHeader>
             <CardContent>
