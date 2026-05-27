@@ -1531,6 +1531,8 @@ export async function registerRoutes(
       const params = {
         query: req.query.q as string | undefined,
         country: req.query.country as string | undefined,
+        companyName: req.query.companyName as string | undefined,
+        companyScope: req.query.companyScope as "current" | "past" | "any" | undefined,
         currentEmployer: req.query.currentEmployer as string | undefined,
         pastEmployers: req.query.pastEmployers as string | undefined,
         minRate: req.query.minRate ? parseFloat(req.query.minRate as string) : undefined,
