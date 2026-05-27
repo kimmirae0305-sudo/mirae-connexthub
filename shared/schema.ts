@@ -36,6 +36,18 @@ export const clientOrganizations = pgTable("client_organizations", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   industry: text("industry").notNull(),
+  clientType: text("client_type"),
+  legalEntityName: text("legal_entity_name"),
+  contractType: text("contract_type"),
+  pricingModel: text("pricing_model"),
+  currency: text("currency").default("USD"),
+  defaultCuRate: decimal("default_cu_rate", { precision: 10, scale: 2 }),
+  paymentTerms: text("payment_terms"),
+  contractStartDate: timestamp("contract_start_date"),
+  contractEndDate: timestamp("contract_end_date"),
+  creditBalance: decimal("credit_balance", { precision: 10, scale: 2 }),
+  retainerBalance: decimal("retainer_balance", { precision: 10, scale: 2 }),
+  commercialNotes: text("commercial_notes"),
   billingAddress: text("billing_address"),
   mainPmId: integer("main_pm_id").references(() => users.id),
   totalCuUsed: decimal("total_cu_used", { precision: 10, scale: 2 }).default("0"),
@@ -472,6 +484,9 @@ export const insertClientOrganizationSchema = createInsertSchema(clientOrganizat
   id: true,
   createdAt: true,
   totalCuUsed: true,
+}).extend({
+  contractStartDate: coerceDate.optional(),
+  contractEndDate: coerceDate.optional(),
 });
 
 export const insertClientPocSchema = createInsertSchema(clientPocs).omit({

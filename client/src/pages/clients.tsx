@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { format } from "date-fns";
 import { Plus, Pencil, Trash2, Search, Building2, Users, UserPlus, Briefcase } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,18 @@ import type { ClientOrganization, InsertClientOrganization, ClientPoc, InsertCli
 const orgFormSchema = z.object({
   name: z.string().min(1, "Organization name is required"),
   industry: z.string().min(1, "Industry is required"),
+  clientType: z.string().optional(),
+  legalEntityName: z.string().optional(),
+  contractType: z.string().optional(),
+  pricingModel: z.string().optional(),
+  currency: z.string().optional(),
+  defaultCuRate: z.string().optional(),
+  paymentTerms: z.string().optional(),
+  contractStartDate: z.string().optional(),
+  contractEndDate: z.string().optional(),
+  creditBalance: z.string().optional(),
+  retainerBalance: z.string().optional(),
+  commercialNotes: z.string().optional(),
   billingAddress: z.string().optional(),
 });
 
@@ -87,6 +100,48 @@ const industries = [
   "Other",
 ];
 
+const clientTypes = ["Corporate", "Private Equity", "Venture Capital", "Consulting", "Law Firm", "Startup", "Other"];
+const contractTypes = ["Pay-as-you-go", "Retainer", "Prepaid Credits", "Annual Contract", "Project-based", "Custom"];
+const pricingModels = ["CU-based", "Hourly", "Fixed project fee", "Retainer drawdown", "Custom"];
+const currencies = ["USD", "BRL", "EUR", "GBP", "JPY", "KRW"];
+
+const emptyOrgDefaults: OrgFormData = {
+  name: "",
+  industry: "",
+  clientType: "",
+  legalEntityName: "",
+  contractType: "",
+  pricingModel: "CU-based",
+  currency: "USD",
+  defaultCuRate: "",
+  paymentTerms: "",
+  contractStartDate: "",
+  contractEndDate: "",
+  creditBalance: "",
+  retainerBalance: "",
+  commercialNotes: "",
+  billingAddress: "",
+};
+
+const toDateInput = (value?: Date | string | null) => {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : format(date, "yyyy-MM-dd");
+};
+
+const formatDate = (value?: Date | string | null) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM dd, yyyy");
+};
+
+const formatMoney = (value?: string | number | null, currency = "USD") => {
+  if (value === null || value === undefined || value === "") return "-";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "-";
+  return `${currency} ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+};
+
 export default function Clients() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -107,11 +162,7 @@ export default function Clients() {
 
   const orgForm = useForm<OrgFormData>({
     resolver: zodResolver(orgFormSchema),
-    defaultValues: {
-      name: "",
-      industry: "",
-      billingAddress: "",
-    },
+    defaultValues: emptyOrgDefaults,
   });
 
   const pocForm = useForm<PocFormData>({
@@ -182,7 +233,9 @@ export default function Clients() {
 
   const filteredOrgs = organizations?.filter((org) =>
     org.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    org.industry?.toLowerCase().includes(searchQuery.toLowerCase())
+    org.industry?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    org.clientType?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    org.legalEntityName?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleOpenOrgDialog = (org?: ClientOrganization) => {
@@ -191,18 +244,43 @@ export default function Clients() {
       orgForm.reset({
         name: org.name,
         industry: org.industry || "",
+        clientType: org.clientType || "",
+        legalEntityName: org.legalEntityName || "",
+        contractType: org.contractType || "",
+        pricingModel: org.pricingModel || "CU-based",
+        currency: org.currency || "USD",
+        defaultCuRate: org.defaultCuRate || "",
+        paymentTerms: org.paymentTerms || "",
+        contractStartDate: toDateInput(org.contractStartDate),
+        contractEndDate: toDateInput(org.contractEndDate),
+        creditBalance: org.creditBalance || "",
+        retainerBalance: org.retainerBalance || "",
+        commercialNotes: org.commercialNotes || "",
         billingAddress: org.billingAddress || "",
       });
     } else {
       setEditingOrg(null);
-      orgForm.reset();
+      orgForm.reset(emptyOrgDefaults);
     }
     setIsOrgDialogOpen(true);
   };
 
   const onOrgSubmit = (data: OrgFormData) => {
     const orgData: InsertClientOrganization = {
-      ...data,
+      name: data.name,
+      industry: data.industry,
+      clientType: data.clientType || null,
+      legalEntityName: data.legalEntityName || null,
+      contractType: data.contractType || null,
+      pricingModel: data.pricingModel || null,
+      currency: data.currency || "USD",
+      defaultCuRate: data.defaultCuRate || null,
+      paymentTerms: data.paymentTerms || null,
+      contractStartDate: data.contractStartDate ? new Date(`${data.contractStartDate}T00:00:00`) : null,
+      contractEndDate: data.contractEndDate ? new Date(`${data.contractEndDate}T00:00:00`) : null,
+      creditBalance: data.creditBalance || null,
+      retainerBalance: data.retainerBalance || null,
+      commercialNotes: data.commercialNotes || null,
       billingAddress: data.billingAddress || null,
     };
 
@@ -299,10 +377,10 @@ export default function Clients() {
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <CardTitle className="text-xl">{selectedOrg.name}</CardTitle>
-                    <p className="text-sm text-muted-foreground">{selectedOrg.industry}</p>
-                    {selectedOrg.billingAddress && (
-                      <p className="mt-1 text-xs text-muted-foreground">{selectedOrg.billingAddress}</p>
-                    )}
+                    <p className="text-sm text-muted-foreground">
+                      {selectedOrg.industry}
+                      {selectedOrg.clientType ? ` • ${selectedOrg.clientType}` : ""}
+                    </p>
                   </div>
                   <div className="flex gap-2">
                     <Button
@@ -326,6 +404,44 @@ export default function Clients() {
                 </div>
               </CardHeader>
               <CardContent>
+                <div className="mb-6 rounded-md border p-4">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold">Commercial & Contract Profile</h3>
+                      <p className="text-xs text-muted-foreground">Client-level commercial terms for future CU revenue automation.</p>
+                    </div>
+                    <Badge variant="outline">{selectedOrg.contractType || "Contract not set"}</Badge>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <CommercialField label="Legal Entity" value={selectedOrg.legalEntityName || "-"} />
+                    <CommercialField label="Pricing Model" value={selectedOrg.pricingModel || "-"} />
+                    <CommercialField label="Currency" value={selectedOrg.currency || "USD"} />
+                    <CommercialField
+                      label="Default CU Rate"
+                      value={formatMoney(selectedOrg.defaultCuRate, selectedOrg.currency || "USD")}
+                    />
+                    <CommercialField label="Payment Terms" value={selectedOrg.paymentTerms || "-"} />
+                    <CommercialField
+                      label="Contract Period"
+                      value={`${formatDate(selectedOrg.contractStartDate)} - ${formatDate(selectedOrg.contractEndDate)}`}
+                    />
+                    <CommercialField
+                      label="Credit Balance"
+                      value={formatMoney(selectedOrg.creditBalance, selectedOrg.currency || "USD")}
+                    />
+                    <CommercialField
+                      label="Retainer Balance"
+                      value={formatMoney(selectedOrg.retainerBalance, selectedOrg.currency || "USD")}
+                    />
+                    <CommercialField label="Billing Address" value={selectedOrg.billingAddress || "Optional / not set"} />
+                  </div>
+                  {selectedOrg.commercialNotes && (
+                    <div className="mt-4">
+                      <p className="text-xs font-medium uppercase text-muted-foreground">Commercial Notes</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm">{selectedOrg.commercialNotes}</p>
+                    </div>
+                  )}
+                </div>
                 <Tabs defaultValue="pocs">
                   <TabsList>
                     <TabsTrigger value="pocs" className="gap-2">
@@ -404,65 +520,207 @@ export default function Clients() {
       </div>
 
       <Dialog open={isOrgDialogOpen} onOpenChange={setIsOrgDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingOrg ? "Edit Organization" : "Add Client Organization"}</DialogTitle>
             <DialogDescription>
               {editingOrg
-                ? "Update the organization details below."
-                : "Fill in the details to add a new client organization."}
+                ? "Update the commercial profile and organization details below."
+                : "Create a client commercial profile. Billing address can be added later if needed."}
             </DialogDescription>
           </DialogHeader>
           <Form {...orgForm}>
-            <form onSubmit={orgForm.handleSubmit(onOrgSubmit)} className="space-y-4">
-              <FormField
-                control={orgForm.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Organization Name *</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Enter organization name" {...field} data-testid="input-org-name" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={orgForm.control}
-                name="industry"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Industry *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+            <form onSubmit={orgForm.handleSubmit(onOrgSubmit)} className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField
+                  control={orgForm.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Organization Name *</FormLabel>
                       <FormControl>
-                        <SelectTrigger data-testid="select-org-industry">
-                          <SelectValue placeholder="Select industry" />
-                        </SelectTrigger>
+                        <Input placeholder="Enter organization name" {...field} data-testid="input-org-name" />
                       </FormControl>
-                      <SelectContent>
-                        {industries.map((industry) => (
-                          <SelectItem key={industry} value={industry}>
-                            {industry}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={orgForm.control}
+                  name="legalEntityName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Legal Entity Name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Legal contracting entity" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={orgForm.control}
+                  name="industry"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Industry *</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-org-industry">
+                            <SelectValue placeholder="Select industry" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {industries.map((industry) => (
+                            <SelectItem key={industry} value={industry}>
+                              {industry}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={orgForm.control}
+                  name="clientType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Client Type</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select client type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {clientTypes.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {type}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="rounded-md border p-4">
+                <h3 className="mb-4 text-sm font-semibold">Commercial Terms</h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField
+                    control={orgForm.control}
+                    name="contractType"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Contract Type</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select contract type" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {contractTypes.map((type) => (
+                              <SelectItem key={type} value={type}>
+                                {type}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={orgForm.control}
+                    name="pricingModel"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Pricing Model</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select pricing model" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {pricingModels.map((model) => (
+                              <SelectItem key={model} value={model}>
+                                {model}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={orgForm.control}
+                    name="currency"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Currency</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Currency" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {currencies.map((currency) => (
+                              <SelectItem key={currency} value={currency}>
+                                {currency}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <TextField control={orgForm.control} name="defaultCuRate" label="Default CU Rate" placeholder="1150" type="number" />
+                  <TextField control={orgForm.control} name="paymentTerms" label="Payment Terms" placeholder="Net 30, upfront, monthly..." />
+                  <TextField control={orgForm.control} name="contractStartDate" label="Contract Start Date" type="date" />
+                  <TextField control={orgForm.control} name="contractEndDate" label="Contract End Date" type="date" />
+                  <TextField control={orgForm.control} name="creditBalance" label="Credit Balance" placeholder="0" type="number" />
+                  <TextField control={orgForm.control} name="retainerBalance" label="Retainer Balance" placeholder="0" type="number" />
+                </div>
+                <FormField
+                  control={orgForm.control}
+                  name="commercialNotes"
+                  render={({ field }) => (
+                    <FormItem className="mt-4">
+                      <FormLabel>Commercial Notes</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="Contract caveats, negotiated terms, invoicing notes..."
+                          className="resize-none"
+                          rows={3}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               <FormField
                 control={orgForm.control}
                 name="billingAddress"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Billing Address</FormLabel>
+                    <FormLabel>Billing Address Optional</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder="Enter billing address..."
+                        placeholder="Optional billing address..."
                         className="resize-none"
-                        rows={3}
+                        rows={2}
                         {...field}
                         data-testid="input-org-billing"
                       />
@@ -594,5 +852,44 @@ export default function Clients() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+function CommercialField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 text-sm">{value}</p>
+    </div>
+  );
+}
+
+function TextField({
+  control,
+  name,
+  label,
+  placeholder,
+  type = "text",
+}: {
+  control: any;
+  name: keyof OrgFormData;
+  label: string;
+  placeholder?: string;
+  type?: string;
+}) {
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{label}</FormLabel>
+          <FormControl>
+            <Input type={type} placeholder={placeholder} {...field} />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
   );
 }
