@@ -1853,6 +1853,54 @@ export async function registerRoutes(
     }
   });
 
+  // Mark an existing project advisor as invited internally.
+  // This intentionally does not send email; provider integration can attach here later.
+  app.post("/api/project-experts/:id/mark-invited", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const user = (req as any).user;
+      const existingAssignment = await storage.getProjectExpert(id);
+
+      if (!existingAssignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+
+      const now = new Date();
+      const assignment = await storage.updateProjectExpert(id, {
+        status: "invited",
+        invitationStatus: "invited",
+        pipelineStatus: existingAssignment.pipelineStatus || "interested",
+        invitedAt: existingAssignment.invitedAt || now,
+        lastActivityAt: now,
+      });
+
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+
+      await storage.createProjectActivity({
+        projectId: assignment.projectId,
+        expertId: assignment.expertId,
+        userId: user?.id,
+        activityType: "expert_invite_status_updated",
+        description: "Advisor marked as invited internally. No email was sent.",
+        metadata: {
+          emailSent: false,
+          futureIntegrationPoint: "Attach SMTP/API email sending here after miraeconnext.com SPF/DKIM/DMARC setup.",
+        },
+      });
+
+      res.json({
+        assignment,
+        emailSent: false,
+        message: "Advisor marked as invited internally. No email was sent.",
+      });
+    } catch (error) {
+      console.error("Failed to mark advisor invited:", error);
+      res.status(500).json({ error: "Failed to update advisor invite status" });
+    }
+  });
+
   // Send invitation to expert (always creates a NEW unique token)
   app.post("/api/project-experts/:id/invite", authMiddleware, async (req, res) => {
     try {

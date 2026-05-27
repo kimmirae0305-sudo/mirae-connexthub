@@ -153,6 +153,7 @@ export default function ProjectDetail() {
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [isQuickInviteModalOpen, setIsQuickInviteModalOpen] = useState(false);
   const [reviewingApplication, setReviewingApplication] = useState<EnrichedExpert | null>(null);
+  const [viewingAdvisor, setViewingAdvisor] = useState<EnrichedExpert | null>(null);
   
   // Angles & VQ state
   const [expandedAngles, setExpandedAngles] = useState<Set<number>>(new Set());
@@ -486,6 +487,23 @@ export default function ProjectDetail() {
     },
     onError: () => {
       toast({ title: "Failed to remove expert", variant: "destructive" });
+    },
+  });
+
+  const markAdvisorInvitedMutation = useMutation({
+    mutationFn: async (assignmentId: number) => {
+      const res = await apiRequest("POST", `/api/project-experts/${assignmentId}/mark-invited`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      toast({
+        title: "Advisor marked invited",
+        description: "No email was sent. This only updates the internal project invite status.",
+      });
+    },
+    onError: () => {
+      toast({ title: "Failed to update advisor invite status", variant: "destructive" });
     },
   });
 
@@ -1085,6 +1103,12 @@ export default function ProjectDetail() {
         return <Badge className="bg-red-500/10 text-red-600 border-red-500/20">Declined</Badge>;
       case "completed":
         return <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">Completed</Badge>;
+      case "scheduled":
+        return <Badge className="bg-indigo-500/10 text-indigo-600 border-indigo-500/20">Scheduled</Badge>;
+      case "invited":
+        return <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">Invited</Badge>;
+      case "assigned":
+        return <Badge variant="secondary">Added</Badge>;
       default:
         return <Badge variant="secondary">-</Badge>;
     }
@@ -1659,53 +1683,21 @@ export default function ProjectDetail() {
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div>
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Search className="h-4 w-4" />
-                    Search Internal Expert Database
-                  </CardTitle>
-                  <CardDescription>
-                    Search and invite experts from the internal database
-                  </CardDescription>
-                </div>
-                <Button
-                  variant="default"
-                  onClick={() => setIsExpertSearchModalOpen(true)}
-                  data-testid="button-search-add-experts"
-                >
-                  <Search className="h-4 w-4 mr-2" />
-                  Search & Add
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <EmptyState
-                icon={Users}
-                title="No experts found"
-                description="Click 'Search & Add' to find and add experts from your database."
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div>
-                  <CardTitle className="text-base flex items-center gap-2">
                     <Users className="h-4 w-4" />
-                    Internal Experts Pipeline
+                    Added Advisors
                   </CardTitle>
                   <CardDescription>
-                    Experts from internal database assigned to this project
+                    Existing expert profiles linked to this project. Invite status is tracked internally; no email is sent from this action yet.
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Button
-                    variant="outline"
-                    size="sm"
+                    variant="default"
                     onClick={() => setIsExpertSearchModalOpen(true)}
                     data-testid="button-search-experts"
                   >
                     <Search className="h-4 w-4 mr-2" />
-                    Search & Add
+                    Search & Add Experts
                   </Button>
                   <Link href={`/projects/${projectId}/client-shortlist`}>
                     <Button
@@ -1750,26 +1742,94 @@ export default function ProjectDetail() {
               {filteredInternalExperts.length === 0 ? (
                 <EmptyState
                   icon={Users}
-                  title={internalExpertsAngleFilter !== "all" ? "No experts match this filter" : "No internal experts yet"}
-                  description={internalExpertsAngleFilter !== "all" ? "Try selecting a different angle filter." : "Use the search above to add experts from your database."}
+                  title={internalExpertsAngleFilter !== "all" ? "No advisors match this filter" : "No added advisors yet"}
+                  description={internalExpertsAngleFilter !== "all" ? "Try selecting a different angle filter." : "Use Search & Add Experts to link existing expert profiles to this project."}
                 />
               ) : (
                 <div className="space-y-3">
-                  {selectedInternalExpertIds.size > 0 && (
-                    <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                      <span className="text-sm">{selectedInternalExpertIds.size} expert(s) selected</span>
-                      <Button
-                        onClick={() => setIsBulkInviteModalOpen(true)}
-                        disabled={bulkInviteMutation.isPending}
-                        size="sm"
-                        data-testid="button-create-invitations"
-                      >
-                        <Send className="h-4 w-4 mr-2" />
-                        {bulkInviteMutation.isPending ? "Creating..." : "Create Invitations"}
-                      </Button>
-                    </div>
-                  )}
-                  <div className="overflow-x-auto">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {filteredInternalExperts.map((pe) => {
+                      const angleNames = getAngleBadges(pe);
+                      const location = [pe.expert?.city, pe.expert?.country].filter(Boolean).join(", ");
+                      const inviteStatus = pe.invitationStatus || "not_invited";
+                      return (
+                        <Card key={pe.id} data-testid={`card-added-advisor-${pe.id}`}>
+                          <CardContent className="space-y-4 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-medium truncate">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {pe.expert?.jobTitle || "Current title not set"}
+                                  {pe.expert?.company ? ` at ${pe.expert.company}` : ""}
+                                </p>
+                                <p className="text-xs text-muted-foreground">{location || "Location not set"}</p>
+                              </div>
+                              <div className="flex flex-col items-end gap-1">
+                                <Badge variant="secondary">Added</Badge>
+                                {getInvitationStatusBadge(inviteStatus)}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              {pe.expert?.industry && <Badge variant="outline">{pe.expert.industry}</Badge>}
+                              {pe.expert?.expertise && <Badge variant="outline">{pe.expert.expertise}</Badge>}
+                              {getPipelineStatusBadge(pe.pipelineStatus)}
+                            </div>
+
+                            {angleNames && angleNames.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {angleNames.map((name, idx) => (
+                                  <Badge key={idx} variant="outline" className="text-xs">
+                                    <Layers className="h-3 w-3 mr-1" />
+                                    {name}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setViewingAdvisor(pe)}
+                                data-testid={`button-view-advisor-${pe.id}`}
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Profile
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => markAdvisorInvitedMutation.mutate(pe.id)}
+                                disabled={markAdvisorInvitedMutation.isPending || inviteStatus === "invited"}
+                                data-testid={`button-invite-advisor-${pe.id}`}
+                              >
+                                <Send className="h-4 w-4 mr-2" />
+                                Invite to Project
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeExpertMutation.mutate(pe.id)}
+                                className="text-destructive"
+                                data-testid={`button-remove-advisor-${pe.id}`}
+                              >
+                                <X className="h-4 w-4 mr-2" />
+                                Remove from Project
+                              </Button>
+                            </div>
+
+                            {(pe.lastActivityAt || pe.invitedAt) && (
+                              <p className="text-xs text-muted-foreground">
+                                Last activity: {formatDistanceToNow(new Date(pe.lastActivityAt || pe.invitedAt!), { addSuffix: true })}
+                              </p>
+                            )}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                  <div className="hidden">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -2865,6 +2925,99 @@ export default function ProjectDetail() {
               {bulkInviteMutation.isPending ? "Sending..." : "Send Invitations"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Added Advisor Profile Modal */}
+      <Dialog open={!!viewingAdvisor} onOpenChange={(open) => !open && setViewingAdvisor(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{viewingAdvisor?.expert?.name || "Advisor profile"}</DialogTitle>
+            <DialogDescription>
+              Existing expert profile linked to this project.
+            </DialogDescription>
+          </DialogHeader>
+          {viewingAdvisor?.expert && (
+            <div className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Email</p>
+                  <p className="text-sm">{viewingAdvisor.expert.email || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Phone</p>
+                  <p className="text-sm">{viewingAdvisor.expert.phone || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Current title</p>
+                  <p className="text-sm">{viewingAdvisor.expert.jobTitle || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Current company</p>
+                  <p className="text-sm">{viewingAdvisor.expert.company || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Location</p>
+                  <p className="text-sm">
+                    {[viewingAdvisor.expert.city, viewingAdvisor.expert.country].filter(Boolean).join(", ") || "-"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Hourly rate</p>
+                  <p className="text-sm">
+                    {viewingAdvisor.expert.hourlyRate ? `$${viewingAdvisor.expert.hourlyRate}/hr` : "-"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Industry</p>
+                  <p className="text-sm">{viewingAdvisor.expert.industry || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Expertise</p>
+                  <p className="text-sm">{viewingAdvisor.expert.expertise || "-"}</p>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Added status</p>
+                  <div className="mt-1"><Badge variant="secondary">Added</Badge></div>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Invite status</p>
+                  <div className="mt-1">{getInvitationStatusBadge(viewingAdvisor.invitationStatus || "not_invited")}</div>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Pipeline</p>
+                  <div className="mt-1">{getPipelineStatusBadge(viewingAdvisor.pipelineStatus)}</div>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase text-muted-foreground">Bio</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm">{viewingAdvisor.expert.bio || "No bio added yet."}</p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase text-muted-foreground">Work history</p>
+                {Array.isArray(viewingAdvisor.expert.workHistory) && viewingAdvisor.expert.workHistory.length > 0 ? (
+                  <div className="mt-2 space-y-2">
+                    {(viewingAdvisor.expert.workHistory as ExpertWorkHistoryItem[]).map((item, index) => (
+                      <div key={index} className="rounded-md border p-3">
+                        <p className="text-sm font-medium">{item.company || "Company not set"}</p>
+                        <p className="text-sm text-muted-foreground">{item.jobTitle || "Job title not set"}</p>
+                        <p className="text-xs text-muted-foreground">{formatWorkHistoryPeriod(item)}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-sm text-muted-foreground">No work history added yet.</p>
+                )}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
