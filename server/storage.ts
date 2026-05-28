@@ -899,16 +899,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCallRecord(record: InsertCallRecord): Promise<CallRecord> {
-    const cuUsed = calculateCU(record.durationMinutes);
+    const shouldCountCu = record.status === "completed";
+    const cuUsed = shouldCountCu ? calculateCU(record.durationMinutes) : 0;
     const [newRecord] = await db.insert(callRecords).values({
       ...record,
       cuUsed: cuUsed.toString(),
     }).returning();
-    
-    // Update project total CU
-    await db.update(projects).set({
-      totalCuUsed: sql`COALESCE(${projects.totalCuUsed}, 0) + ${cuUsed}`,
-    }).where(eq(projects.id, record.projectId));
+
+    if (shouldCountCu && cuUsed > 0) {
+      await db.update(projects).set({
+        totalCuUsed: sql`COALESCE(${projects.totalCuUsed}, 0) + ${cuUsed}`,
+      }).where(eq(projects.id, record.projectId));
+    }
     
     return newRecord;
   }
