@@ -2692,12 +2692,19 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const { actualDurationMinutes, recordingUrl, notes } = req.body;
-      
-      const cuUsed = calculateCU(actualDurationMinutes || 0);
+
+      const existingRecord = await storage.getCallRecord(id);
+      if (!existingRecord) {
+        return res.status(404).json({ error: "Call record not found" });
+      }
+
+      const completedDurationMinutes = actualDurationMinutes || existingRecord.durationMinutes;
+      const cuUsed = calculateCU(completedDurationMinutes);
       const record = await storage.updateCallRecord(id, {
         status: "completed",
-        actualDurationMinutes,
-        durationMinutes: actualDurationMinutes,
+        actualDurationMinutes: completedDurationMinutes,
+        durationMinutes: completedDurationMinutes,
+        cuUsed: cuUsed.toString(),
         recordingUrl,
         notes,
         completedAt: new Date(),
