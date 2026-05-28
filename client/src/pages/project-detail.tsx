@@ -927,6 +927,21 @@ export default function ProjectDetail() {
     return allRAs?.find((ra) => ra.id === raId)?.fullName || "Unknown";
   };
 
+  const getPmNameById = (pmId: number | null) => {
+    if (!pmId) return projectDetail?.createdByPm?.fullName || "-";
+    if (projectDetail?.createdByPm?.id === pmId) return projectDetail.createdByPm.fullName;
+    return `PM #${pmId}`;
+  };
+
+  const getAdvisorLabelForCall = (record: CallRecord) => {
+    const advisor = projectAdvisors.find((pe) =>
+      pe.id === record.projectExpertId || pe.expertId === record.expertId
+    );
+    if (!advisor) return record.projectExpertId ? `Assignment #${record.projectExpertId}` : "-";
+    const sourceLabel = advisor.sourceType === "internal_db" ? "Internal DB" : "RA-sourced";
+    return `${sourceLabel} #${advisor.id}`;
+  };
+
   const filteredProjectCalls = projectCallRecords?.filter((record) =>
     consultationStatusFilter === "all" || record.status === consultationStatusFilter
   );
@@ -936,6 +951,11 @@ export default function ProjectDetail() {
   const projectTotalCuUsed = projectCallRecords
     ?.filter((r) => r.status === "completed")
     .reduce((sum, r) => sum + parseFloat(r.cuUsed || "0"), 0) || 0;
+  const completionDurationMinutes =
+    completeCallForm.watch("actualDurationMinutes") || selectedCallRecord?.durationMinutes || 0;
+  const completionCalculatedCu = completionDurationMinutes > 0
+    ? Math.ceil(completionDurationMinutes / 15) * 0.25
+    : 0;
 
   // Vetting Questions mutations
   const createVQMutation = useMutation({
@@ -1329,7 +1349,7 @@ export default function ProjectDetail() {
 
   const projectApplications = projectDetail.projectApplications || projectAdvisors.filter(hasReviewableApplication);
   const canViewProjectRevenue = ["admin", "finance"].includes(user?.role?.toLowerCase() || "");
-  const summaryCuUsed = projectTotalCuUsed || parseFloat(projectDetail.totalCuUsed || "0") || 0;
+  const summaryCuUsed = projectTotalCuUsed;
   const projectCuRate = parseFloat(projectDetail.cuRatePerCU || "");
   const estimatedProjectRevenue =
     Number.isFinite(projectCuRate) && summaryCuUsed > 0 ? summaryCuUsed * projectCuRate : null;
@@ -1841,7 +1861,7 @@ export default function ProjectDetail() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">CU Used</p>
-                    <p className="font-mono font-medium">{parseFloat(projectDetail.totalCuUsed || "0").toFixed(1)}</p>
+                    <p className="font-mono font-medium">{projectTotalCuUsed.toFixed(1)}</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Rate per CU</p>
@@ -3052,16 +3072,17 @@ export default function ProjectDetail() {
                   }
                 />
               ) : (
-                <div className="rounded-md border">
+                <div className="rounded-md border overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Expert</TableHead>
-                        <TableHead>Date</TableHead>
+                        <TableHead>Advisor Link</TableHead>
+                        <TableHead>Scheduled</TableHead>
                         <TableHead>Duration</TableHead>
-                        <TableHead>CU Used</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Assigned RA</TableHead>
+                        <TableHead>Owners</TableHead>
+                        <TableHead>Links & Notes</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -3070,6 +3091,9 @@ export default function ProjectDetail() {
                         <TableRow key={record.id} data-testid={`row-call-record-${record.id}`}>
                           <TableCell className="font-medium">
                             {getExpertNameById(record.expertId)}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {getAdvisorLabelForCall(record)}
                           </TableCell>
                           <TableCell className="text-sm">
                             {format(new Date(record.callDate), "MMM dd, yyyy")}
@@ -3081,18 +3105,57 @@ export default function ProjectDetail() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <span className="font-mono text-sm">
-                              {record.actualDurationMinutes || record.durationMinutes} min
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <span className="font-mono text-sm">{parseFloat(record.cuUsed || "0").toFixed(2)}</span>
+                            <div className="space-y-1 font-mono text-sm">
+                              <p>Planned: {record.durationMinutes} min</p>
+                              {record.status === "completed" && (
+                                <p>Actual: {record.actualDurationMinutes || record.durationMinutes} min</p>
+                              )}
+                              <p>{parseFloat(record.cuUsed || "0").toFixed(2)} CU</p>
+                            </div>
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={record.status} type="call" />
+                            {record.completedAt && (
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Completed {format(new Date(record.completedAt), "MMM dd")}
+                              </p>
+                            )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
-                            {getRaNameById(record.assignedRaId)}
+                            <p>PM: {getPmNameById(record.pmId)}</p>
+                            <p>RA: {getRaNameById(record.raId)}</p>
+                          </TableCell>
+                          <TableCell className="max-w-[260px] text-sm">
+                            <div className="space-y-1">
+                              {record.zoomLink ? (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(record.zoomLink!, "_blank")}
+                                  className="block text-primary hover:underline"
+                                >
+                                  Zoom link
+                                </button>
+                              ) : (
+                                <p className="text-muted-foreground">No Zoom link</p>
+                              )}
+                              {record.recordingUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(record.recordingUrl!, "_blank")}
+                                  className="block text-primary hover:underline"
+                                >
+                                  Recording
+                                </button>
+                              ) : (
+                                <p className="text-muted-foreground">No recording</p>
+                              )}
+                              {record.notes && (
+                                <p className="line-clamp-2 text-muted-foreground">{record.notes}</p>
+                              )}
+                              {record.status === "completed" && (
+                                <p className="text-xs text-muted-foreground">Insight pending</p>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right">
                             <DropdownMenu>
@@ -4508,6 +4571,9 @@ export default function ProjectDetail() {
                   <p className="text-xs text-muted-foreground">
                     Scheduled: {format(new Date(selectedCallRecord.callDate), "MMM dd, yyyy")}
                   </p>
+                  <p className="text-xs text-muted-foreground">
+                    Current status: {selectedCallRecord.status}
+                  </p>
                 </div>
               )}
               <FormField
@@ -4528,6 +4594,26 @@ export default function ProjectDetail() {
                   </FormItem>
                 )}
               />
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Completion Preview</p>
+                <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Actual duration</p>
+                    <p className="font-mono font-medium">{completionDurationMinutes || 0} min</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Calculated CU</p>
+                    <p className="font-mono font-medium">{completionCalculatedCu.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">New status</p>
+                    <p className="font-medium">completed</p>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Actual duration determines CU used and completes this call record.
+                </p>
+              </div>
               <FormField
                 control={completeCallForm.control}
                 name="recordingUrl"
