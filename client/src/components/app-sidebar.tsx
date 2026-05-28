@@ -53,6 +53,12 @@ const mainNavItems: NavItem[] = [
     pageKey: "projects",
   },
   {
+    title: "Consultations",
+    url: "/consultations",
+    icon: Phone,
+    pageKey: "consultations",
+  },
+  {
     title: "Experts",
     url: "/experts",
     icon: Users,
@@ -72,12 +78,6 @@ const managementItems: NavItem[] = [
     url: "/insight-hub",
     icon: FileQuestion,
     pageKey: "insight-hub",
-  },
-  {
-    title: "Consultations",
-    url: "/consultations",
-    icon: Phone,
-    pageKey: "consultations",
   },
   {
     title: "Invites",
