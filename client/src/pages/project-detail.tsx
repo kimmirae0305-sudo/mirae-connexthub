@@ -193,6 +193,7 @@ export default function ProjectDetail() {
   const [reviewingApplication, setReviewingApplication] = useState<EnrichedExpert | null>(null);
   const [viewingAdvisor, setViewingAdvisor] = useState<EnrichedExpert | null>(null);
   const [isProjectEditMode, setIsProjectEditMode] = useState(false);
+  const [activeProjectTab, setActiveProjectTab] = useState("overview");
   
   // Angles & VQ state
   const [expandedAngles, setExpandedAngles] = useState<Set<number>>(new Set());
@@ -1337,31 +1338,37 @@ export default function ProjectDetail() {
       label: "Added Advisors",
       value: String(projectAdvisors.length),
       helper: "Project-linked experts",
+      targetTab: "existing-experts",
     },
     {
       label: "Applications Submitted",
       value: String(projectApplications.length),
       helper: "Reviewable applications",
+      targetTab: "applications",
     },
     {
       label: "RA-Sourced Experts",
       value: String(projectDetail.raSourcedExperts?.length || 0),
       helper: "External sourcing",
+      targetTab: "ra-sourcing",
     },
     {
       label: "Scheduled Calls",
       value: String(projectScheduledCalls),
       helper: "Upcoming consultations",
+      targetTab: "consultations",
     },
     {
       label: "Completed Calls",
       value: String(projectCompletedCalls),
       helper: "Finished consultations",
+      targetTab: "consultations",
     },
     {
       label: "CU Used",
       value: summaryCuUsed.toFixed(2),
       helper: "Completed call CU",
+      targetTab: "consultations",
     },
   ];
   const projectInsightCount = (() => {
@@ -1647,14 +1654,30 @@ export default function ProjectDetail() {
         <CardContent>
           <div className={`grid gap-3 sm:grid-cols-2 ${canViewProjectRevenue ? "lg:grid-cols-7" : "lg:grid-cols-6"}`}>
             {summaryMetrics.map((metric) => (
-              <div key={metric.label} className="rounded-md border bg-muted/20 p-3">
+              <button
+                key={metric.label}
+                type="button"
+                onClick={() => setActiveProjectTab(metric.targetTab)}
+                className="rounded-md border bg-muted/20 p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`Open ${metric.label} details`}
+              >
                 <p className="text-xs font-medium uppercase text-muted-foreground">{metric.label}</p>
                 <p className="mt-1 text-2xl font-semibold">{metric.value}</p>
                 <p className="mt-1 text-xs text-muted-foreground">{metric.helper}</p>
-              </div>
+              </button>
             ))}
             {canViewProjectRevenue && (
-              <div className="rounded-md border bg-muted/20 p-3">
+              <button
+                type="button"
+                onClick={() => estimatedProjectRevenue !== null && setActiveProjectTab("consultations")}
+                disabled={estimatedProjectRevenue === null}
+                className={`rounded-md border bg-muted/20 p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  estimatedProjectRevenue === null
+                    ? "cursor-default opacity-70"
+                    : "hover:border-primary/40 hover:bg-primary/5"
+                }`}
+                aria-label="Open estimated revenue details"
+              >
                 <p className="text-xs font-medium uppercase text-muted-foreground">Estimated Revenue</p>
                 <p className="mt-1 text-2xl font-semibold">
                   {estimatedProjectRevenue === null
@@ -1662,13 +1685,13 @@ export default function ProjectDetail() {
                     : `$${estimatedProjectRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">CU used x project rate</p>
-              </div>
+              </button>
             )}
           </div>
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="overview" className="space-y-4">
+      <Tabs value={activeProjectTab} onValueChange={setActiveProjectTab} className="space-y-4">
         <TabsList className="flex-wrap">
           <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
           <TabsTrigger value="angles-vq" data-testid="tab-angles-vq">
