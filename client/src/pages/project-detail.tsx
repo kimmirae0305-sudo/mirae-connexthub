@@ -1327,6 +1327,43 @@ export default function ProjectDetail() {
   }
 
   const projectApplications = projectDetail.projectApplications || projectAdvisors.filter(hasReviewableApplication);
+  const canViewProjectRevenue = ["admin", "finance"].includes(user?.role?.toLowerCase() || "");
+  const summaryCuUsed = projectTotalCuUsed || parseFloat(projectDetail.totalCuUsed || "0") || 0;
+  const projectCuRate = parseFloat(projectDetail.cuRatePerCU || "");
+  const estimatedProjectRevenue =
+    Number.isFinite(projectCuRate) && summaryCuUsed > 0 ? summaryCuUsed * projectCuRate : null;
+  const summaryMetrics = [
+    {
+      label: "Added Advisors",
+      value: String(projectAdvisors.length),
+      helper: "Project-linked experts",
+    },
+    {
+      label: "Applications Submitted",
+      value: String(projectApplications.length),
+      helper: "Reviewable applications",
+    },
+    {
+      label: "RA-Sourced Experts",
+      value: String(projectDetail.raSourcedExperts?.length || 0),
+      helper: "External sourcing",
+    },
+    {
+      label: "Scheduled Calls",
+      value: String(projectScheduledCalls),
+      helper: "Upcoming consultations",
+    },
+    {
+      label: "Completed Calls",
+      value: String(projectCompletedCalls),
+      helper: "Finished consultations",
+    },
+    {
+      label: "CU Used",
+      value: summaryCuUsed.toFixed(2),
+      helper: "Completed call CU",
+    },
+  ];
   const projectInsightCount = (() => {
     const callIds = new Set((projectCallRecords || []).map((call) => call.id));
     const callIdStrings = new Set((projectCallRecords || []).map((call) => String(call.id)));
@@ -1593,6 +1630,40 @@ export default function ProjectDetail() {
                 </div>
               </div>
             ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ClipboardList className="h-4 w-4" />
+            Project Summary
+          </CardTitle>
+          <CardDescription>
+            Read-only operational snapshot from project advisors, applications, consultations, and CU usage.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className={`grid gap-3 sm:grid-cols-2 ${canViewProjectRevenue ? "lg:grid-cols-7" : "lg:grid-cols-6"}`}>
+            {summaryMetrics.map((metric) => (
+              <div key={metric.label} className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">{metric.label}</p>
+                <p className="mt-1 text-2xl font-semibold">{metric.value}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{metric.helper}</p>
+              </div>
+            ))}
+            {canViewProjectRevenue && (
+              <div className="rounded-md border bg-muted/20 p-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Estimated Revenue</p>
+                <p className="mt-1 text-2xl font-semibold">
+                  {estimatedProjectRevenue === null
+                    ? "N/A"
+                    : `$${estimatedProjectRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">CU used x project rate</p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
