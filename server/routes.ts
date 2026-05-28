@@ -2671,11 +2671,12 @@ export async function registerRoutes(
   app.post("/api/call-records/:id/schedule", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { scheduledStartTime, scheduledEndTime, zoomLink } = req.body;
+      const { scheduledStartTime, scheduledEndTime, timezone, zoomLink } = req.body;
       const record = await storage.updateCallRecord(id, {
         status: "scheduled",
         scheduledStartTime: new Date(scheduledStartTime),
-        scheduledEndTime: new Date(scheduledEndTime),
+        scheduledEndTime: scheduledEndTime ? new Date(scheduledEndTime) : undefined,
+        timezone: timezone || "America/Sao_Paulo",
         zoomLink,
       });
       if (!record) {

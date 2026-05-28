@@ -209,6 +209,7 @@ export const callRecords = pgTable("call_records", {
   callDate: timestamp("call_date").notNull(),
   scheduledStartTime: timestamp("scheduled_start_time"),
   scheduledEndTime: timestamp("scheduled_end_time"),
+  timezone: text("timezone"),
   actualDurationMinutes: integer("actual_duration_minutes"),
   durationMinutes: integer("duration_minutes").notNull(),
   cuUsed: decimal("cu_used", { precision: 10, scale: 2 }).notNull(),

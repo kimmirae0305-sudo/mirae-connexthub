@@ -817,9 +817,9 @@ export default function ProjectDetail() {
   const scheduleCallFormSchema = z.object({
     expertId: z.number().min(1, "Expert is required"),
     callDate: z.string().min(1, "Call date is required"),
-    durationMinutes: z.number().min(1, "Duration is required"),
-    scheduledStartTime: z.string().optional(),
-    scheduledEndTime: z.string().optional(),
+    startTime: z.string().min(1, "Start time is required"),
+    timezone: z.string().min(1, "Time zone is required"),
+    durationMinutes: z.number().min(1, "Planned duration is required"),
     zoomLink: z.string().optional(),
     notes: z.string().optional(),
   });
@@ -831,9 +831,9 @@ export default function ProjectDetail() {
     defaultValues: {
       expertId: 0,
       callDate: format(new Date(), "yyyy-MM-dd"),
+      startTime: "",
+      timezone: "America/Sao_Paulo",
       durationMinutes: 30,
-      scheduledStartTime: "",
-      scheduledEndTime: "",
       zoomLink: "",
       notes: "",
     },
@@ -889,6 +889,19 @@ export default function ProjectDetail() {
     return Math.ceil(minutes / 15) * 0.25;
   };
 
+  const consultationTimezones = [
+    "America/Sao_Paulo",
+    "Asia/Seoul",
+    "America/New_York",
+    "Europe/London",
+    "UTC",
+  ];
+
+  const buildScheduledDateTime = (callDate: string, startTime: string) => {
+    if (!callDate || !startTime) return null;
+    return new Date(`${callDate}T${startTime}:00`);
+  };
+
   const onEditCallSubmit = (data: EditCallFormData) => {
     editCallMutation.mutate({
       durationMinutes: data.durationMinutes,
@@ -897,16 +910,20 @@ export default function ProjectDetail() {
   };
 
   const onScheduleCallSubmit = (data: ScheduleCallFormData) => {
-    const cuUsed = Math.ceil((data.durationMinutes / 60) * 4) / 4;
+    const scheduledStart = buildScheduledDateTime(data.callDate, data.startTime);
+    const estimatedEnd = scheduledStart
+      ? new Date(scheduledStart.getTime() + data.durationMinutes * 60_000)
+      : null;
     const callData: InsertCallRecord = {
       projectId,
       expertId: data.expertId,
-      callDate: new Date(data.callDate),
+      callDate: scheduledStart || new Date(data.callDate),
       durationMinutes: data.durationMinutes,
-      cuUsed: cuUsed.toString(),
-      status: data.scheduledStartTime ? "scheduled" : "pending",
-      scheduledStartTime: data.scheduledStartTime ? new Date(data.scheduledStartTime) : null,
-      scheduledEndTime: data.scheduledEndTime ? new Date(data.scheduledEndTime) : null,
+      cuUsed: "0",
+      status: "scheduled",
+      scheduledStartTime: scheduledStart,
+      scheduledEndTime: estimatedEnd,
+      timezone: data.timezone,
       zoomLink: data.zoomLink || null,
       notes: data.notes || null,
     };
@@ -956,6 +973,15 @@ export default function ProjectDetail() {
   const completionCalculatedCu = completionDurationMinutes > 0
     ? Math.ceil(completionDurationMinutes / 15) * 0.25
     : 0;
+  const scheduleCallDate = scheduleCallForm.watch("callDate");
+  const scheduleStartTime = scheduleCallForm.watch("startTime");
+  const scheduleTimezone = scheduleCallForm.watch("timezone");
+  const schedulePlannedDuration = scheduleCallForm.watch("durationMinutes") || 0;
+  const estimatedScheduleEnd = (() => {
+    const start = buildScheduledDateTime(scheduleCallDate, scheduleStartTime);
+    if (!start || schedulePlannedDuration <= 0) return null;
+    return new Date(start.getTime() + schedulePlannedDuration * 60_000);
+  })();
 
   // Vetting Questions mutations
   const createVQMutation = useMutation({
@@ -3101,6 +3127,7 @@ export default function ProjectDetail() {
                               <span className="block text-xs text-muted-foreground">
                                 {format(new Date(record.scheduledStartTime), "HH:mm")}
                                 {record.scheduledEndTime && ` - ${format(new Date(record.scheduledEndTime), "HH:mm")}`}
+                                {record.timezone && ` (${record.timezone})`}
                               </span>
                             )}
                           </TableCell>
@@ -4379,11 +4406,11 @@ export default function ProjectDetail() {
 
       {/* Schedule Call Modal */}
       <Dialog open={isScheduleCallModalOpen} onOpenChange={setIsScheduleCallModalOpen}>
-        <DialogContent className="max-w-md" aria-describedby="schedule-call-description">
+        <DialogContent className="max-w-lg" aria-describedby="schedule-call-description">
           <DialogHeader>
             <DialogTitle>Schedule Consultation</DialogTitle>
             <DialogDescription id="schedule-call-description">
-              Schedule a new consultation call for this project
+              Schedule the planned call time. Actual duration and CU are confirmed when the call is completed.
             </DialogDescription>
           </DialogHeader>
           <Form {...scheduleCallForm}>
@@ -4444,13 +4471,13 @@ export default function ProjectDetail() {
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={scheduleCallForm.control}
-                  name="scheduledStartTime"
+                  name="startTime"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Start Time</FormLabel>
                       <FormControl>
                         <Input
-                          type="datetime-local"
+                          type="time"
                           {...field}
                           data-testid="input-schedule-start-time"
                         />
@@ -4461,16 +4488,23 @@ export default function ProjectDetail() {
                 />
                 <FormField
                   control={scheduleCallForm.control}
-                  name="scheduledEndTime"
+                  name="timezone"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>End Time</FormLabel>
+                      <FormLabel>Time Zone</FormLabel>
                       <FormControl>
-                        <Input
-                          type="datetime-local"
-                          {...field}
-                          data-testid="input-schedule-end-time"
-                        />
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger data-testid="select-schedule-timezone">
+                            <SelectValue placeholder="Select time zone" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {consultationTimezones.map((timezone) => (
+                              <SelectItem key={timezone} value={timezone}>
+                                {timezone}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -4482,19 +4516,34 @@ export default function ProjectDetail() {
                 name="durationMinutes"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Duration (minutes)</FormLabel>
+                    <FormLabel>Planned Duration (minutes)</FormLabel>
                     <FormControl>
                       <Input
                         type="number"
+                        min="1"
                         {...field}
                         onChange={(e) => field.onChange(parseInt(e.target.value) || 30)}
                         data-testid="input-schedule-duration"
                       />
                     </FormControl>
+                    <FormDescription>
+                      Actual duration and CU are confirmed when the call is completed.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                <p className="font-medium">Estimated End Time</p>
+                <p className="text-muted-foreground">
+                  {estimatedScheduleEnd
+                    ? `${format(estimatedScheduleEnd, "HH:mm")} (${scheduleTimezone || "America/Sao_Paulo"})`
+                    : "Select a date, start time, and planned duration to preview."}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  End time is a preview only. The completed call record uses actual duration.
+                </p>
+              </div>
               <FormField
                 control={scheduleCallForm.control}
                 name="zoomLink"
@@ -4517,7 +4566,7 @@ export default function ProjectDetail() {
                 name="notes"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Notes (optional)</FormLabel>
+                    <FormLabel>Agenda / Notes (optional)</FormLabel>
                     <FormControl>
                       <Textarea
                         placeholder="Call agenda, topics to cover..."
@@ -4529,6 +4578,9 @@ export default function ProjectDetail() {
                   </FormItem>
                 )}
               />
+              <p className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+                Invitation notification will be supported in a future integration. No email or WhatsApp message is sent yet.
+              </p>
               <DialogFooter>
                 <Button
                   type="button"
