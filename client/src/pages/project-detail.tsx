@@ -87,7 +87,7 @@ import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { RegisterExpertForm } from "@/components/experts/RegisterExpertForm";
 import { QuickInviteForm } from "@/components/experts/QuickInviteForm";
-import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle, CallRecord, InsertCallRecord, InsertProject, ClientOrganization, Insight } from "@shared/schema";
+import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle, CallRecord, InsertCallRecord, InsertInsight, InsertProject, ClientOrganization, Insight } from "@shared/schema";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -259,6 +259,7 @@ export default function ProjectDetail() {
   const [isCompleteCallModalOpen, setIsCompleteCallModalOpen] = useState(false);
   const [isEditCallModalOpen, setIsEditCallModalOpen] = useState(false);
   const [selectedCallRecord, setSelectedCallRecord] = useState<CallRecord | null>(null);
+  const [selectedInsightCallRecord, setSelectedInsightCallRecord] = useState<CallRecord | null>(null);
   const [consultationStatusFilter, setConsultationStatusFilter] = useState<string>("all");
   
   // Auth for role-based UI
@@ -412,6 +413,16 @@ export default function ProjectDetail() {
   const { data: insights = [] } = useQuery<Insight[]>({
     queryKey: ["/api/insights"],
   });
+
+  const insightByCallRecordId = useMemo(() => {
+    const byCallRecordId = new Map<number, Insight>();
+    insights.forEach((insight) => {
+      if (insight.callRecordId) {
+        byCallRecordId.set(insight.callRecordId, insight);
+      }
+    });
+    return byCallRecordId;
+  }, [insights]);
 
   // Expert search results query with metrics
   const { data: expertSearchResults, isLoading: expertSearchLoading, refetch: refetchExpertSearch } = useQuery<ExpertWithMetrics[]>({
@@ -880,6 +891,71 @@ export default function ProjectDetail() {
     },
   });
 
+  const createInsightFormSchema = z.object({
+    consultationId: z.string().min(1, "Consultation ID is required"),
+    callRecordId: z.number().min(1, "Completed call is required"),
+    month: z.string().min(1, "Month is required"),
+    callDate: z.string().min(1, "Call date is required"),
+    clientType: z.string().min(1, "Client type is required"),
+    industry: z.string().min(1, "Industry is required"),
+    market: z.string().min(1, "Market is required"),
+    geography: z.string().min(1, "Geography is required"),
+    clientQuestion: z.string().min(1, "Client question is required"),
+    observedTrend: z.string().min(1, "Observed trend is required"),
+    keyTagsText: z.string().optional(),
+    signalStrength: z.string().min(1, "Signal strength is required"),
+    companyMentioned: z.string().optional(),
+    expertSeniority: z.string().optional(),
+    callDurationMin: z.string().optional(),
+    recordingLink: z.string().optional(),
+    transcriptLink: z.string().optional(),
+    internalNotes: z.string().optional(),
+  });
+
+  type CreateInsightFormData = z.infer<typeof createInsightFormSchema>;
+
+  const createInsightForm = useForm<CreateInsightFormData>({
+    resolver: zodResolver(createInsightFormSchema),
+    defaultValues: {
+      consultationId: "",
+      callRecordId: 0,
+      month: format(new Date(), "yyyy-MM"),
+      callDate: format(new Date(), "yyyy-MM-dd"),
+      clientType: "",
+      industry: "",
+      market: "",
+      geography: "",
+      clientQuestion: "",
+      observedTrend: "",
+      keyTagsText: "",
+      signalStrength: "Strong",
+      companyMentioned: "",
+      expertSeniority: "",
+      callDurationMin: "",
+      recordingLink: "",
+      transcriptLink: "",
+      internalNotes: "",
+    },
+  });
+
+  const createInsightMutation = useMutation({
+    mutationFn: async (data: InsertInsight) => {
+      const res = await apiRequest("POST", "/api/insights", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/insights"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      setSelectedInsightCallRecord(null);
+      createInsightForm.reset();
+      toast({ title: "Insight captured" });
+    },
+    onError: () => {
+      toast({ title: "Failed to create insight", variant: "destructive" });
+    },
+  });
+
   /**
    * Calculate CU from duration
    * CU formula: ceil(durationMinutes / 15) * 0.25
@@ -934,6 +1010,65 @@ export default function ProjectDetail() {
     completeCallMutation.mutate(data);
   };
 
+  const openCreateInsightModal = (record: CallRecord) => {
+    if (record.status !== "completed" || insightByCallRecordId.has(record.id)) return;
+
+    const insightDate = new Date(record.completedAt || record.callDate);
+    const safeInsightDate = Number.isNaN(insightDate.getTime()) ? new Date() : insightDate;
+    const clientOrg = clientOrganizations?.find((org) => org.id === projectDetail?.clientOrganizationId);
+    const completedDuration = record.actualDurationMinutes || record.durationMinutes;
+
+    setSelectedInsightCallRecord(record);
+    createInsightForm.reset({
+      consultationId: `CALL-${record.id}`,
+      callRecordId: record.id,
+      month: format(safeInsightDate, "yyyy-MM"),
+      callDate: format(safeInsightDate, "yyyy-MM-dd"),
+      clientType: clientOrg?.clientType || "",
+      industry: projectDetail?.industry || "",
+      market: "",
+      geography: projectDetail?.region || "",
+      clientQuestion: "",
+      observedTrend: "",
+      keyTagsText: "",
+      signalStrength: "Strong",
+      companyMentioned: "",
+      expertSeniority: "",
+      callDurationMin: completedDuration ? String(completedDuration) : "",
+      recordingLink: record.recordingUrl || "",
+      transcriptLink: "",
+      internalNotes: record.notes || "",
+    });
+  };
+
+  const onCreateInsightSubmit = (data: CreateInsightFormData) => {
+    const tags = (data.keyTagsText || "")
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+    createInsightMutation.mutate({
+      consultationId: data.consultationId.trim(),
+      callRecordId: data.callRecordId,
+      month: data.month,
+      callDate: new Date(`${data.callDate}T00:00:00`),
+      clientType: data.clientType.trim(),
+      industry: data.industry.trim(),
+      market: data.market.trim(),
+      geography: data.geography.trim(),
+      clientQuestion: data.clientQuestion.trim(),
+      observedTrend: data.observedTrend.trim(),
+      keyTags: tags,
+      signalStrength: data.signalStrength,
+      companyMentioned: data.companyMentioned?.trim() || undefined,
+      expertSeniority: data.expertSeniority?.trim() || undefined,
+      callDurationMin: data.callDurationMin ? Number(data.callDurationMin) : undefined,
+      recordingLink: data.recordingLink?.trim() || undefined,
+      transcriptLink: data.transcriptLink?.trim() || undefined,
+      internalNotes: data.internalNotes?.trim() || undefined,
+    });
+  };
+
   // Helper functions for Consultations tab
   const getExpertNameById = (expertId: number) => {
     return allExperts?.find((e) => e.id === expertId)?.name || "Unknown";
@@ -958,6 +1093,8 @@ export default function ProjectDetail() {
     const sourceLabel = advisor.sourceType === "internal_db" ? "Internal DB" : "RA-sourced";
     return `${sourceLabel} #${advisor.id}`;
   };
+
+  const getInsightForCall = (record: CallRecord) => insightByCallRecordId.get(record.id);
 
   const filteredProjectCalls = projectCallRecords?.filter((record) =>
     consultationStatusFilter === "all" || record.status === consultationStatusFilter
@@ -3180,7 +3317,11 @@ export default function ProjectDetail() {
                                 <p className="line-clamp-2 text-muted-foreground">{record.notes}</p>
                               )}
                               {record.status === "completed" && (
-                                <p className="text-xs text-muted-foreground">Insight pending</p>
+                                getInsightForCall(record) ? (
+                                  <p className="text-xs text-emerald-600">Insight captured</p>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">Insight pending</p>
+                                )
                               )}
                             </div>
                           </TableCell>
@@ -3227,6 +3368,15 @@ export default function ProjectDetail() {
                                   >
                                     <CheckCircle2 className="h-4 w-4 mr-2" />
                                     Mark Completed
+                                  </DropdownMenuItem>
+                                )}
+                                {record.status === "completed" && !getInsightForCall(record) && (
+                                  <DropdownMenuItem
+                                    onClick={() => openCreateInsightModal(record)}
+                                    data-testid={`button-create-insight-${record.id}`}
+                                  >
+                                    <FileSearch className="h-4 w-4 mr-2" />
+                                    Create Insight
                                   </DropdownMenuItem>
                                 )}
                                 {(record.status === "pending" || record.status === "scheduled") && !isRA && (
@@ -4599,6 +4749,308 @@ export default function ProjectDetail() {
                   data-testid="button-confirm-schedule"
                 >
                   {createCallMutation.isPending ? "Scheduling..." : "Schedule Call"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Insight from Completed Call Modal */}
+      <Dialog
+        open={!!selectedInsightCallRecord}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedInsightCallRecord(null);
+            createInsightForm.reset();
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" aria-describedby="create-insight-description">
+          <DialogHeader>
+            <DialogTitle>Create Insight from Completed Call</DialogTitle>
+            <DialogDescription id="create-insight-description">
+              Review the completed call details and capture the market signal for Insight Hub.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedInsightCallRecord && (
+            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+              <p className="font-medium">{getExpertNameById(selectedInsightCallRecord.expertId)}</p>
+              <p className="text-muted-foreground">
+                Completed call #{selectedInsightCallRecord.id}
+                {selectedInsightCallRecord.completedAt
+                  ? ` • ${format(new Date(selectedInsightCallRecord.completedAt), "MMM dd, yyyy")}`
+                  : ` • ${format(new Date(selectedInsightCallRecord.callDate), "MMM dd, yyyy")}`}
+              </p>
+              <p className="text-muted-foreground">
+                Duration: {selectedInsightCallRecord.actualDurationMinutes || selectedInsightCallRecord.durationMinutes} min
+                {selectedInsightCallRecord.recordingUrl ? " • Recording available" : ""}
+              </p>
+            </div>
+          )}
+          <Form {...createInsightForm}>
+            <form onSubmit={createInsightForm.handleSubmit(onCreateInsightSubmit)} className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-3">
+                <FormField
+                  control={createInsightForm.control}
+                  name="consultationId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Consultation ID *</FormLabel>
+                      <FormControl>
+                        <Input {...field} data-testid="input-insight-consultation-id" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="callDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Call Date *</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="date"
+                          {...field}
+                          onChange={(event) => {
+                            field.onChange(event);
+                            if (event.target.value) {
+                              createInsightForm.setValue("month", event.target.value.slice(0, 7));
+                            }
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="month"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Month *</FormLabel>
+                      <FormControl>
+                        <Input type="month" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="clientType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Client Type *</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Corporate, PE, VC..." {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="industry"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Industry *</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Payments, Healthcare..." {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="market"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Market *</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Digital wallets, AI infrastructure..." {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="geography"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Geography *</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Brazil, LATAM, Korea..." {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="signalStrength"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Signal Strength *</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Strong">Strong</SelectItem>
+                          <SelectItem value="Medium">Medium</SelectItem>
+                          <SelectItem value="Weak">Weak</SelectItem>
+                          <SelectItem value="Emerging">Emerging</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="callDurationMin"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Call Duration Min</FormLabel>
+                      <FormControl>
+                        <Input type="number" min="0" placeholder="60" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="companyMentioned"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Company Mentioned</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Company name" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="expertSeniority"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Expert Seniority</FormLabel>
+                      <FormControl>
+                        <Input placeholder="VP, C-level, Director..." {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="keyTagsText"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Key Tags</FormLabel>
+                      <FormControl>
+                        <Input placeholder="payments, regulation, churn" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={createInsightForm.control}
+                name="clientQuestion"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Client Question *</FormLabel>
+                    <FormControl>
+                      <Textarea rows={3} placeholder="What was the client trying to learn?" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={createInsightForm.control}
+                name="observedTrend"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Observed Trend *</FormLabel>
+                    <FormControl>
+                      <Textarea rows={3} placeholder="What market signal or pattern was observed?" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField
+                  control={createInsightForm.control}
+                  name="recordingLink"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Recording Link</FormLabel>
+                      <FormControl>
+                        <Input placeholder="https://..." {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createInsightForm.control}
+                  name="transcriptLink"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Transcript Link</FormLabel>
+                      <FormControl>
+                        <Input placeholder="https://..." {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={createInsightForm.control}
+                name="internalNotes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Internal Notes</FormLabel>
+                    <FormControl>
+                      <Textarea rows={3} placeholder="Internal interpretation, caveats, or follow-up notes..." {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedInsightCallRecord(null);
+                    createInsightForm.reset();
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={createInsightMutation.isPending}>
+                  {createInsightMutation.isPending ? "Saving..." : "Save Insight"}
                 </Button>
               </DialogFooter>
             </form>
