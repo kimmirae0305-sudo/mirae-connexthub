@@ -4859,12 +4859,16 @@ export default function ProjectDetail() {
                 name="observedTrend"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Market Signal *</FormLabel>
+                    <FormLabel>Expert Takeaway *</FormLabel>
                     <FormControl>
-                      <Textarea rows={4} placeholder="Capture the market signal, pattern, or implication from this call." {...field} />
+                      <Textarea
+                        rows={4}
+                        placeholder="Example: The expert indicated that local partnership quality is the main success factor for foreign investors entering Brazil's energy infrastructure market."
+                        {...field}
+                      />
                     </FormControl>
                     <FormDescription>
-                      Keep this concise. This is the core signal that should enter Insight Hub.
+                      Summarize the expert's most useful answer in 1 to 3 sentences. This should help answer the client question above.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
