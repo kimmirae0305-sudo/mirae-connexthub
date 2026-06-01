@@ -76,7 +76,7 @@ const availabilityBlocks = [
   { id: "18:00-21:00", label: "Evening", time: "18:00-21:00" },
 ];
 
-const timezones = [
+const priorityTimezones = [
   "America/Sao_Paulo",
   "America/New_York",
   "America/Mexico_City",
@@ -91,7 +91,31 @@ const timezones = [
   "UTC",
 ];
 
-const countries = [
+const getTimezoneOptions = () => {
+  try {
+    const supportedTimezones = (Intl as any).supportedValuesOf?.("timeZone");
+    if (Array.isArray(supportedTimezones) && supportedTimezones.length > 0) {
+      return Array.from(new Set([...priorityTimezones, ...supportedTimezones])).sort((a, b) => {
+        const priorityA = priorityTimezones.indexOf(a);
+        const priorityB = priorityTimezones.indexOf(b);
+        if (priorityA !== -1 || priorityB !== -1) {
+          if (priorityA === -1) return 1;
+          if (priorityB === -1) return -1;
+          return priorityA - priorityB;
+        }
+        return a.localeCompare(b);
+      });
+    }
+  } catch {
+    // Older browsers may not support Intl.supportedValuesOf.
+  }
+
+  return priorityTimezones;
+};
+
+const timezones = getTimezoneOptions();
+
+const priorityCountries = [
   "Brazil",
   "United States",
   "South Korea",
@@ -104,15 +128,109 @@ const countries = [
   "Argentina",
   "Peru",
   "Singapore",
+];
+
+const countries = Array.from(new Set([
+  ...priorityCountries,
+  "Afghanistan",
+  "Albania",
+  "Algeria",
+  "Andorra",
+  "Angola",
+  "Antigua and Barbuda",
+  "Armenia",
+  "Austria",
+  "Azerbaijan",
+  "Bahamas",
+  "Bahrain",
+  "Bangladesh",
+  "Barbados",
+  "Belarus",
+  "Belgium",
+  "Belize",
+  "Benin",
+  "Bhutan",
+  "Bolivia",
+  "Bosnia and Herzegovina",
+  "Botswana",
+  "Brunei",
+  "Bulgaria",
+  "Burkina Faso",
+  "Burundi",
+  "Cambodia",
+  "Cameroon",
   "Canada",
+  "Cape Verde",
+  "Central African Republic",
+  "Chad",
+  "China",
+  "Costa Rica",
+  "Cote d'Ivoire",
+  "Croatia",
+  "Cyprus",
+  "Czech Republic",
+  "Denmark",
+  "Dominican Republic",
+  "Ecuador",
+  "Egypt",
+  "El Salvador",
+  "Estonia",
+  "Ethiopia",
+  "Finland",
   "France",
   "Germany",
+  "Ghana",
+  "Greece",
+  "Guatemala",
+  "Honduras",
+  "Hong Kong",
+  "Hungary",
+  "Iceland",
+  "India",
+  "Indonesia",
+  "Ireland",
+  "Israel",
   "Italy",
   "Japan",
-  "India",
+  "Kenya",
+  "Kuwait",
+  "Latvia",
+  "Lebanon",
+  "Lithuania",
+  "Luxembourg",
+  "Malaysia",
+  "Malta",
+  "Morocco",
+  "Netherlands",
+  "New Zealand",
+  "Nigeria",
+  "Norway",
+  "Panama",
+  "Philippines",
+  "Poland",
+  "Qatar",
+  "Romania",
+  "Saudi Arabia",
+  "South Africa",
+  "Sweden",
+  "Switzerland",
+  "Taiwan",
+  "Thailand",
+  "Turkey",
+  "Uruguay",
+  "Vietnam",
   "Australia",
   "United Arab Emirates",
-];
+])).sort((a, b) => {
+  const priorityA = priorityCountries.indexOf(a);
+  const priorityB = priorityCountries.indexOf(b);
+  if (priorityA !== -1 || priorityB !== -1) {
+    if (priorityA === -1) return 1;
+    if (priorityB === -1) return -1;
+    return priorityA - priorityB;
+  }
+  return a.localeCompare(b);
+});
 
 const getBrowserTimezone = () => {
   try {
