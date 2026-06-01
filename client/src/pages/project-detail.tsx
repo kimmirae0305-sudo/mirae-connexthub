@@ -913,7 +913,7 @@ export default function ProjectDetail() {
     market: z.string().min(1, "Market is required"),
     geography: z.string().min(1, "Geography is required"),
     clientQuestion: z.string().min(1, "Client question is required"),
-    observedTrend: z.string().min(1, "Observed trend is required"),
+    observedTrend: z.string().min(1, "Market signal is required"),
     keyTagsText: z.string().optional(),
     signalStrength: z.string().min(1, "Signal strength is required"),
     companyMentioned: z.string().optional(),
@@ -961,10 +961,10 @@ export default function ProjectDetail() {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
       setSelectedInsightCallRecord(null);
       createInsightForm.reset();
-      toast({ title: "Insight captured" });
+      toast({ title: "Signal captured" });
     },
     onError: () => {
-      toast({ title: "Failed to create insight", variant: "destructive" });
+      toast({ title: "Failed to save signal", variant: "destructive" });
     },
   });
 
@@ -1022,6 +1022,22 @@ export default function ProjectDetail() {
     completeCallMutation.mutate(data);
   };
 
+  const buildClientQuestionPrefill = () => {
+    const questions = [...(projectDetail?.vettingQuestions || [])]
+      .filter((question) => question.question?.trim())
+      .sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0))
+      .map((question, index) => `${index + 1}. ${question.question.trim()}`)
+      .join("\n");
+
+    return (
+      questions ||
+      projectDetail?.clientRequestNotes?.trim() ||
+      projectDetail?.projectOverview?.trim() ||
+      projectDetail?.description?.trim() ||
+      ""
+    );
+  };
+
   const openCreateInsightModal = (record: CallRecord) => {
     if (record.status !== "completed" || insightByCallRecordId.has(record.id)) return;
 
@@ -1040,7 +1056,7 @@ export default function ProjectDetail() {
       industry: projectDetail?.industry || "",
       market: "",
       geography: projectDetail?.region || "",
-      clientQuestion: "",
+      clientQuestion: buildClientQuestionPrefill(),
       observedTrend: "",
       keyTagsText: "",
       signalStrength: "Strong",
@@ -3330,9 +3346,9 @@ export default function ProjectDetail() {
                               )}
                               {record.status === "completed" && canCreateProjectInsight && (
                                 getInsightForCall(record) ? (
-                                  <p className="text-xs text-emerald-600">Insight captured</p>
+                                  <p className="text-xs text-emerald-600">Signal captured</p>
                                 ) : (
-                                  <p className="text-xs text-muted-foreground">Insight pending</p>
+                                  <p className="text-xs text-muted-foreground">No signal captured</p>
                                 )
                               )}
                             </div>
@@ -3388,7 +3404,7 @@ export default function ProjectDetail() {
                                     data-testid={`button-create-insight-${record.id}`}
                                   >
                                     <FileSearch className="h-4 w-4 mr-2" />
-                                    Create Insight
+                                    Capture Signal
                                   </DropdownMenuItem>
                                 )}
                                 {(record.status === "pending" || record.status === "scheduled") && !isRA && (
@@ -4768,7 +4784,7 @@ export default function ProjectDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Create Insight from Completed Call Modal */}
+      {/* Capture Signal from Completed Call Modal */}
       <Dialog
         open={!!selectedInsightCallRecord}
         onOpenChange={(open) => {
@@ -4780,14 +4796,23 @@ export default function ProjectDetail() {
       >
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" aria-describedby="create-insight-description">
           <DialogHeader>
-            <DialogTitle>Create Insight from Completed Call</DialogTitle>
+            <DialogTitle>Capture Signal from Completed Call</DialogTitle>
             <DialogDescription id="create-insight-description">
               Review the completed call details and capture the market signal for Insight Hub.
             </DialogDescription>
           </DialogHeader>
           {selectedInsightCallRecord && (
-            <div className="rounded-md border bg-muted/30 p-3 text-sm">
-              <p className="font-medium">{getExpertNameById(selectedInsightCallRecord.expertId)}</p>
+            <div className="rounded-lg border bg-muted/30 p-4 text-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Completed call context
+                  </p>
+                  <p className="mt-1 font-medium">{projectDetail?.name || "Project"}</p>
+                  <p className="text-muted-foreground">{getExpertNameById(selectedInsightCallRecord.expertId)}</p>
+                </div>
+                <Badge variant="outline">Call #{selectedInsightCallRecord.id}</Badge>
+              </div>
               <p className="text-muted-foreground">
                 Completed call #{selectedInsightCallRecord.id}
                 {selectedInsightCallRecord.completedAt
@@ -4798,11 +4823,76 @@ export default function ProjectDetail() {
                 Duration: {selectedInsightCallRecord.actualDurationMinutes || selectedInsightCallRecord.durationMinutes} min
                 {selectedInsightCallRecord.recordingUrl ? " • Recording available" : ""}
               </p>
+              {selectedInsightCallRecord.recordingUrl && (
+                <button
+                  type="button"
+                  onClick={() => window.open(selectedInsightCallRecord.recordingUrl!, "_blank")}
+                  className="mt-2 inline-flex items-center gap-1 text-primary hover:underline"
+                >
+                  Open recording
+                  <ExternalLink className="h-3 w-3" />
+                </button>
+              )}
             </div>
           )}
           <Form {...createInsightForm}>
             <form onSubmit={createInsightForm.handleSubmit(onCreateInsightSubmit)} className="space-y-5">
-              <div className="grid gap-4 md:grid-cols-3">
+              <FormField
+                control={createInsightForm.control}
+                name="clientQuestion"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Client Question *</FormLabel>
+                    <FormControl>
+                      <Textarea rows={5} placeholder="What was the client trying to learn?" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Prefilled from project VQs or project context when available. Edit before saving if needed.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={createInsightForm.control}
+                name="observedTrend"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Market Signal *</FormLabel>
+                    <FormControl>
+                      <Textarea rows={4} placeholder="Capture the market signal, pattern, or implication from this call." {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Keep this concise. This is the core signal that should enter Insight Hub.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={createInsightForm.control}
+                name="internalNotes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Internal Note</FormLabel>
+                    <FormControl>
+                      <Textarea rows={3} placeholder="Optional PM context, caveats, or follow-up notes..." {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="rounded-lg border p-4">
+                <div className="mb-4">
+                  <p className="text-sm font-medium">Advanced Details</p>
+                  <p className="text-xs text-muted-foreground">
+                    Metadata is prefilled where possible and remains editable for Insight Hub quality.
+                  </p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-3">
                 <FormField
                   control={createInsightForm.control}
                   name="consultationId"
@@ -4978,36 +5068,9 @@ export default function ProjectDetail() {
                     </FormItem>
                   )}
                 />
-              </div>
+                </div>
 
-              <FormField
-                control={createInsightForm.control}
-                name="clientQuestion"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Client Question *</FormLabel>
-                    <FormControl>
-                      <Textarea rows={3} placeholder="What was the client trying to learn?" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={createInsightForm.control}
-                name="observedTrend"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Observed Trend *</FormLabel>
-                    <FormControl>
-                      <Textarea rows={3} placeholder="What market signal or pattern was observed?" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="grid gap-4 md:grid-cols-2">
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <FormField
                   control={createInsightForm.control}
                   name="recordingLink"
@@ -5034,21 +5097,8 @@ export default function ProjectDetail() {
                     </FormItem>
                   )}
                 />
+                </div>
               </div>
-
-              <FormField
-                control={createInsightForm.control}
-                name="internalNotes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Internal Notes</FormLabel>
-                    <FormControl>
-                      <Textarea rows={3} placeholder="Internal interpretation, caveats, or follow-up notes..." {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
 
               <DialogFooter>
                 <Button
@@ -5062,7 +5112,7 @@ export default function ProjectDetail() {
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createInsightMutation.isPending}>
-                  {createInsightMutation.isPending ? "Saving..." : "Save Insight"}
+                  {createInsightMutation.isPending ? "Saving..." : "Save Signal"}
                 </Button>
               </DialogFooter>
             </form>
