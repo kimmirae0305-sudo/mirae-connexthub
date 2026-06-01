@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { BarChart3, CalendarDays, Database, ExternalLink, Plus, Search, Tags, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +46,20 @@ import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CallRecord, Insight, InsertInsight } from "@shared/schema";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 const ALL = "all";
 
@@ -97,6 +111,7 @@ const defaultFilters: Filters = {
 };
 
 const signalStrengthOptions = ["Strong", "Medium", "Weak", "Emerging"];
+const chartColors = ["#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2"];
 
 const uniqueValues = (values: Array<string | null | undefined>) =>
   Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])).sort((a, b) =>
@@ -125,6 +140,29 @@ const formatMonth = (value: string) => {
 const isStrongSignal = (value?: string | null) => {
   const normalized = (value || "").toLowerCase();
   return normalized.includes("strong") || normalized.includes("high");
+};
+
+const buildCountData = (values: Array<string | null | undefined>, limit = 6) => {
+  const counts = new Map<string, number>();
+  values.forEach((value) => {
+    const key = value?.trim();
+    if (!key) return;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+
+  return Array.from(counts.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+    .slice(0, limit);
+};
+
+const signalStrengthScore = (value?: string | null) => {
+  const normalized = (value || "").toLowerCase();
+  if (normalized.includes("strong") || normalized.includes("high")) return 4;
+  if (normalized.includes("emerging")) return 3;
+  if (normalized.includes("medium")) return 2;
+  if (normalized.includes("weak") || normalized.includes("low")) return 1;
+  return 0;
 };
 
 export default function InsightHub() {
@@ -268,6 +306,37 @@ export default function InsightHub() {
     };
   }, [insights]);
 
+  const visualData = useMemo(() => {
+    const monthlyCounts = new Map<string, number>();
+    filteredInsights.forEach((insight) => {
+      if (!insight.month) return;
+      monthlyCounts.set(insight.month, (monthlyCounts.get(insight.month) || 0) + 1);
+    });
+
+    return {
+      signalStrength: buildCountData(filteredInsights.map((insight) => insight.signalStrength), 5),
+      industries: buildCountData(filteredInsights.map((insight) => insight.industry), 8),
+      markets: buildCountData(filteredInsights.map((insight) => insight.market), 8),
+      months: Array.from(monthlyCounts.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, signals]) => ({
+          month,
+          label: formatMonth(month),
+          signals,
+        })),
+    };
+  }, [filteredInsights]);
+
+  const featuredSignals = useMemo(() => {
+    return [...filteredInsights]
+      .sort((a, b) => {
+        const strengthDelta = signalStrengthScore(b.signalStrength) - signalStrengthScore(a.signalStrength);
+        if (strengthDelta !== 0) return strengthDelta;
+        return new Date(b.callDate).getTime() - new Date(a.callDate).getTime();
+      })
+      .slice(0, 6);
+  }, [filteredInsights]);
+
   const updateFilter = (key: keyof Filters, value: string) => {
     setFilters((current) => ({ ...current, [key]: value }));
   };
@@ -324,6 +393,12 @@ export default function InsightHub() {
     </div>
   );
 
+  const emptyChartState = (label: string) => (
+    <div className="flex h-[260px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+      {label}
+    </div>
+  );
+
   return (
     <div className="space-y-6 p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -344,7 +419,7 @@ export default function InsightHub() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium">
               <Database className="h-4 w-4" />
-              Total Insights
+              Total Signals
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -429,6 +504,212 @@ export default function InsightHub() {
           </Button>
         </CardContent>
       </Card>
+
+      <section className="space-y-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-xl font-semibold">Visual Intelligence</h2>
+          <p className="text-sm text-muted-foreground">
+            Filter-responsive views of where signals are clustering across markets, industries, and time.
+          </p>
+        </div>
+
+        {isLoading ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card><CardContent className="p-6">{emptyChartState("Loading signal distribution...")}</CardContent></Card>
+            <Card><CardContent className="p-6">{emptyChartState("Loading industry signals...")}</CardContent></Card>
+            <Card><CardContent className="p-6">{emptyChartState("Loading market signals...")}</CardContent></Card>
+            <Card><CardContent className="p-6">{emptyChartState("Loading monthly trend...")}</CardContent></Card>
+          </div>
+        ) : filteredInsights.length === 0 ? (
+          <Card>
+            <CardContent className="p-6">
+              {emptyChartState(insights.length === 0 ? "No signal data yet" : "No chart data for the current filters")}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Signal Strength Distribution</CardTitle>
+                <CardDescription>How filtered signals rank by conviction.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {visualData.signalStrength.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <PieChart>
+                      <Pie
+                        data={visualData.signalStrength}
+                        cx="50%"
+                        cy="50%"
+                        dataKey="value"
+                        nameKey="name"
+                        outerRadius={86}
+                        label={({ name, value }) => `${name}: ${value}`}
+                      >
+                        {visualData.signalStrength.map((_, index) => (
+                          <Cell key={`strength-${index}`} fill={chartColors[index % chartColors.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  emptyChartState("No signal strength data")
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Signals by Industry</CardTitle>
+                <CardDescription>Industries generating the most structured signals.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {visualData.industries.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={visualData.industries}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" angle={-35} textAnchor="end" height={80} />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip />
+                      <Bar dataKey="value" name="Signals" fill="#2563eb" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  emptyChartState("No industry data")
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Signals by Market</CardTitle>
+                <CardDescription>Market themes appearing most often in captured signals.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {visualData.markets.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={visualData.markets}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" angle={-35} textAnchor="end" height={80} />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip />
+                      <Bar dataKey="value" name="Signals" fill="#16a34a" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  emptyChartState("No market data")
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Signals Over Time</CardTitle>
+                <CardDescription>Monthly signal capture trend for the current filter set.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {visualData.months.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={visualData.months}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="signals" stroke="#7c3aed" strokeWidth={2} dot={{ r: 4 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  emptyChartState("No monthly signal data")
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Signal Cards</h2>
+            <p className="text-sm text-muted-foreground">
+              Recent high-conviction takeaways surfaced from the current filter set.
+            </p>
+          </div>
+          <Badge variant="secondary">{featuredSignals.length} featured</Badge>
+        </div>
+
+        {isLoading ? (
+          <Card>
+            <CardContent className="p-6">
+              {emptyChartState("Loading signal cards...")}
+            </CardContent>
+          </Card>
+        ) : featuredSignals.length === 0 ? (
+          <Card>
+            <CardContent className="p-6">
+              {emptyChartState(insights.length === 0 ? "No signal cards yet" : "No featured signals for these filters")}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-3">
+            {featuredSignals.map((insight) => (
+              <Card
+                key={insight.id}
+                className="cursor-pointer transition-colors hover:border-primary/50"
+                onClick={() => setSelectedInsight(insight)}
+                data-testid={`card-signal-${insight.id}`}
+              >
+                <CardHeader className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <Badge
+                      className={
+                        isStrongSignal(insight.signalStrength)
+                          ? "bg-green-500/10 text-green-600 border-green-500/20"
+                          : ""
+                      }
+                      variant={isStrongSignal(insight.signalStrength) ? "default" : "secondary"}
+                    >
+                      {insight.signalStrength}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{formatDate(insight.callDate)}</span>
+                  </div>
+                  <div>
+                    <CardTitle className="line-clamp-2 text-base">{insight.industry}</CardTitle>
+                    <CardDescription className="line-clamp-1">
+                      {[insight.market, insight.geography].filter(Boolean).join(" / ")}
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <p className="text-xs font-medium uppercase text-muted-foreground">Expert Takeaway</p>
+                    <p className="mt-1 line-clamp-4 text-sm">{insight.observedTrend}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase text-muted-foreground">Client Question</p>
+                    <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{insight.clientQuestion}</p>
+                  </div>
+                  {(insight.keyTags || []).length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {(insight.keyTags || []).slice(0, 4).map((tag) => (
+                        <Badge key={tag} variant="outline" className="text-xs">
+                          {tag}
+                        </Badge>
+                      ))}
+                      {(insight.keyTags || []).length > 4 && (
+                        <Badge variant="secondary" className="text-xs">
+                          +{(insight.keyTags || []).length - 4}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </section>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
