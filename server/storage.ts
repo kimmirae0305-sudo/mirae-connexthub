@@ -44,7 +44,38 @@ import {
   calculateCU,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, ilike, or, and, sql, gte, lte } from "drizzle-orm";
+import { eq, desc, ilike, or, and, sql, gte, lte, inArray } from "drizzle-orm";
+
+export interface CuLedgerFilters {
+  startDate?: Date;
+  endDate?: Date;
+  projectId?: number;
+  expertId?: number;
+  pmId?: number;
+  raId?: number;
+  clientOrganizationId?: number;
+}
+
+export interface CuLedgerRow {
+  callRecordId: number;
+  callDate: Date;
+  projectId: number;
+  projectName: string;
+  clientName: string;
+  clientOrganizationId: number | null;
+  expertId: number;
+  expertName: string;
+  pmId: number | null;
+  pmName: string | null;
+  raId: number | null;
+  raName: string | null;
+  durationMinutes: number;
+  actualDurationMinutes: number | null;
+  cuUsed: string;
+  completedAt: Date | null;
+  recordingUrl: string | null;
+  source: "Completed Call Record";
+}
 
 export interface IStorage {
   // Users (Employees)
@@ -153,6 +184,7 @@ export interface IStorage {
   getCallRecord(id: number): Promise<CallRecord | undefined>;
   getCallRecordsByProject(projectId: number): Promise<CallRecord[]>;
   getCallRecordsByExpert(expertId: number): Promise<CallRecord[]>;
+  getCuLedgerRows(filters: CuLedgerFilters): Promise<CuLedgerRow[]>;
   createCallRecord(record: InsertCallRecord): Promise<CallRecord>;
   updateCallRecord(id: number, record: Partial<InsertCallRecord>): Promise<CallRecord | undefined>;
   deleteCallRecord(id: number): Promise<boolean>;
@@ -898,6 +930,78 @@ export class DatabaseStorage implements IStorage {
       .from(callRecords)
       .where(eq(callRecords.expertId, expertId))
       .orderBy(desc(callRecords.callDate));
+  }
+
+  async getCuLedgerRows(filters: CuLedgerFilters): Promise<CuLedgerRow[]> {
+    const conditions = [eq(callRecords.status, "completed")];
+
+    if (filters.startDate) conditions.push(gte(callRecords.callDate, filters.startDate));
+    if (filters.endDate) conditions.push(lte(callRecords.callDate, filters.endDate));
+    if (filters.projectId) conditions.push(eq(callRecords.projectId, filters.projectId));
+    if (filters.expertId) conditions.push(eq(callRecords.expertId, filters.expertId));
+    if (filters.pmId) conditions.push(eq(callRecords.pmId, filters.pmId));
+    if (filters.raId) conditions.push(eq(callRecords.raId, filters.raId));
+    if (filters.clientOrganizationId) {
+      conditions.push(eq(projects.clientOrganizationId, filters.clientOrganizationId));
+    }
+
+    const rows = await db
+      .select({
+        callRecordId: callRecords.id,
+        callDate: callRecords.callDate,
+        projectId: callRecords.projectId,
+        projectName: projects.name,
+        clientName: projects.clientName,
+        clientCompany: projects.clientCompany,
+        clientOrganizationId: projects.clientOrganizationId,
+        expertId: callRecords.expertId,
+        expertName: experts.name,
+        pmId: callRecords.pmId,
+        raId: callRecords.raId,
+        durationMinutes: callRecords.durationMinutes,
+        actualDurationMinutes: callRecords.actualDurationMinutes,
+        cuUsed: callRecords.cuUsed,
+        completedAt: callRecords.completedAt,
+        recordingUrl: callRecords.recordingUrl,
+      })
+      .from(callRecords)
+      .innerJoin(projects, eq(callRecords.projectId, projects.id))
+      .innerJoin(experts, eq(callRecords.expertId, experts.id))
+      .where(and(...conditions))
+      .orderBy(desc(callRecords.callDate), desc(callRecords.completedAt));
+
+    const userIds = Array.from(
+      new Set(
+        rows
+          .flatMap((row) => [row.pmId, row.raId])
+          .filter((id): id is number => typeof id === "number")
+      )
+    );
+    const ledgerUsers = userIds.length > 0
+      ? await db.select().from(users).where(inArray(users.id, userIds))
+      : [];
+    const userById = new Map(ledgerUsers.map((user) => [user.id, user]));
+
+    return rows.map((row) => ({
+      callRecordId: row.callRecordId,
+      callDate: row.callDate,
+      projectId: row.projectId,
+      projectName: row.projectName,
+      clientName: row.clientName || row.clientCompany || "-",
+      clientOrganizationId: row.clientOrganizationId,
+      expertId: row.expertId,
+      expertName: row.expertName,
+      pmId: row.pmId,
+      pmName: row.pmId ? userById.get(row.pmId)?.fullName || userById.get(row.pmId)?.email || null : null,
+      raId: row.raId,
+      raName: row.raId ? userById.get(row.raId)?.fullName || userById.get(row.raId)?.email || null : null,
+      durationMinutes: row.durationMinutes,
+      actualDurationMinutes: row.actualDurationMinutes,
+      cuUsed: row.cuUsed,
+      completedAt: row.completedAt,
+      recordingUrl: row.recordingUrl,
+      source: "Completed Call Record",
+    }));
   }
 
   async createCallRecord(record: InsertCallRecord): Promise<CallRecord> {

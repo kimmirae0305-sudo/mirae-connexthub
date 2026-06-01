@@ -3454,6 +3454,53 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== CU LEDGER (READ-ONLY) ====================
+  app.get("/api/cu-ledger", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const parseOptionalId = (value: unknown) => {
+        if (!value) return undefined;
+        const parsed = parseInt(String(value), 10);
+        return Number.isNaN(parsed) ? undefined : parsed;
+      };
+      const parseOptionalDate = (value: unknown, endOfDay = false) => {
+        if (!value) return undefined;
+        const date = new Date(`${String(value)}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
+        return Number.isNaN(date.getTime()) ? undefined : date;
+      };
+
+      const rows = await storage.getCuLedgerRows({
+        startDate: parseOptionalDate(req.query.startDate),
+        endDate: parseOptionalDate(req.query.endDate, true),
+        projectId: parseOptionalId(req.query.projectId),
+        expertId: parseOptionalId(req.query.expertId),
+        pmId: parseOptionalId(req.query.pmId),
+        raId: parseOptionalId(req.query.raId),
+        clientOrganizationId: parseOptionalId(req.query.clientOrganizationId),
+      });
+
+      const completedCalls = rows.length;
+      const totalCUUsed = rows.reduce((sum, row) => sum + Number(row.cuUsed || 0), 0);
+      const totalCompletedMinutes = rows.reduce(
+        (sum, row) => sum + (row.actualDurationMinutes || row.durationMinutes || 0),
+        0
+      );
+      const avgCUPerCall = completedCalls > 0 ? totalCUUsed / completedCalls : 0;
+
+      res.json({
+        summary: {
+          completedCalls,
+          totalCUUsed: Math.round(totalCUUsed * 100) / 100,
+          totalCompletedMinutes,
+          avgCUPerCall: Math.round(avgCUPerCall * 100) / 100,
+        },
+        rows,
+      });
+    } catch (error) {
+      console.error("Failed to fetch CU ledger:", error);
+      res.status(500).json({ error: "Failed to fetch CU ledger" });
+    }
+  });
+
   // ==================== USAGE RECORDS (LEGACY) ====================
   app.get("/api/usage", authMiddleware, async (req, res) => {
     try {
