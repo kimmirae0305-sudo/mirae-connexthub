@@ -30,6 +30,8 @@ import Invites from "@/pages/invites";
 import RaPerformance from "@/pages/ra-performance";
 import ClientShortlist from "@/pages/client-shortlist";
 import ChangePassword from "@/pages/change-password";
+import TermsPage from "@/pages/terms";
+import PrivacyPage from "@/pages/privacy";
 import NotFound from "@/pages/not-found";
 
 function MainLayout({ children }: { children: React.ReactNode }) {
@@ -95,6 +97,12 @@ function Router() {
       </Route>
       <Route path="/invite/decide/:token">
         {(params) => <QuickInviteDecision />}
+      </Route>
+      <Route path="/terms">
+        <TermsPage />
+      </Route>
+      <Route path="/privacy">
+        <PrivacyPage />
       </Route>
       <Route path="/app/dashboard">
         <MainLayout><Dashboard /></MainLayout>
