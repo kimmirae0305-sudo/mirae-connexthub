@@ -1,31 +1,11 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { z } from "zod";
-import { Plus, Clock, CreditCard, BarChart3, Download, Trash2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { BarChart3, Clock, CreditCard, Download, FileText } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
 import {
   Select,
   SelectContent,
@@ -41,482 +21,360 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
-import { MetricCard } from "@/components/metric-card";
-import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import type { Project, Expert, UsageRecord, InsertUsageRecord } from "@shared/schema";
+import { EmptyState } from "@/components/empty-state";
+import { MetricCard } from "@/components/metric-card";
+import { useToast } from "@/hooks/use-toast";
+import type { CallRecord, Expert, Project, User } from "@shared/schema";
 
-const usageFormSchema = z.object({
-  projectId: z.coerce.number().min(1, "Please select a project"),
-  expertId: z.coerce.number().min(1, "Please select an expert"),
-  callDate: z.string().min(1, "Call date is required"),
-  durationMinutes: z.coerce.number().min(1, "Duration must be at least 1 minute"),
-  creditsUsed: z.string().min(1, "Credits used is required"),
-  notes: z.string().optional(),
-});
+type DateRangePreset = "this_month" | "last_month" | "last_30_days" | "year_to_date" | "all_time" | "custom";
 
-type UsageFormData = z.infer<typeof usageFormSchema>;
+const dateRangeLabels: Record<DateRangePreset, string> = {
+  this_month: "This Month",
+  last_month: "Last Month",
+  last_30_days: "Last 30 Days",
+  year_to_date: "Year to Date",
+  all_time: "All Time",
+  custom: "Custom Range",
+};
 
-const CREDIT_RATE = 0.5;
-const MONTHLY_CREDIT_BUDGET = 1000;
+const toDateInputValue = (date: Date) => format(date, "yyyy-MM-dd");
+
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+const endOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+
+const getPresetRange = (preset: DateRangePreset, customStart: string, customEnd: string) => {
+  const now = new Date();
+
+  if (preset === "all_time") {
+    return { start: null as Date | null, end: null as Date | null };
+  }
+
+  if (preset === "last_month") {
+    return {
+      start: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+      end: endOfDay(new Date(now.getFullYear(), now.getMonth(), 0)),
+    };
+  }
+
+  if (preset === "last_30_days") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 29);
+    return { start: startOfDay(start), end: endOfDay(now) };
+  }
+
+  if (preset === "year_to_date") {
+    return { start: new Date(now.getFullYear(), 0, 1), end: endOfDay(now) };
+  }
+
+  if (preset === "custom") {
+    return {
+      start: customStart ? startOfDay(new Date(`${customStart}T00:00:00`)) : null,
+      end: customEnd ? endOfDay(new Date(`${customEnd}T00:00:00`)) : null,
+    };
+  }
+
+  return {
+    start: new Date(now.getFullYear(), now.getMonth(), 1),
+    end: endOfDay(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+  };
+};
+
+const formatDate = (value: Date | string | null | undefined) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM dd, yyyy");
+};
+
+const formatDateTime = (value: Date | string | null | undefined) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM dd, yyyy HH:mm");
+};
+
+const csvEscape = (value: string | number | null | undefined) => {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+};
 
 export default function Usage() {
   const { toast } = useToast();
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [deletingRecord, setDeletingRecord] = useState<UsageRecord | null>(null);
+  const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
+  const [customStartDate, setCustomStartDate] = useState(() => toDateInputValue(new Date()));
+  const [customEndDate, setCustomEndDate] = useState(() => toDateInputValue(new Date()));
 
-  const { data: projects, isLoading: projectsLoading } = useQuery<Project[]>({
+  const { data: projects = [], isLoading: projectsLoading } = useQuery<Project[]>({
     queryKey: ["/api/projects"],
   });
 
-  const { data: experts, isLoading: expertsLoading } = useQuery<Expert[]>({
+  const { data: experts = [], isLoading: expertsLoading } = useQuery<Expert[]>({
     queryKey: ["/api/experts"],
   });
 
-  const { data: usageRecords, isLoading: usageLoading } = useQuery<UsageRecord[]>({
-    queryKey: ["/api/usage"],
+  const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
+    queryKey: ["/api/users"],
   });
 
-  const form = useForm<UsageFormData>({
-    resolver: zodResolver(usageFormSchema),
-    defaultValues: {
-      projectId: 0,
-      expertId: 0,
-      callDate: format(new Date(), "yyyy-MM-dd"),
-      durationMinutes: 30,
-      creditsUsed: "15",
-      notes: "",
-    },
+  const { data: callRecords = [], isLoading: callRecordsLoading } = useQuery<CallRecord[]>({
+    queryKey: ["/api/call-records"],
   });
 
-  const createMutation = useMutation({
-    mutationFn: (data: InsertUsageRecord) => apiRequest("POST", "/api/usage", data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/usage"] });
-      setIsDialogOpen(false);
-      form.reset();
-      toast({ title: "Usage record added successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to add usage record", variant: "destructive" });
-    },
-  });
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const expertById = useMemo(() => new Map(experts.map((expert) => [expert.id, expert])), [experts]);
+  const userById = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/usage/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/usage"] });
-      setDeletingRecord(null);
-      toast({ title: "Usage record deleted" });
-    },
-    onError: () => {
-      toast({ title: "Failed to delete record", variant: "destructive" });
-    },
-  });
-
-  const totalMinutes = usageRecords?.reduce((sum, r) => sum + r.durationMinutes, 0) || 0;
-  const totalCredits = usageRecords?.reduce((sum, r) => sum + Number(r.creditsUsed), 0) || 0;
-  const totalCalls = usageRecords?.length || 0;
-  const averageDuration = totalCalls > 0 ? Math.round(totalMinutes / totalCalls) : 0;
-  const creditUsagePercent = Math.min((totalCredits / MONTHLY_CREDIT_BUDGET) * 100, 100);
-
-  const getProjectName = (projectId: number) =>
-    projects?.find((p) => p.id === projectId)?.name || "Unknown";
-  const getExpertName = (expertId: number) =>
-    experts?.find((e) => e.id === expertId)?.name || "Unknown";
-
-  const handleDurationChange = (minutes: number) => {
-    form.setValue("durationMinutes", minutes);
-    form.setValue("creditsUsed", (minutes * CREDIT_RATE).toFixed(2));
+  const getProjectName = (projectId: number) => projectById.get(projectId)?.name || "Unknown";
+  const getClientName = (projectId: number) => {
+    const project = projectById.get(projectId);
+    return project?.clientName || project?.clientCompany || "-";
+  };
+  const getExpertName = (expertId: number) => expertById.get(expertId)?.name || "Unknown";
+  const getUserName = (userId: number | null | undefined) => {
+    if (!userId) return "-";
+    const user = userById.get(userId);
+    return user?.fullName || user?.email || `User #${userId}`;
   };
 
-  const onSubmit = (data: UsageFormData) => {
-    const usageData: InsertUsageRecord = {
-      ...data,
-      callDate: new Date(data.callDate),
-      notes: data.notes || null,
-    };
-    createMutation.mutate(usageData);
-  };
+  const dateRange = useMemo(
+    () => getPresetRange(datePreset, customStartDate, customEndDate),
+    [customEndDate, customStartDate, datePreset]
+  );
+
+  const ledgerRows = useMemo(() => {
+    return callRecords
+      .filter((record) => record.status === "completed")
+      .filter((record) => {
+        const callDate = new Date(record.callDate);
+        if (Number.isNaN(callDate.getTime())) return false;
+        if (dateRange.start && callDate < dateRange.start) return false;
+        if (dateRange.end && callDate > dateRange.end) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.callDate).getTime() - new Date(a.callDate).getTime());
+  }, [callRecords, dateRange.end, dateRange.start]);
+
+  const totalCompletedMinutes = ledgerRows.reduce(
+    (sum, record) => sum + (record.actualDurationMinutes || record.durationMinutes || 0),
+    0
+  );
+  const totalCuUsed = ledgerRows.reduce((sum, record) => sum + Number(record.cuUsed || 0), 0);
+  const averageCuPerCall = ledgerRows.length > 0 ? totalCuUsed / ledgerRows.length : 0;
+  const isLoading = projectsLoading || expertsLoading || usersLoading || callRecordsLoading;
 
   const exportToCSV = () => {
-    if (!usageRecords?.length) return;
+    if (!ledgerRows.length) return;
 
-    const headers = ["Date", "Project", "Expert", "Duration (min)", "Credits Used", "Notes"];
-    const rows = usageRecords.map((r) => [
-      format(new Date(r.callDate), "yyyy-MM-dd"),
-      getProjectName(r.projectId),
-      getExpertName(r.expertId),
-      r.durationMinutes,
-      r.creditsUsed,
-      r.notes || "",
+    const headers = [
+      "Call Date",
+      "Project",
+      "Client",
+      "Expert",
+      "PM",
+      "RA",
+      "Duration",
+      "CU Used",
+      "Completed At",
+      "Recording",
+      "Source",
+    ];
+    const rows = ledgerRows.map((record) => [
+      formatDate(record.callDate),
+      getProjectName(record.projectId),
+      getClientName(record.projectId),
+      getExpertName(record.expertId),
+      getUserName(record.pmId),
+      getUserName(record.raId),
+      `${record.actualDurationMinutes || record.durationMinutes || 0} min`,
+      Number(record.cuUsed || 0).toFixed(2),
+      formatDateTime(record.completedAt),
+      record.recordingUrl || "",
+      "Completed Call Record",
     ]);
 
-    const csvContent = [headers, ...rows].map((row) => row.join(",")).join("\n");
+    const csvContent = [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
     const blob = new Blob([csvContent], { type: "text/csv" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `usage-report-${format(new Date(), "yyyy-MM-dd")}.csv`;
+    a.download = `cu-ledger-${format(new Date(), "yyyy-MM-dd")}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
 
-    toast({ title: "Report exported successfully" });
+    toast({ title: "CU ledger exported successfully" });
   };
-
-  const isLoading = projectsLoading || expertsLoading || usageLoading;
 
   return (
     <div className="space-y-6 p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-foreground">Usage Tracker</h1>
+          <h1 className="text-3xl font-semibold text-foreground">CU Ledger</h1>
           <p className="text-sm text-muted-foreground">
-            Track call durations and credit consumption.
+            Read-only CU ledger generated from completed consultation records.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={exportToCSV}
-            disabled={!usageRecords?.length}
-            className="gap-2"
-            data-testid="button-export-usage"
-          >
-            <Download className="h-4 w-4" /> Export
-          </Button>
-          <Button
-            onClick={() => setIsDialogOpen(true)}
-            className="gap-2"
-            disabled={!projects?.length || !experts?.length}
-            data-testid="button-log-usage"
-          >
-            <Plus className="h-4 w-4" /> Log Usage
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          onClick={exportToCSV}
+          disabled={!ledgerRows.length}
+          className="gap-2"
+          data-testid="button-export-cu-ledger"
+        >
+          <Download className="h-4 w-4" /> Export
+        </Button>
       </div>
 
       <Alert>
-        <AlertTitle>Legacy usage tracker</AlertTitle>
+        <AlertTitle>Completed calls are the source of truth</AlertTitle>
         <AlertDescription>
-          Legacy manual usage records. Completed call records will become the source of truth for CU usage.
+          Legacy manual usage records are no longer the source of truth. CU usage is calculated from completed call records.
         </AlertDescription>
       </Alert>
 
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-medium">Date Range</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Period</label>
+              <Select value={datePreset} onValueChange={(value) => setDatePreset(value as DateRangePreset)}>
+                <SelectTrigger data-testid="select-cu-ledger-period">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(dateRangeLabels).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {datePreset === "custom" && (
+              <>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Start Date</label>
+                  <Input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(event) => setCustomStartDate(event.target.value)}
+                    data-testid="input-cu-ledger-start-date"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">End Date</label>
+                  <Input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(event) => setCustomEndDate(event.target.value)}
+                    data-testid="input-cu-ledger-end-date"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
-          title="Total Calls"
-          value={totalCalls}
-          subtitle="All time"
+          title="Completed Calls"
+          value={ledgerRows.length}
+          subtitle={dateRangeLabels[datePreset]}
           icon={BarChart3}
         />
         <MetricCard
-          title="Total Minutes"
-          value={totalMinutes.toLocaleString()}
-          subtitle={`~${Math.round(totalMinutes / 60)} hours`}
-          icon={Clock}
-        />
-        <MetricCard
-          title="Credits Used"
-          value={totalCredits.toFixed(2)}
-          subtitle={`of ${MONTHLY_CREDIT_BUDGET} budget`}
+          title="Total CU Used"
+          value={totalCuUsed.toFixed(2)}
+          subtitle="Completed calls only"
           icon={CreditCard}
         />
         <MetricCard
-          title="Avg. Duration"
-          value={`${averageDuration} min`}
-          subtitle="Per call"
+          title="Total Completed Minutes"
+          value={totalCompletedMinutes.toLocaleString()}
+          subtitle={`~${Math.round(totalCompletedMinutes / 60)} hours`}
+          icon={Clock}
+        />
+        <MetricCard
+          title="Avg. CU per Call"
+          value={averageCuPerCall.toFixed(2)}
+          subtitle="Read-only ledger"
           icon={Clock}
         />
       </div>
 
       <Card>
-        <CardHeader className="pb-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-base font-medium">Credit Usage</CardTitle>
-            <span className="font-mono text-sm text-muted-foreground">
-              {totalCredits.toFixed(2)} / {MONTHLY_CREDIT_BUDGET} CU
-            </span>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Progress value={creditUsagePercent} className="h-2" />
-          <p className="mt-2 text-xs text-muted-foreground">
-            {creditUsagePercent.toFixed(1)}% of monthly budget used
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-4">
-          <CardTitle className="text-base font-medium">Usage History</CardTitle>
+          <CardTitle className="text-base font-medium">Completed Call CU Ledger</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <DataTableSkeleton columns={6} rows={5} />
-          ) : !usageRecords?.length ? (
+            <DataTableSkeleton columns={11} rows={5} />
+          ) : !ledgerRows.length ? (
             <EmptyState
-              icon={BarChart3}
-              title="No usage records"
-              description="Log your first call to start tracking usage."
-              action={
-                projects?.length && experts?.length ? (
-                  <Button onClick={() => setIsDialogOpen(true)} className="gap-2" data-testid="button-log-first-usage">
-                    <Plus className="h-4 w-4" /> Log Usage
-                  </Button>
-                ) : undefined
-              }
+              icon={FileText}
+              title="No completed call records for this period."
+              description="CU usage will appear here after consultations are completed."
             />
           ) : (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-xs font-semibold uppercase">Date</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Call Date</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
-                    <TableHead className="text-right text-xs font-semibold uppercase">
-                      Duration
-                    </TableHead>
-                    <TableHead className="text-right text-xs font-semibold uppercase">
-                      Credits
-                    </TableHead>
-                    <TableHead className="text-right text-xs font-semibold uppercase">
-                      Actions
-                    </TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">PM</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">RA</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase">Duration</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase">CU Used</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Completed At</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Recording</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Source</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {usageRecords
-                    .sort((a, b) => new Date(b.callDate).getTime() - new Date(a.callDate).getTime())
-                    .map((record) => (
-                      <TableRow key={record.id} data-testid={`row-usage-${record.id}`}>
-                        <TableCell className="font-mono text-sm">
-                          {format(new Date(record.callDate), "MMM dd, yyyy")}
-                        </TableCell>
-                        <TableCell>{getProjectName(record.projectId)}</TableCell>
-                        <TableCell>{getExpertName(record.expertId)}</TableCell>
-                        <TableCell className="text-right font-mono">
-                          {record.durationMinutes} min
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {Number(record.creditsUsed).toFixed(2)} CU
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setDeletingRecord(record)}
-                            data-testid={`button-delete-usage-${record.id}`}
+                  {ledgerRows.map((record) => (
+                    <TableRow key={record.id} data-testid={`row-cu-ledger-${record.id}`}>
+                      <TableCell className="font-mono text-sm">{formatDate(record.callDate)}</TableCell>
+                      <TableCell>{getProjectName(record.projectId)}</TableCell>
+                      <TableCell>{getClientName(record.projectId)}</TableCell>
+                      <TableCell>{getExpertName(record.expertId)}</TableCell>
+                      <TableCell>{getUserName(record.pmId)}</TableCell>
+                      <TableCell>{getUserName(record.raId)}</TableCell>
+                      <TableCell className="text-right font-mono">
+                        {record.actualDurationMinutes || record.durationMinutes || 0} min
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {Number(record.cuUsed || 0).toFixed(2)}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">{formatDateTime(record.completedAt)}</TableCell>
+                      <TableCell>
+                        {record.recordingUrl ? (
+                          <a
+                            href={record.recordingUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline"
                           >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                            Open
+                          </a>
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
+                      <TableCell>Completed Call Record</TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>
           )}
         </CardContent>
       </Card>
-
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Log Usage</DialogTitle>
-            <DialogDescription>Record a call session with an expert.</DialogDescription>
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="projectId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Project *</FormLabel>
-                    <Select
-                      onValueChange={(val) => field.onChange(Number(val))}
-                      value={field.value?.toString() || ""}
-                    >
-                      <FormControl>
-                        <SelectTrigger data-testid="select-usage-project">
-                          <SelectValue placeholder="Select a project" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {projects?.map((project) => (
-                          <SelectItem key={project.id} value={project.id.toString()}>
-                            {project.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="expertId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Expert *</FormLabel>
-                    <Select
-                      onValueChange={(val) => field.onChange(Number(val))}
-                      value={field.value?.toString() || ""}
-                    >
-                      <FormControl>
-                        <SelectTrigger data-testid="select-usage-expert">
-                          <SelectValue placeholder="Select an expert" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {experts?.map((expert) => (
-                          <SelectItem key={expert.id} value={expert.id.toString()}>
-                            {expert.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="callDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Call Date *</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} data-testid="input-call-date" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="durationMinutes"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Duration (minutes) *</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min={1}
-                          {...field}
-                          onChange={(e) => handleDurationChange(Number(e.target.value))}
-                          data-testid="input-duration"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="creditsUsed"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Credits Used *</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        {...field}
-                        data-testid="input-credits"
-                      />
-                    </FormControl>
-                    <p className="text-xs text-muted-foreground">
-                      Auto-calculated at {CREDIT_RATE} CU per minute
-                    </p>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Optional notes about the call..."
-                        className="resize-none"
-                        rows={2}
-                        {...field}
-                        data-testid="input-usage-notes"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsDialogOpen(false)}
-                  data-testid="button-cancel-usage"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={createMutation.isPending}
-                  data-testid="button-save-usage"
-                >
-                  {createMutation.isPending ? "Saving..." : "Log Usage"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={!!deletingRecord} onOpenChange={() => setDeletingRecord(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Usage Record</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this usage record? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-cancel-delete-usage">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => deletingRecord && deleteMutation.mutate(deletingRecord.id)}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              data-testid="button-confirm-delete-usage"
-            >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
