@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams } from "wouter";
-import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle, Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, Check, CheckCircle, ChevronsUpDown, Loader2, Plus, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -76,13 +77,50 @@ const availabilityBlocks = [
 ];
 
 const timezones = [
-  "Asia/Seoul",
   "America/Sao_Paulo",
   "America/New_York",
+  "America/Mexico_City",
+  "America/Bogota",
+  "America/Santiago",
+  "America/Argentina/Buenos_Aires",
   "Europe/London",
-  "Europe/Paris",
+  "Europe/Madrid",
+  "Europe/Lisbon",
+  "Asia/Seoul",
+  "Asia/Singapore",
   "UTC",
 ];
+
+const countries = [
+  "Brazil",
+  "United States",
+  "South Korea",
+  "United Kingdom",
+  "Spain",
+  "Portugal",
+  "Mexico",
+  "Chile",
+  "Colombia",
+  "Argentina",
+  "Peru",
+  "Singapore",
+  "Canada",
+  "France",
+  "Germany",
+  "Italy",
+  "Japan",
+  "India",
+  "Australia",
+  "United Arab Emirates",
+];
+
+const getBrowserTimezone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
+  } catch {
+    return "America/Sao_Paulo";
+  }
+};
 
 const languageLabels: Record<QuickInviteLanguage, string> = {
   en: "English",
@@ -93,6 +131,7 @@ const languageLabels: Record<QuickInviteLanguage, string> = {
 export default function QuickInviteOnboarding() {
   const { token } = useParams<{ token: string }>();
   const { toast } = useToast();
+  const defaultTimezone = getBrowserTimezone();
   const [language, setLanguage] = useState<QuickInviteLanguage>(() => {
     const params = new URLSearchParams(window.location.search);
     return normalizeQuickInviteLanguage(params.get("lang"));
@@ -110,9 +149,10 @@ export default function QuickInviteOnboarding() {
     city: "",
     currentTitle: "",
     currentCompany: "",
+    timezone: timezones.includes(defaultTimezone) ? defaultTimezone : "America/Sao_Paulo",
     expectedHourlyRateUsd: "",
     workHistory: [emptyWorkHistoryItem()],
-    availabilityTimezone: "Asia/Seoul",
+    availabilityTimezone: timezones.includes(defaultTimezone) ? defaultTimezone : "America/Sao_Paulo",
     availabilitySlots: [] as string[],
     availabilityNotes: "",
     conflictChoice: "" as "" | "yes" | "no",
@@ -161,11 +201,18 @@ export default function QuickInviteOnboarding() {
         formData.conflictChoice === "no"
           ? "No conflict declared"
           : `Conflict declared: ${formData.conflictDetails.trim()}`;
+      const primaryWorkHistory = formData.workHistory.find(
+        (item) => item.company.trim() && item.jobTitle.trim()
+      );
       const res = await fetch(resolveApiUrl(`/api/quick-invite/${token}/onboard`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
+          city: "Not provided",
+          timezone: formData.timezone,
+          currentTitle: primaryWorkHistory?.jobTitle.trim() || "Not provided",
+          currentCompany: primaryWorkHistory?.company.trim() || "Not provided",
           availability,
           conflictCheck,
           consentLanguage: language,
@@ -228,6 +275,29 @@ export default function QuickInviteOnboarding() {
     }));
   };
 
+  const handleCountryChange = (country: string) => {
+    setFormData((current) => ({
+      ...current,
+      country,
+      timezone:
+        country === "Brazil" && !current.timezone
+          ? "America/Sao_Paulo"
+          : current.timezone,
+      availabilityTimezone:
+        country === "Brazil" && !current.availabilityTimezone
+          ? "America/Sao_Paulo"
+          : current.availabilityTimezone,
+    }));
+  };
+
+  const handleTimezoneChange = (timezone: string) => {
+    setFormData((current) => ({
+      ...current,
+      timezone,
+      availabilityTimezone: timezone,
+    }));
+  };
+
   const buildAvailabilitySummary = () => {
     const groupedSlots = weekDays
       .map((day) => {
@@ -249,9 +319,7 @@ export default function QuickInviteOnboarding() {
     formData.email.trim() &&
     formData.phoneWhatsapp.trim() &&
     formData.country.trim() &&
-    formData.city.trim() &&
-    formData.currentTitle.trim() &&
-    formData.currentCompany.trim() &&
+    formData.timezone.trim() &&
     Number(formData.expectedHourlyRateUsd) > 0 &&
     formData.workHistory.length > 0 &&
     formData.workHistory.every((item) => item.company.trim() && item.jobTitle.trim());
@@ -438,38 +506,24 @@ export default function QuickInviteOnboarding() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="country">{t.country}</Label>
-                  <Input
-                    id="country"
+                  <SearchableSelect
                     value={formData.country}
-                    onChange={(event) => setFormData({ ...formData, country: event.target.value })}
-                    data-testid="input-country"
+                    options={countries}
+                    placeholder={t.country}
+                    searchPlaceholder="Search country..."
+                    onChange={handleCountryChange}
+                    dataTestId="select-country"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="city">{t.city}</Label>
-                  <Input
-                    id="city"
-                    value={formData.city}
-                    onChange={(event) => setFormData({ ...formData, city: event.target.value })}
-                    data-testid="input-city"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="currentTitle">{t.currentTitle}</Label>
-                  <Input
-                    id="currentTitle"
-                    value={formData.currentTitle}
-                    onChange={(event) => setFormData({ ...formData, currentTitle: event.target.value })}
-                    data-testid="input-current-title"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="currentCompany">{t.currentCompany}</Label>
-                  <Input
-                    id="currentCompany"
-                    value={formData.currentCompany}
-                    onChange={(event) => setFormData({ ...formData, currentCompany: event.target.value })}
-                    data-testid="input-current-company"
+                  <Label htmlFor="timezone">{t.timezone}</Label>
+                  <SearchableSelect
+                    value={formData.timezone}
+                    options={timezones}
+                    placeholder={t.timezone}
+                    searchPlaceholder="Search timezone..."
+                    onChange={handleTimezoneChange}
+                    dataTestId="select-timezone"
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
@@ -752,6 +806,79 @@ export default function QuickInviteOnboarding() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function SearchableSelect({
+  value,
+  options,
+  placeholder,
+  searchPlaceholder,
+  onChange,
+  dataTestId,
+}: {
+  value: string;
+  options: string[];
+  placeholder: string;
+  searchPlaceholder: string;
+  onChange: (value: string) => void;
+  dataTestId: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const filteredOptions = options.filter((option) =>
+    option.toLowerCase().includes(query.trim().toLowerCase())
+  );
+
+  const selectOption = (option: string) => {
+    onChange(option);
+    setQuery("");
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full justify-between"
+        onClick={() => setIsOpen((current) => !current)}
+        data-testid={dataTestId}
+      >
+        <span className={cn("truncate", !value && "text-muted-foreground")}>
+          {value || placeholder}
+        </span>
+        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+      {isOpen && (
+        <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover p-2 shadow-md">
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={searchPlaceholder}
+            className="mb-2"
+            data-testid={`${dataTestId}-search`}
+          />
+          <div className="max-h-56 overflow-y-auto">
+            {filteredOptions.length === 0 ? (
+              <p className="px-2 py-3 text-sm text-muted-foreground">No results found.</p>
+            ) : (
+              filteredOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-sm px-2 py-2 text-left text-sm hover:bg-muted"
+                  onClick={() => selectOption(option)}
+                >
+                  <span>{option}</span>
+                  {value === option && <Check className="h-4 w-4 text-primary" />}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
