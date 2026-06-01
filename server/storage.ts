@@ -160,6 +160,8 @@ export interface IStorage {
   // Insights
   getInsights(): Promise<Insight[]>;
   getInsight(id: number): Promise<Insight | undefined>;
+  getInsightsByProjectId(projectId: number): Promise<Insight[]>;
+  getInsightByCallRecordId(callRecordId: number): Promise<Insight | undefined>;
   createInsight(insight: InsertInsight): Promise<Insight>;
 
   // Expert Invitation Links
@@ -953,6 +955,25 @@ export class DatabaseStorage implements IStorage {
 
   async getInsight(id: number): Promise<Insight | undefined> {
     const [insight] = await db.select().from(insights).where(eq(insights.id, id));
+    return insight || undefined;
+  }
+
+  async getInsightsByProjectId(projectId: number): Promise<Insight[]> {
+    const rows = await db
+      .select({ insight: insights })
+      .from(insights)
+      .innerJoin(callRecords, eq(insights.callRecordId, callRecords.id))
+      .where(eq(callRecords.projectId, projectId))
+      .orderBy(desc(insights.callDate), desc(insights.createdAt));
+    return rows.map((row) => row.insight);
+  }
+
+  async getInsightByCallRecordId(callRecordId: number): Promise<Insight | undefined> {
+    const [insight] = await db
+      .select()
+      .from(insights)
+      .where(eq(insights.callRecordId, callRecordId))
+      .limit(1);
     return insight || undefined;
   }
 

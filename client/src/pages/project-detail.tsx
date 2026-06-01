@@ -264,7 +264,9 @@ export default function ProjectDetail() {
   
   // Auth for role-based UI
   const { user } = useAuth();
-  const isRA = user?.role === "ra" || user?.role?.toLowerCase() === "research associate";
+  const normalizedUserRole = user?.role?.toLowerCase();
+  const isRA = normalizedUserRole === "ra" || normalizedUserRole === "research associate";
+  const canCreateProjectInsight = normalizedUserRole === "admin" || normalizedUserRole === "pm";
 
   useEffect(() => {
     if (searchCompanyScope === "current") {
@@ -411,7 +413,17 @@ export default function ProjectDetail() {
   });
 
   const { data: insights = [] } = useQuery<Insight[]>({
-    queryKey: ["/api/insights"],
+    queryKey: ["/api/insights", projectId],
+    queryFn: async () => {
+      const res = await fetch(resolveApiUrl(`/api/insights?projectId=${projectId}`), {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("authToken")}`,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to fetch project insights");
+      return res.json();
+    },
+    enabled: !!projectId && canCreateProjectInsight,
   });
 
   const insightByCallRecordId = useMemo(() => {
@@ -944,7 +956,7 @@ export default function ProjectDetail() {
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/insights"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/insights", projectId] });
       queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
       setSelectedInsightCallRecord(null);
@@ -3316,7 +3328,7 @@ export default function ProjectDetail() {
                               {record.notes && (
                                 <p className="line-clamp-2 text-muted-foreground">{record.notes}</p>
                               )}
-                              {record.status === "completed" && (
+                              {record.status === "completed" && canCreateProjectInsight && (
                                 getInsightForCall(record) ? (
                                   <p className="text-xs text-emerald-600">Insight captured</p>
                                 ) : (
@@ -3370,7 +3382,7 @@ export default function ProjectDetail() {
                                     Mark Completed
                                   </DropdownMenuItem>
                                 )}
-                                {record.status === "completed" && !getInsightForCall(record) && (
+                                {record.status === "completed" && !getInsightForCall(record) && canCreateProjectInsight && (
                                   <DropdownMenuItem
                                     onClick={() => openCreateInsightModal(record)}
                                     data-testid={`button-create-insight-${record.id}`}
