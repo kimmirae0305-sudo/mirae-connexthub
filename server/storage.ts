@@ -77,6 +77,30 @@ export interface CuLedgerRow {
   source: "Completed Call Record";
 }
 
+export interface OperationsAnalyticsFilters {
+  startDate?: Date;
+  endDate?: Date;
+  granularity?: "month" | "week" | "day";
+}
+
+export interface OperationsAnalytics {
+  summary: {
+    activeProjects: number;
+    completedCalls: number;
+    totalCUUsed: number;
+    totalCompletedMinutes: number;
+    avgCUPerCall: number;
+  };
+  charts: {
+    callsOverTime: Array<{ period: string; completedCalls: number; cuUsed: number }>;
+    cuByIndustry: Array<{ industry: string; cuUsed: number; completedCalls: number }>;
+    cuByProject: Array<{ projectId: number; projectName: string; cuUsed: number; completedCalls: number }>;
+    completedCallsByExpert: Array<{ expertId: number; expertName: string; completedCalls: number; cuUsed: number }>;
+    completedCallsByPM: Array<{ pmId: number | null; pmName: string; completedCalls: number; cuUsed: number }>;
+    projectPipeline: Array<{ status: string; count: number }>;
+  };
+}
+
 export interface IStorage {
   // Users (Employees)
   getUsers(): Promise<User[]>;
@@ -185,6 +209,7 @@ export interface IStorage {
   getCallRecordsByProject(projectId: number): Promise<CallRecord[]>;
   getCallRecordsByExpert(expertId: number): Promise<CallRecord[]>;
   getCuLedgerRows(filters: CuLedgerFilters): Promise<CuLedgerRow[]>;
+  getOperationsAnalytics(filters: OperationsAnalyticsFilters): Promise<OperationsAnalytics>;
   createCallRecord(record: InsertCallRecord): Promise<CallRecord>;
   updateCallRecord(id: number, record: Partial<InsertCallRecord>): Promise<CallRecord | undefined>;
   deleteCallRecord(id: number): Promise<boolean>;
@@ -1002,6 +1027,177 @@ export class DatabaseStorage implements IStorage {
       recordingUrl: row.recordingUrl,
       source: "Completed Call Record",
     }));
+  }
+
+  async getOperationsAnalytics(filters: OperationsAnalyticsFilters): Promise<OperationsAnalytics> {
+    const granularity = filters.granularity || "month";
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const formatPeriod = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+
+      if (granularity === "day") return `${year}-${month}-${day}`;
+      if (granularity === "week") {
+        const start = new Date(date);
+        start.setHours(0, 0, 0, 0);
+        start.setDate(start.getDate() - start.getDay());
+        const startMonth = String(start.getMonth() + 1).padStart(2, "0");
+        const startDay = String(start.getDate()).padStart(2, "0");
+        return `${start.getFullYear()}-${startMonth}-${startDay}`;
+      }
+      return `${year}-${month}`;
+    };
+
+    const allProjects = await db.select().from(projects);
+    const activeProjects = allProjects.filter(
+      (project) => project.status !== "completed" && project.status !== "cancelled"
+    ).length;
+    const projectPipelineMap = new Map<string, number>();
+    allProjects.forEach((project) => {
+      projectPipelineMap.set(project.status, (projectPipelineMap.get(project.status) || 0) + 1);
+    });
+
+    const conditions = [eq(callRecords.status, "completed")];
+    if (filters.startDate) conditions.push(gte(callRecords.callDate, filters.startDate));
+    if (filters.endDate) conditions.push(lte(callRecords.callDate, filters.endDate));
+
+    const completedRows = await db
+      .select({
+        callRecordId: callRecords.id,
+        callDate: callRecords.callDate,
+        projectId: callRecords.projectId,
+        projectName: projects.name,
+        industry: projects.industry,
+        expertId: callRecords.expertId,
+        expertName: experts.name,
+        pmId: callRecords.pmId,
+        durationMinutes: callRecords.durationMinutes,
+        actualDurationMinutes: callRecords.actualDurationMinutes,
+        cuUsed: callRecords.cuUsed,
+      })
+      .from(callRecords)
+      .innerJoin(projects, eq(callRecords.projectId, projects.id))
+      .innerJoin(experts, eq(callRecords.expertId, experts.id))
+      .where(and(...conditions));
+
+    const pmIds = Array.from(
+      new Set(completedRows.map((row) => row.pmId).filter((id): id is number => typeof id === "number"))
+    );
+    const pmUsers = pmIds.length > 0
+      ? await db.select().from(users).where(inArray(users.id, pmIds))
+      : [];
+    const pmById = new Map(pmUsers.map((user) => [user.id, user]));
+
+    const callsOverTimeMap = new Map<string, { completedCalls: number; cuUsed: number }>();
+    const cuByIndustryMap = new Map<string, { cuUsed: number; completedCalls: number }>();
+    const cuByProjectMap = new Map<number, { projectId: number; projectName: string; cuUsed: number; completedCalls: number }>();
+    const callsByExpertMap = new Map<number, { expertId: number; expertName: string; completedCalls: number; cuUsed: number }>();
+    const callsByPmMap = new Map<string, { pmId: number | null; pmName: string; completedCalls: number; cuUsed: number }>();
+
+    let totalCUUsed = 0;
+    let totalCompletedMinutes = 0;
+
+    completedRows.forEach((row) => {
+      const cuUsed = Number(row.cuUsed || 0);
+      const duration = row.actualDurationMinutes || row.durationMinutes || 0;
+      totalCUUsed += cuUsed;
+      totalCompletedMinutes += duration;
+
+      const period = formatPeriod(new Date(row.callDate));
+      const periodBucket = callsOverTimeMap.get(period) || { completedCalls: 0, cuUsed: 0 };
+      periodBucket.completedCalls += 1;
+      periodBucket.cuUsed += cuUsed;
+      callsOverTimeMap.set(period, periodBucket);
+
+      const industry = row.industry || "Unspecified";
+      const industryBucket = cuByIndustryMap.get(industry) || { completedCalls: 0, cuUsed: 0 };
+      industryBucket.completedCalls += 1;
+      industryBucket.cuUsed += cuUsed;
+      cuByIndustryMap.set(industry, industryBucket);
+
+      const projectBucket = cuByProjectMap.get(row.projectId) || {
+        projectId: row.projectId,
+        projectName: row.projectName,
+        completedCalls: 0,
+        cuUsed: 0,
+      };
+      projectBucket.completedCalls += 1;
+      projectBucket.cuUsed += cuUsed;
+      cuByProjectMap.set(row.projectId, projectBucket);
+
+      const expertBucket = callsByExpertMap.get(row.expertId) || {
+        expertId: row.expertId,
+        expertName: row.expertName,
+        completedCalls: 0,
+        cuUsed: 0,
+      };
+      expertBucket.completedCalls += 1;
+      expertBucket.cuUsed += cuUsed;
+      callsByExpertMap.set(row.expertId, expertBucket);
+
+      const pmKey = row.pmId ? String(row.pmId) : "unassigned";
+      const pm = row.pmId ? pmById.get(row.pmId) : null;
+      const pmBucket = callsByPmMap.get(pmKey) || {
+        pmId: row.pmId,
+        pmName: pm?.fullName || pm?.email || "Unassigned",
+        completedCalls: 0,
+        cuUsed: 0,
+      };
+      pmBucket.completedCalls += 1;
+      pmBucket.cuUsed += cuUsed;
+      callsByPmMap.set(pmKey, pmBucket);
+    });
+
+    const sortByCu = <T extends { cuUsed: number }>(items: T[]) =>
+      items.sort((a, b) => b.cuUsed - a.cuUsed);
+
+    return {
+      summary: {
+        activeProjects,
+        completedCalls: completedRows.length,
+        totalCUUsed: round(totalCUUsed),
+        totalCompletedMinutes,
+        avgCUPerCall: completedRows.length > 0 ? round(totalCUUsed / completedRows.length) : 0,
+      },
+      charts: {
+        callsOverTime: Array.from(callsOverTimeMap.entries())
+          .map(([period, data]) => ({
+            period,
+            completedCalls: data.completedCalls,
+            cuUsed: round(data.cuUsed),
+          }))
+          .sort((a, b) => a.period.localeCompare(b.period)),
+        cuByIndustry: sortByCu(
+          Array.from(cuByIndustryMap.entries()).map(([industry, data]) => ({
+            industry,
+            completedCalls: data.completedCalls,
+            cuUsed: round(data.cuUsed),
+          }))
+        ),
+        cuByProject: sortByCu(
+          Array.from(cuByProjectMap.values()).map((data) => ({
+            ...data,
+            cuUsed: round(data.cuUsed),
+          }))
+        ),
+        completedCallsByExpert: sortByCu(
+          Array.from(callsByExpertMap.values()).map((data) => ({
+            ...data,
+            cuUsed: round(data.cuUsed),
+          }))
+        ).slice(0, 10),
+        completedCallsByPM: sortByCu(
+          Array.from(callsByPmMap.values()).map((data) => ({
+            ...data,
+            cuUsed: round(data.cuUsed),
+          }))
+        ).slice(0, 10),
+        projectPipeline: Array.from(projectPipelineMap.entries())
+          .map(([status, count]) => ({ status, count }))
+          .sort((a, b) => a.status.localeCompare(b.status)),
+      },
+    };
   }
 
   async createCallRecord(record: InsertCallRecord): Promise<CallRecord> {

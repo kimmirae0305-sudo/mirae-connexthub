@@ -1,5 +1,15 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   BarChart,
@@ -16,123 +26,136 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { TrendingUp, Users, Briefcase, DollarSign } from "lucide-react";
-import type { Project, Expert, UsageRecord } from "@shared/schema";
+import { BarChart3, Briefcase, Clock, CreditCard, PhoneCall } from "lucide-react";
+
+type DateRangePreset = "this_month" | "last_month" | "last_30_days" | "year_to_date" | "all_time" | "custom";
+
+interface OperationsAnalytics {
+  summary: {
+    activeProjects: number;
+    completedCalls: number;
+    totalCUUsed: number;
+    totalCompletedMinutes: number;
+    avgCUPerCall: number;
+  };
+  charts: {
+    callsOverTime: Array<{ period: string; completedCalls: number; cuUsed: number }>;
+    cuByIndustry: Array<{ industry: string; cuUsed: number; completedCalls: number }>;
+    cuByProject: Array<{ projectId: number; projectName: string; cuUsed: number; completedCalls: number }>;
+    completedCallsByExpert: Array<{ expertId: number; expertName: string; completedCalls: number; cuUsed: number }>;
+    completedCallsByPM: Array<{ pmId: number | null; pmName: string; completedCalls: number; cuUsed: number }>;
+    projectPipeline: Array<{ status: string; count: number }>;
+  };
+}
+
+const dateRangeLabels: Record<DateRangePreset, string> = {
+  this_month: "This Month",
+  last_month: "Last Month",
+  last_30_days: "Last 30 Days",
+  year_to_date: "Year to Date",
+  all_time: "All Time",
+  custom: "Custom Range",
+};
+
+const COLORS = ["#3b82f6", "#ef4444", "#8b5cf6", "#f59e0b", "#10b981", "#06b6d4"];
+
+const toDateInputValue = (date: Date) => format(date, "yyyy-MM-dd");
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+const endOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+const toQueryDate = (date: Date | null) => (date ? format(date, "yyyy-MM-dd") : "");
+
+const getPresetRange = (preset: DateRangePreset, customStart: string, customEnd: string) => {
+  const now = new Date();
+
+  if (preset === "all_time") return { start: null as Date | null, end: null as Date | null };
+  if (preset === "last_month") {
+    return {
+      start: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+      end: endOfDay(new Date(now.getFullYear(), now.getMonth(), 0)),
+    };
+  }
+  if (preset === "last_30_days") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 29);
+    return { start: startOfDay(start), end: endOfDay(now) };
+  }
+  if (preset === "year_to_date") {
+    return { start: new Date(now.getFullYear(), 0, 1), end: endOfDay(now) };
+  }
+  if (preset === "custom") {
+    return {
+      start: customStart ? startOfDay(new Date(`${customStart}T00:00:00`)) : null,
+      end: customEnd ? endOfDay(new Date(`${customEnd}T00:00:00`)) : null,
+    };
+  }
+
+  return {
+    start: new Date(now.getFullYear(), now.getMonth(), 1),
+    end: endOfDay(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+  };
+};
+
+const formatStatus = (status: string) =>
+  status
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+const EmptyChart = ({ label }: { label: string }) => (
+  <div className="flex h-[300px] items-center justify-center text-muted-foreground">{label}</div>
+);
+
+const SkeletonCard = () => (
+  <Card>
+    <CardHeader>
+      <Skeleton className="h-5 w-32" />
+    </CardHeader>
+    <CardContent>
+      <Skeleton className="h-64 w-full" />
+    </CardContent>
+  </Card>
+);
 
 export default function Analytics() {
-  const { data: projects, isLoading: projectsLoading } = useQuery<Project[]>({
-    queryKey: ["/api/projects"],
+  const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
+  const [customStartDate, setCustomStartDate] = useState(() => toDateInputValue(new Date()));
+  const [customEndDate, setCustomEndDate] = useState(() => toDateInputValue(new Date()));
+
+  const dateRange = useMemo(
+    () => getPresetRange(datePreset, customStartDate, customEndDate),
+    [customEndDate, customStartDate, datePreset]
+  );
+
+  const analyticsUrl = useMemo(() => {
+    const params = new URLSearchParams({ granularity: "month" });
+    if (dateRange.start) params.set("startDate", toQueryDate(dateRange.start));
+    if (dateRange.end) params.set("endDate", toQueryDate(dateRange.end));
+    return `/api/analytics/operations?${params.toString()}`;
+  }, [dateRange.end, dateRange.start]);
+
+  const { data, isLoading } = useQuery<OperationsAnalytics>({
+    queryKey: [analyticsUrl],
   });
-  const { data: experts, isLoading: expertsLoading } = useQuery<Expert[]>({
-    queryKey: ["/api/experts"],
-  });
-  const { data: usageRecords, isLoading: usageLoading } = useQuery<UsageRecord[]>({
-    queryKey: ["/api/usage"],
-  });
 
-  const isLoading = projectsLoading || expertsLoading || usageLoading;
-
-  // Calculate metrics
-  const totalProjects = projects?.length || 0;
-  const totalExperts = experts?.length || 0;
-  const totalCallMinutes =
-    usageRecords?.reduce((sum, record) => sum + record.durationMinutes, 0) || 0;
-  const totalCreditsUsed =
-    usageRecords?.reduce((sum, record) => sum + Number(record.creditsUsed), 0) || 0;
-
-  // Project pipeline by status
-  const projectPipelineData = (projects || []).reduce(
-    (acc: Record<string, number>, project) => {
-      acc[project.status] = (acc[project.status] || 0) + 1;
-      return acc;
-    },
-    {}
-  );
-
-  const projectStatusChartData = Object.entries(projectPipelineData).map(
-    ([status, count]) => ({
-      name: status.charAt(0).toUpperCase() + status.slice(1),
-      value: count,
-      status,
-    })
-  );
-
-  // Expert utilization by industry
-  const expertByIndustry = (experts || []).reduce(
-    (acc: Record<string, number>, expert) => {
-      acc[expert.industry] = (acc[expert.industry] || 0) + 1;
-      return acc;
-    },
-    {}
-  );
-
-  const expertUtilizationData = Object.entries(expertByIndustry)
-    .map(([industry, count]) => ({
-      name: industry,
-      experts: count,
-    }))
-    .sort((a, b) => b.experts - a.experts)
-    .slice(0, 8);
-
-  // Revenue metrics by expert
-  const revenueByExpert = (usageRecords || []).reduce(
-    (acc: Record<string, { calls: number; revenue: number }>, record) => {
-      const expertId = record.expertId;
-      const expert = experts?.find((e) => e.id === expertId);
-      const name = expert?.name || `Expert ${expertId}`;
-
-      if (!acc[name]) {
-        acc[name] = { calls: 0, revenue: 0 };
-      }
-      acc[name].calls += 1;
-      acc[name].revenue += Number(record.creditsUsed);
-      return acc;
-    },
-    {}
-  );
-
-  const revenueData = Object.entries(revenueByExpert)
-    .map(([name, data]) => ({
-      name,
-      calls: data.calls,
-      revenue: data.revenue,
-    }))
-    .sort((a, b) => b.revenue - a.revenue)
-    .slice(0, 6);
-
-  // Call volume trend by day
-  const callVolumeByDay = (usageRecords || []).reduce(
-    (acc: Record<string, number>, record) => {
-      const date = new Date(record.callDate).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-      });
-      acc[date] = (acc[date] || 0) + 1;
-      return acc;
-    },
-    {}
-  );
-
-  const callVolumeData = Object.entries(callVolumeByDay)
-    .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
-    .slice(-14)
-    .map(([date, count]) => ({
-      date,
-      calls: count,
-    }));
-
-  const COLORS = ["#3b82f6", "#ef4444", "#8b5cf6", "#f59e0b", "#10b981", "#06b6d4"];
-
-  const SkeletonCard = () => (
-    <Card>
-      <CardHeader>
-        <Skeleton className="h-5 w-20" />
-      </CardHeader>
-      <CardContent>
-        <Skeleton className="h-64 w-full" />
-      </CardContent>
-    </Card>
-  );
+  const summary = data?.summary || {
+    activeProjects: 0,
+    completedCalls: 0,
+    totalCUUsed: 0,
+    totalCompletedMinutes: 0,
+    avgCUPerCall: 0,
+  };
+  const charts = data?.charts || {
+    callsOverTime: [],
+    cuByIndustry: [],
+    cuByProject: [],
+    completedCallsByExpert: [],
+    completedCallsByPM: [],
+    projectPipeline: [],
+  };
+  const projectPipelineData = charts.projectPipeline.map((item) => ({
+    name: formatStatus(item.status),
+    value: item.count,
+  }));
 
   if (isLoading) {
     return (
@@ -140,24 +163,24 @@ export default function Analytics() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Analytics</h1>
           <p className="text-sm text-muted-foreground">
-            View detailed metrics and performance insights.
+            Backend-aggregated operational metrics from completed consultation records.
           </p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i}>
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Card key={index}>
               <CardHeader>
-                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-28" />
               </CardHeader>
               <CardContent>
-                <Skeleton className="h-8 w-16" />
+                <Skeleton className="h-8 w-20" />
               </CardContent>
             </Card>
           ))}
         </div>
         <div className="grid gap-6 lg:grid-cols-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <SkeletonCard key={i} />
+          {Array.from({ length: 4 }).map((_, index) => (
+            <SkeletonCard key={index} />
           ))}
         </div>
       </div>
@@ -169,9 +192,57 @@ export default function Analytics() {
       <div>
         <h1 className="text-3xl font-semibold text-foreground">Analytics</h1>
         <p className="text-sm text-muted-foreground">
-          View detailed metrics and performance insights.
+          Backend-aggregated operational metrics from completed consultation records.
         </p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-medium">Date Range</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Period</label>
+              <Select value={datePreset} onValueChange={(value) => setDatePreset(value as DateRangePreset)}>
+                <SelectTrigger data-testid="select-analytics-period">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(dateRangeLabels).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {datePreset === "custom" && (
+              <>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Start Date</label>
+                  <Input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(event) => setCustomStartDate(event.target.value)}
+                    data-testid="input-analytics-start-date"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">End Date</label>
+                  <Input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(event) => setCustomEndDate(event.target.value)}
+                    data-testid="input-analytics-end-date"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -180,45 +251,43 @@ export default function Analytics() {
             <Briefcase className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalProjects}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {projects?.filter((p) => p.status !== "completed").length || 0} in progress
+            <div className="text-2xl font-bold">{summary.activeProjects}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Current non-closed project load</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Completed Calls</CardTitle>
+            <PhoneCall className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono">{summary.completedCalls}</div>
+            <p className="mt-1 text-xs text-muted-foreground">{dateRangeLabels[datePreset]}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total CU Used</CardTitle>
+            <CreditCard className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono">{summary.totalCUUsed.toFixed(2)}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Completed calls only</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Avg. CU per Call</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold font-mono">{summary.avgCUPerCall.toFixed(2)}</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {summary.totalCompletedMinutes.toLocaleString()} completed minutes
             </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Expert Network</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalExperts}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {experts?.filter((e) => e.status === "available").length || 0} available
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Call Time</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold font-mono">{totalCallMinutes}</div>
-            <p className="text-xs text-muted-foreground mt-1">minutes</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Credits</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold font-mono">{totalCreditsUsed.toFixed(0)}</div>
-            <p className="text-xs text-muted-foreground mt-1">consumed</p>
           </CardContent>
         </Card>
       </div>
@@ -229,11 +298,11 @@ export default function Analytics() {
             <CardTitle className="text-lg">Project Pipeline</CardTitle>
           </CardHeader>
           <CardContent>
-            {projectStatusChartData.length > 0 ? (
+            {projectPipelineData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
                   <Pie
-                    data={projectStatusChartData}
+                    data={projectPipelineData}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
@@ -242,92 +311,134 @@ export default function Analytics() {
                     fill="#8884d8"
                     dataKey="value"
                   >
-                    {projectStatusChartData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    {projectPipelineData.map((_, index) => (
+                      <Cell key={`pipeline-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
-                No projects yet
-              </div>
+              <EmptyChart label="No project pipeline data yet" />
             )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Expert Utilization by Industry</CardTitle>
+            <CardTitle className="text-lg">Calls Over Time</CardTitle>
           </CardHeader>
           <CardContent>
-            {expertUtilizationData.length > 0 ? (
+            {charts.callsOverTime.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={expertUtilizationData}>
+                <LineChart data={charts.callsOverTime}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} />
+                  <XAxis dataKey="period" />
                   <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="experts" fill="#3b82f6" />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
-                No experts yet
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-lg">Revenue by Expert</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {revenueData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={revenueData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} />
-                  <YAxis yAxisId="left" />
-                  <YAxis yAxisId="right" orientation="right" />
                   <Tooltip />
                   <Legend />
-                  <Bar yAxisId="left" dataKey="calls" fill="#8b5cf6" />
-                  <Bar yAxisId="right" dataKey="revenue" fill="#ef4444" />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
-                No usage records yet
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-lg">Call Volume Trend (Last 14 Days)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {callVolumeData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={callVolumeData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="calls" stroke="#3b82f6" dot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="completedCalls" name="Completed Calls" stroke="#3b82f6" />
+                  <Line type="monotone" dataKey="cuUsed" name="CU Used" stroke="#10b981" />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex h-[300px] items-center justify-center text-muted-foreground">
-                No usage records yet
-              </div>
+              <EmptyChart label="No completed calls for this period" />
             )}
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">CU by Industry</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {charts.cuByIndustry.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={charts.cuByIndustry.slice(0, 8)}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="industry" angle={-45} textAnchor="end" height={80} />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="cuUsed" name="CU Used" fill="#3b82f6" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyChart label="No industry CU data for this period" />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">CU by Project</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {charts.cuByProject.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={charts.cuByProject.slice(0, 8)}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="projectName" angle={-45} textAnchor="end" height={90} />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="cuUsed" name="CU Used" fill="#8b5cf6" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyChart label="No project CU data for this period" />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Completed Calls by Expert</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {charts.completedCallsByExpert.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={charts.completedCallsByExpert}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="expertName" angle={-45} textAnchor="end" height={90} />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="completedCalls" name="Completed Calls" fill="#f59e0b" />
+                  <Bar dataKey="cuUsed" name="CU Used" fill="#06b6d4" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyChart label="No expert completion data for this period" />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Completed Calls by PM</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {charts.completedCallsByPM.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={charts.completedCallsByPM}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="pmName" angle={-45} textAnchor="end" height={90} />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="completedCalls" name="Completed Calls" fill="#10b981" />
+                  <Bar dataKey="cuUsed" name="CU Used" fill="#3b82f6" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyChart label="No PM completion data for this period" />
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        <BarChart3 className="h-4 w-4" />
+        Analytics uses completed call records only. Contract, billing, invoice, payment, and revenue logic remain in Finance.
       </div>
     </div>
   );

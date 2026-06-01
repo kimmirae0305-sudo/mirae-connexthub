@@ -3501,6 +3501,33 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== OPERATIONS ANALYTICS (READ-ONLY) ====================
+  app.get("/api/analytics/operations", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const parseOptionalDate = (value: unknown, endOfDay = false) => {
+        if (!value) return undefined;
+        const date = new Date(`${String(value)}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
+        return Number.isNaN(date.getTime()) ? undefined : date;
+      };
+      const requestedGranularity = String(req.query.granularity || "month");
+      const granularity =
+        requestedGranularity === "day" || requestedGranularity === "week" || requestedGranularity === "month"
+          ? requestedGranularity
+          : "month";
+
+      const analytics = await storage.getOperationsAnalytics({
+        startDate: parseOptionalDate(req.query.startDate),
+        endDate: parseOptionalDate(req.query.endDate, true),
+        granularity,
+      });
+
+      res.json(analytics);
+    } catch (error) {
+      console.error("Failed to fetch operations analytics:", error);
+      res.status(500).json({ error: "Failed to fetch operations analytics" });
+    }
+  });
+
   // ==================== USAGE RECORDS (LEGACY) ====================
   app.get("/api/usage", authMiddleware, async (req, res) => {
     try {
