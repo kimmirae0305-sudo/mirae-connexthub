@@ -33,8 +33,11 @@ import logoPath from "@assets/Logo_1764384177823.png";
 interface WorkHistoryItem {
   company: string;
   jobTitle: string;
+  fromMonth: string;
   fromYear: string;
+  toMonth: string;
   toYear: string;
+  isCurrent: boolean;
 }
 
 interface InviteData {
@@ -65,11 +68,21 @@ interface InviteData {
 const emptyWorkHistoryItem = (): WorkHistoryItem => ({
   company: "",
   jobTitle: "",
+  fromMonth: "",
   fromYear: "",
+  toMonth: "",
   toYear: "",
+  isCurrent: false,
 });
 
 const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const monthOptions = Array.from({ length: 12 }, (_, index) => ({
+  value: String(index + 1).padStart(2, "0"),
+}));
+const currentYear = new Date().getFullYear();
+const yearOptions = Array.from({ length: currentYear - 1970 + 1 }, (_, index) =>
+  String(currentYear - index)
+);
 const availabilityBlocks = [
   { id: "09:00-12:00", label: "Morning", time: "09:00-12:00" },
   { id: "13:00-17:00", label: "Afternoon", time: "13:00-17:00" },
@@ -246,6 +259,71 @@ const languageLabels: Record<QuickInviteLanguage, string> = {
   es: "Español",
 };
 
+const workHistoryDateLabels: Record<
+  QuickInviteLanguage,
+  {
+    fromMonth: string;
+    fromYear: string;
+    toMonth: string;
+    toYear: string;
+    present: string;
+    selectMonth: string;
+    selectYear: string;
+  }
+> = {
+  en: {
+    fromMonth: "From month",
+    fromYear: "From year",
+    toMonth: "To month",
+    toYear: "To year",
+    present: "Present",
+    selectMonth: "Month",
+    selectYear: "Year",
+  },
+  "pt-BR": {
+    fromMonth: "Mes inicial",
+    fromYear: "Ano inicial",
+    toMonth: "Mes final",
+    toYear: "Ano final",
+    present: "Atual",
+    selectMonth: "Mes",
+    selectYear: "Ano",
+  },
+  es: {
+    fromMonth: "Mes inicial",
+    fromYear: "Ano inicial",
+    toMonth: "Mes final",
+    toYear: "Ano final",
+    present: "Actual",
+    selectMonth: "Mes",
+    selectYear: "Ano",
+  },
+};
+
+const getMonthLabel = (month: string, language: QuickInviteLanguage) => {
+  const monthIndex = Number(month) - 1;
+  if (Number.isNaN(monthIndex)) return month;
+
+  try {
+    return new Intl.DateTimeFormat(language, { month: "long", timeZone: "UTC" }).format(
+      new Date(Date.UTC(2024, monthIndex, 1))
+    );
+  } catch {
+    return month;
+  }
+};
+
+const formatWorkHistoryStart = (item: WorkHistoryItem) => {
+  if (item.fromMonth && item.fromYear) return `${item.fromYear}-${item.fromMonth}`;
+  return item.fromYear;
+};
+
+const formatWorkHistoryEnd = (item: WorkHistoryItem) => {
+  if (item.isCurrent) return "Present";
+  if (item.toMonth && item.toYear) return `${item.toYear}-${item.toMonth}`;
+  return item.toYear;
+};
+
 export default function QuickInviteOnboarding() {
   const { token } = useParams<{ token: string }>();
   const { toast } = useToast();
@@ -255,6 +333,7 @@ export default function QuickInviteOnboarding() {
     return normalizeQuickInviteLanguage(params.get("lang"));
   });
   const t = quickInviteTranslations[language];
+  const workDateLabels = workHistoryDateLabels[language];
   const [step, setStep] = useState(1);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [formData, setFormData] = useState({
@@ -322,11 +401,17 @@ export default function QuickInviteOnboarding() {
       const primaryWorkHistory = formData.workHistory.find(
         (item) => item.company.trim() && item.jobTitle.trim()
       );
+      const workHistory = formData.workHistory.map((item) => ({
+        ...item,
+        fromYear: formatWorkHistoryStart(item),
+        toYear: formatWorkHistoryEnd(item),
+      }));
       const res = await fetch(resolveApiUrl(`/api/quick-invite/${token}/onboard`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...formData,
+          workHistory,
           city: "Not provided",
           timezone: formData.timezone,
           currentTitle: primaryWorkHistory?.jobTitle.trim() || "Not provided",
@@ -690,19 +775,99 @@ export default function QuickInviteOnboarding() {
                       onChange={(event) => updateWorkHistory(index, { jobTitle: event.target.value })}
                       data-testid={`input-work-title-${index}`}
                     />
-                    <Input
-                      placeholder={t.fromYearPlaceholder}
-                      value={item.fromYear}
-                      onChange={(event) => updateWorkHistory(index, { fromYear: event.target.value })}
-                      data-testid={`input-work-from-${index}`}
-                    />
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder={t.toYearPlaceholder}
-                        value={item.toYear}
-                        onChange={(event) => updateWorkHistory(index, { toYear: event.target.value })}
-                        data-testid={`input-work-to-${index}`}
-                      />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">{workDateLabels.fromMonth}</Label>
+                        <Select
+                          value={item.fromMonth}
+                          onValueChange={(value) => updateWorkHistory(index, { fromMonth: value })}
+                        >
+                          <SelectTrigger data-testid={`select-work-from-month-${index}`}>
+                            <SelectValue placeholder={workDateLabels.selectMonth} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {monthOptions.map((month) => (
+                              <SelectItem key={month.value} value={month.value}>
+                                {getMonthLabel(month.value, language)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">{workDateLabels.fromYear}</Label>
+                        <Select
+                          value={item.fromYear}
+                          onValueChange={(value) => updateWorkHistory(index, { fromYear: value })}
+                        >
+                          <SelectTrigger data-testid={`select-work-from-year-${index}`}>
+                            <SelectValue placeholder={workDateLabels.selectYear} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {yearOptions.map((year) => (
+                              <SelectItem key={year} value={year}>
+                                {year}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">{workDateLabels.toMonth}</Label>
+                          <Select
+                            value={item.toMonth}
+                            onValueChange={(value) => updateWorkHistory(index, { toMonth: value })}
+                            disabled={item.isCurrent}
+                          >
+                            <SelectTrigger data-testid={`select-work-to-month-${index}`}>
+                              <SelectValue placeholder={item.isCurrent ? workDateLabels.present : workDateLabels.selectMonth} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {monthOptions.map((month) => (
+                                <SelectItem key={month.value} value={month.value}>
+                                  {getMonthLabel(month.value, language)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">{workDateLabels.toYear}</Label>
+                          <Select
+                            value={item.toYear}
+                            onValueChange={(value) => updateWorkHistory(index, { toYear: value })}
+                            disabled={item.isCurrent}
+                          >
+                            <SelectTrigger data-testid={`select-work-to-year-${index}`}>
+                              <SelectValue placeholder={item.isCurrent ? workDateLabels.present : workDateLabels.selectYear} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {yearOptions.map((year) => (
+                                <SelectItem key={year} value={year}>
+                                  {year}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <Label className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={item.isCurrent}
+                            onCheckedChange={(checked) =>
+                              updateWorkHistory(index, {
+                                isCurrent: checked === true,
+                                ...(checked === true ? { toMonth: "", toYear: "" } : {}),
+                              })
+                            }
+                            data-testid={`checkbox-work-present-${index}`}
+                          />
+                          {workDateLabels.present}
+                        </Label>
                       {formData.workHistory.length > 1 && (
                         <Button
                           type="button"
@@ -714,6 +879,7 @@ export default function QuickInviteOnboarding() {
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
                       )}
+                      </div>
                     </div>
                   </div>
                 ))}
