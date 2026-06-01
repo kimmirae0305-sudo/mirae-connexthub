@@ -4,7 +4,7 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { z } from "zod";
-import { Plus, Trash2, Search, Briefcase, Filter, Eye, X, FolderKanban } from "lucide-react";
+import { Plus, Trash2, Search, Briefcase, Filter, Eye, FolderKanban } from "lucide-react";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth";
@@ -59,7 +59,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
-import type { Project, InsertProject, ClientOrganization, VettingQuestion } from "@shared/schema";
+import type { Project, InsertProject, ClientOrganization, VettingQuestion, User } from "@shared/schema";
 
 const vettingQuestionSchema = z.object({
   question: z.string().min(1, "Question is required"),
@@ -117,12 +117,16 @@ export default function Projects() {
   const [location, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [projectScope, setProjectScope] = useState<"my" | "all" | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   
-  // Check if user is RA (Research Associate)
-  const isRA = user && normalizeRole(user.role) === "ra";
+  const normalizedRole = normalizeRole(user?.role);
+  const isRA = normalizedRole === "ra";
+  const isPM = normalizedRole === "pm";
+  const isAdmin = normalizedRole === "admin";
+  const effectiveProjectScope = isRA ? "my" : projectScope ?? (isPM ? "my" : "all");
 
   const getProjectDetailPath = (projectId: number) =>
     location.startsWith("/app/") ? `/app/projects/${projectId}` : `/projects/${projectId}`;
@@ -133,6 +137,10 @@ export default function Projects() {
 
   const { data: clientOrganizations } = useQuery<ClientOrganization[]>({
     queryKey: ["/api/client-organizations"],
+  });
+
+  const { data: users } = useQuery<User[]>({
+    queryKey: ["/api/users"],
   });
 
   const { data: existingVettingQuestions } = useQuery<VettingQuestion[]>({
@@ -222,10 +230,25 @@ export default function Projects() {
     },
   });
 
-  const filteredProjects = projects?.filter((project) => {
+  const userById = new Map((users || []).map((owner) => [owner.id, owner]));
+  const getPmOwnerName = (project: Project) => {
+    if (!project.createdByPmId) return "Unassigned";
+    return userById.get(project.createdByPmId)?.fullName || "Unassigned";
+  };
+
+  const scopeFilteredProjects = projects?.filter((project) => {
+    if (isRA) return true;
+    if (effectiveProjectScope === "my") {
+      return Boolean(user?.id) && project.createdByPmId === user?.id;
+    }
+    return true;
+  });
+
+  const filteredProjects = scopeFilteredProjects?.filter((project) => {
     const matchesSearch =
       project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      project.clientName.toLowerCase().includes(searchQuery.toLowerCase());
+      project.clientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      getPmOwnerName(project).toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "all" || project.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -285,25 +308,25 @@ export default function Projects() {
       <div className="grid gap-4 sm:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
-            <div className="text-2xl font-bold">{projects?.filter(p => p.status === "new").length || 0}</div>
+            <div className="text-2xl font-bold">{scopeFilteredProjects?.filter(p => p.status === "new").length || 0}</div>
             <p className="text-xs text-muted-foreground">New Requests</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-2xl font-bold">{projects?.filter(p => p.status === "sourcing").length || 0}</div>
+            <div className="text-2xl font-bold">{scopeFilteredProjects?.filter(p => p.status === "sourcing").length || 0}</div>
             <p className="text-xs text-muted-foreground">Sourcing</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-2xl font-bold">{projects?.filter(p => p.status === "pending_client_review").length || 0}</div>
+            <div className="text-2xl font-bold">{scopeFilteredProjects?.filter(p => p.status === "pending_client_review").length || 0}</div>
             <p className="text-xs text-muted-foreground">Client Review</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-2xl font-bold">{projects?.filter(p => p.status === "completed").length || 0}</div>
+            <div className="text-2xl font-bold">{scopeFilteredProjects?.filter(p => p.status === "completed").length || 0}</div>
             <p className="text-xs text-muted-foreground">Completed</p>
           </CardContent>
         </Card>
@@ -313,9 +336,31 @@ export default function Projects() {
         <CardHeader className="pb-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-base font-medium">
-              {isRA ? "My Assigned Projects" : "All Projects"}
+              {isRA ? "My Assigned Projects" : effectiveProjectScope === "my" ? "My Projects" : "All Projects"}
             </CardTitle>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              {!isRA && (
+                <div className="flex rounded-md border bg-muted/30 p-1" data-testid="toggle-project-scope">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={effectiveProjectScope === "my" ? "default" : "ghost"}
+                    onClick={() => setProjectScope("my")}
+                    data-testid="button-my-projects"
+                  >
+                    My Projects
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={effectiveProjectScope === "all" ? "default" : "ghost"}
+                    onClick={() => setProjectScope("all")}
+                    data-testid="button-all-projects"
+                  >
+                    All Projects
+                  </Button>
+                </div>
+              )}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -345,7 +390,7 @@ export default function Projects() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <DataTableSkeleton columns={isRA ? 6 : 7} rows={5} />
+            <DataTableSkeleton columns={isRA ? 7 : 8} rows={5} />
           ) : filteredProjects?.length === 0 ? (
             <EmptyState
               icon={isRA ? FolderKanban : Briefcase}
@@ -353,6 +398,8 @@ export default function Projects() {
               description={
                 searchQuery || statusFilter !== "all"
                   ? "Try adjusting your filters."
+                  : !isRA && effectiveProjectScope === "my"
+                    ? "Projects where you are the PM owner will appear here."
                   : isRA
                     ? "Once you're assigned to a project, it will appear here."
                     : "Create your first project to get started."
@@ -371,6 +418,7 @@ export default function Projects() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">PM Owner</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Industry</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
@@ -389,6 +437,9 @@ export default function Projects() {
                             <p className="text-xs text-muted-foreground">POC: {project.clientPocName}</p>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell onClick={() => setLocation(getProjectDetailPath(project.id))} className="text-muted-foreground">
+                        {getPmOwnerName(project)}
                       </TableCell>
                       <TableCell onClick={() => setLocation(getProjectDetailPath(project.id))} className="text-muted-foreground">{project.clientName}</TableCell>
                       <TableCell onClick={() => setLocation(getProjectDetailPath(project.id))} className="text-muted-foreground">{project.industry}</TableCell>
@@ -413,7 +464,7 @@ export default function Projects() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
-                          {!isRA && (
+                          {isAdmin && (
                             <Button
                               variant="ghost"
                               size="icon"
