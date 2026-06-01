@@ -98,7 +98,7 @@ const operationsItems: NavItem[] = [
 
 const financeItems: NavItem[] = [
   {
-    title: "Usage Tracker",
+    title: "CU Ledger",
     url: "/usage",
     icon: BarChart3,
     pageKey: "usage",
