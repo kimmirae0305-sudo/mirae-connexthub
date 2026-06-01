@@ -2825,7 +2825,11 @@ export async function registerRoutes(
 
       const callRecordId = result.data.callRecordId;
       if (!callRecordId) {
-        return res.status(400).json({ error: "callRecordId is required to create an insight" });
+        if (user.role === "admin") {
+          const insight = await storage.createInsight(result.data);
+          return res.status(201).json(insight);
+        }
+        return res.status(400).json({ error: "callRecordId is required to create a project insight" });
       }
 
       const callRecord = await storage.getCallRecord(callRecordId);
