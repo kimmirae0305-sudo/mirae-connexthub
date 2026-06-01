@@ -25,9 +25,39 @@ import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
 import { useToast } from "@/hooks/use-toast";
-import type { CallRecord, Expert, Project, User } from "@shared/schema";
 
 type DateRangePreset = "this_month" | "last_month" | "last_30_days" | "year_to_date" | "all_time" | "custom";
+
+interface CuLedgerRow {
+  callRecordId: number;
+  callDate: string;
+  projectId: number;
+  projectName: string;
+  clientName: string;
+  clientOrganizationId: number | null;
+  expertId: number;
+  expertName: string;
+  pmId: number | null;
+  pmName: string | null;
+  raId: number | null;
+  raName: string | null;
+  durationMinutes: number;
+  actualDurationMinutes: number | null;
+  cuUsed: string;
+  completedAt: string | null;
+  recordingUrl: string | null;
+  source: "Completed Call Record";
+}
+
+interface CuLedgerResponse {
+  summary: {
+    completedCalls: number;
+    totalCUUsed: number;
+    totalCompletedMinutes: number;
+    avgCUPerCall: number;
+  };
+  rows: CuLedgerRow[];
+}
 
 const dateRangeLabels: Record<DateRangePreset, string> = {
   this_month: "This Month",
@@ -97,69 +127,42 @@ const csvEscape = (value: string | number | null | undefined) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
+const toQueryDate = (date: Date | null) => (date ? format(date, "yyyy-MM-dd") : "");
+
 export default function Usage() {
   const { toast } = useToast();
   const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
   const [customStartDate, setCustomStartDate] = useState(() => toDateInputValue(new Date()));
   const [customEndDate, setCustomEndDate] = useState(() => toDateInputValue(new Date()));
 
-  const { data: projects = [], isLoading: projectsLoading } = useQuery<Project[]>({
-    queryKey: ["/api/projects"],
-  });
-
-  const { data: experts = [], isLoading: expertsLoading } = useQuery<Expert[]>({
-    queryKey: ["/api/experts"],
-  });
-
-  const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
-    queryKey: ["/api/users"],
-  });
-
-  const { data: callRecords = [], isLoading: callRecordsLoading } = useQuery<CallRecord[]>({
-    queryKey: ["/api/call-records"],
-  });
-
-  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
-  const expertById = useMemo(() => new Map(experts.map((expert) => [expert.id, expert])), [experts]);
-  const userById = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
-
-  const getProjectName = (projectId: number) => projectById.get(projectId)?.name || "Unknown";
-  const getClientName = (projectId: number) => {
-    const project = projectById.get(projectId);
-    return project?.clientName || project?.clientCompany || "-";
-  };
-  const getExpertName = (expertId: number) => expertById.get(expertId)?.name || "Unknown";
-  const getUserName = (userId: number | null | undefined) => {
-    if (!userId) return "-";
-    const user = userById.get(userId);
-    return user?.fullName || user?.email || `User #${userId}`;
-  };
-
   const dateRange = useMemo(
     () => getPresetRange(datePreset, customStartDate, customEndDate),
     [customEndDate, customStartDate, datePreset]
   );
 
-  const ledgerRows = useMemo(() => {
-    return callRecords
-      .filter((record) => record.status === "completed")
-      .filter((record) => {
-        const callDate = new Date(record.callDate);
-        if (Number.isNaN(callDate.getTime())) return false;
-        if (dateRange.start && callDate < dateRange.start) return false;
-        if (dateRange.end && callDate > dateRange.end) return false;
-        return true;
-      })
-      .sort((a, b) => new Date(b.callDate).getTime() - new Date(a.callDate).getTime());
-  }, [callRecords, dateRange.end, dateRange.start]);
+  const ledgerUrl = useMemo(() => {
+    const params = new URLSearchParams();
+    if (dateRange.start) params.set("startDate", toQueryDate(dateRange.start));
+    if (dateRange.end) params.set("endDate", toQueryDate(dateRange.end));
+    const query = params.toString();
+    return `/api/cu-ledger${query ? `?${query}` : ""}`;
+  }, [dateRange.end, dateRange.start]);
 
-  const totalCompletedMinutes = ledgerRows.reduce(
-    (sum, record) => sum + (record.actualDurationMinutes || record.durationMinutes || 0),
-    0
-  );
-  const totalCuUsed = ledgerRows.reduce((sum, record) => sum + Number(record.cuUsed || 0), 0);
-  const averageCuPerCall = ledgerRows.length > 0 ? totalCuUsed / ledgerRows.length : 0;
-  const isLoading = projectsLoading || expertsLoading || usersLoading || callRecordsLoading;
+  const { data: ledgerData, isLoading } = useQuery<CuLedgerResponse>({
+    queryKey: [ledgerUrl],
+  });
+
+  const ledgerRows = ledgerData?.rows || [];
+  const summary = ledgerData?.summary || {
+    completedCalls: 0,
+    totalCUUsed: 0,
+    totalCompletedMinutes: 0,
+    avgCUPerCall: 0,
+  };
+  const totalCompletedMinutes = summary.totalCompletedMinutes;
+  const totalCuUsed = summary.totalCUUsed;
+  const averageCuPerCall = summary.avgCUPerCall;
+  const completedCalls = summary.completedCalls;
 
   const exportToCSV = () => {
     if (!ledgerRows.length) return;
@@ -179,11 +182,11 @@ export default function Usage() {
     ];
     const rows = ledgerRows.map((record) => [
       formatDate(record.callDate),
-      getProjectName(record.projectId),
-      getClientName(record.projectId),
-      getExpertName(record.expertId),
-      getUserName(record.pmId),
-      getUserName(record.raId),
+      record.projectName,
+      record.clientName,
+      record.expertName,
+      record.pmName || "-",
+      record.raName || "-",
       `${record.actualDurationMinutes || record.durationMinutes || 0} min`,
       Number(record.cuUsed || 0).toFixed(2),
       formatDateTime(record.completedAt),
@@ -281,7 +284,7 @@ export default function Usage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Completed Calls"
-          value={ledgerRows.length}
+          value={completedCalls}
           subtitle={dateRangeLabels[datePreset]}
           icon={BarChart3}
         />
@@ -338,13 +341,13 @@ export default function Usage() {
                 </TableHeader>
                 <TableBody>
                   {ledgerRows.map((record) => (
-                    <TableRow key={record.id} data-testid={`row-cu-ledger-${record.id}`}>
+                    <TableRow key={record.callRecordId} data-testid={`row-cu-ledger-${record.callRecordId}`}>
                       <TableCell className="font-mono text-sm">{formatDate(record.callDate)}</TableCell>
-                      <TableCell>{getProjectName(record.projectId)}</TableCell>
-                      <TableCell>{getClientName(record.projectId)}</TableCell>
-                      <TableCell>{getExpertName(record.expertId)}</TableCell>
-                      <TableCell>{getUserName(record.pmId)}</TableCell>
-                      <TableCell>{getUserName(record.raId)}</TableCell>
+                      <TableCell>{record.projectName}</TableCell>
+                      <TableCell>{record.clientName}</TableCell>
+                      <TableCell>{record.expertName}</TableCell>
+                      <TableCell>{record.pmName || "-"}</TableCell>
+                      <TableCell>{record.raName || "-"}</TableCell>
                       <TableCell className="text-right font-mono">
                         {record.actualDurationMinutes || record.durationMinutes || 0} min
                       </TableCell>
@@ -366,7 +369,7 @@ export default function Usage() {
                           "-"
                         )}
                       </TableCell>
-                      <TableCell>Completed Call Record</TableCell>
+                      <TableCell>{record.source}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
