@@ -4,15 +4,12 @@ import {
   Briefcase,
   Users,
   FileQuestion,
-  UserPlus,
   BarChart3,
   TrendingUp,
   Building2,
   Phone,
   LogOut,
   UsersRound,
-  Settings,
-  Mail,
   Award,
 } from "lucide-react";
 import {
@@ -58,6 +55,9 @@ const mainNavItems: NavItem[] = [
     icon: Phone,
     pageKey: "consultations",
   },
+];
+
+const networkItems: NavItem[] = [
   {
     title: "Experts",
     url: "/experts",
@@ -72,30 +72,36 @@ const mainNavItems: NavItem[] = [
   },
 ];
 
-const managementItems: NavItem[] = [
+const intelligenceItems: NavItem[] = [
   {
     title: "Insight Hub",
     url: "/insight-hub",
     icon: FileQuestion,
     pageKey: "insight-hub",
   },
-  {
-    title: "Invites",
-    url: "/invites",
-    icon: Mail,
-    pageKey: "invites",
-  },
-  {
-    title: "Usage Tracker",
-    url: "/usage",
-    icon: BarChart3,
-    pageKey: "usage",
-  },
+];
+
+const operationsItems: NavItem[] = [
   {
     title: "Analytics",
     url: "/analytics",
     icon: TrendingUp,
     pageKey: "analytics",
+  },
+  {
+    title: "RA Performance",
+    url: "/ra-performance",
+    icon: Award,
+    pageKey: "ra-performance",
+  },
+];
+
+const financeItems: NavItem[] = [
+  {
+    title: "Usage Tracker",
+    url: "/usage",
+    icon: BarChart3,
+    pageKey: "usage",
   },
 ];
 
@@ -105,12 +111,6 @@ const adminItems: NavItem[] = [
     url: "/employees",
     icon: UsersRound,
     pageKey: "employees",
-  },
-  {
-    title: "RA Performance",
-    url: "/ra-performance",
-    icon: Award,
-    pageKey: "ra-performance",
   },
 ];
 
@@ -143,8 +143,41 @@ export function AppSidebar() {
   };
 
   const filteredMainItems = filterItemsByRole(mainNavItems);
-  const filteredManagementItems = filterItemsByRole(managementItems);
+  const filteredNetworkItems = filterItemsByRole(networkItems);
+  const filteredIntelligenceItems = filterItemsByRole(intelligenceItems);
+  const filteredOperationsItems = filterItemsByRole(operationsItems);
+  const filteredFinanceItems = filterItemsByRole(financeItems);
   const filteredAdminItems = filterItemsByRole(adminItems);
+
+  const renderNavGroup = (label: string, items: NavItem[]) => {
+    if (items.length === 0) return null;
+
+    return (
+      <SidebarGroup className="mt-4 first:mt-0">
+        <SidebarGroupLabel className="px-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {items.map((item) => (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location === item.url || (item.url !== "/" && location.startsWith(item.url))}
+                  className="gap-3"
+                >
+                  <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase().replaceAll(" ", "-")}`}>
+                    <item.icon className="h-4 w-4" />
+                    <span>{item.title}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    );
+  };
 
   return (
     <Sidebar>
@@ -158,81 +191,12 @@ export function AppSidebar() {
         </Link>
       </SidebarHeader>
       <SidebarContent className="px-3 py-4">
-        {filteredMainItems.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Overview
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {filteredMainItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location === item.url || (item.url !== "/" && location.startsWith(item.url))}
-                      className="gap-3"
-                    >
-                      <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase()}`}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-        {filteredManagementItems.length > 0 && (
-          <SidebarGroup className="mt-4">
-            <SidebarGroupLabel className="px-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Management
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {filteredManagementItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location === item.url}
-                      className="gap-3"
-                    >
-                      <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase().replace(' ', '-')}`}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-        {filteredAdminItems.length > 0 && (
-          <SidebarGroup className="mt-4">
-            <SidebarGroupLabel className="px-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Admin
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {filteredAdminItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location === item.url}
-                      className="gap-3"
-                    >
-                      <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase()}`}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
+        {renderNavGroup("Overview", filteredMainItems)}
+        {renderNavGroup("Network", filteredNetworkItems)}
+        {renderNavGroup("Intelligence", filteredIntelligenceItems)}
+        {renderNavGroup("Operations", filteredOperationsItems)}
+        {renderNavGroup("Finance", filteredFinanceItems)}
+        {renderNavGroup("Admin", filteredAdminItems)}
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <div className="flex items-center justify-between gap-2">

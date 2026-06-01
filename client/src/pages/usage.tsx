@@ -56,6 +56,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { MetricCard } from "@/components/metric-card";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { Project, Expert, UsageRecord, InsertUsageRecord } from "@shared/schema";
 
 const usageFormSchema = z.object({
@@ -207,6 +208,13 @@ export default function Usage() {
           </Button>
         </div>
       </div>
+
+      <Alert>
+        <AlertTitle>Legacy usage tracker</AlertTitle>
+        <AlertDescription>
+          Legacy manual usage records. Completed call records will become the source of truth for CU usage.
+        </AlertDescription>
+      </Alert>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
