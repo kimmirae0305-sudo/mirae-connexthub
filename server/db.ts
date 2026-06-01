@@ -162,6 +162,9 @@ const compatibilityStatements = [
     invitation_status text DEFAULT 'not_invited',
     pipeline_status text DEFAULT 'interested',
     source_type text DEFAULT 'internal_db',
+    consent_language text,
+    terms_version text,
+    privacy_policy_version text,
     assigned_at timestamp DEFAULT now()
   )`,
   `CREATE TABLE IF NOT EXISTS call_records (
@@ -327,6 +330,9 @@ const compatibilityStatements = [
   `ALTER TABLE project_experts ADD COLUMN IF NOT EXISTS accepted_at timestamp`,
   `ALTER TABLE project_experts ADD COLUMN IF NOT EXISTS ip_address text`,
   `ALTER TABLE project_experts ADD COLUMN IF NOT EXISTS user_agent text`,
+  `ALTER TABLE project_experts ADD COLUMN IF NOT EXISTS consent_language text`,
+  `ALTER TABLE project_experts ADD COLUMN IF NOT EXISTS terms_version text`,
+  `ALTER TABLE project_experts ADD COLUMN IF NOT EXISTS privacy_policy_version text`,
   `ALTER TABLE project_experts ADD COLUMN IF NOT EXISTS conflict_check text`,
   `ALTER TABLE project_experts ADD COLUMN IF NOT EXISTS application_status text DEFAULT 'pending_review'`,
   `ALTER TABLE project_experts ADD COLUMN IF NOT EXISTS notes text`,

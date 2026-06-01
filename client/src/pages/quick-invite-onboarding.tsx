@@ -19,6 +19,14 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { resolveApiUrl } from "@/lib/apiUrl";
+import {
+  normalizeQuickInviteLanguage,
+  PRIVACY_POLICY_VERSION,
+  quickInviteLanguages,
+  quickInviteTranslations,
+  TERMS_VERSION,
+  type QuickInviteLanguage,
+} from "@/lib/translations/quick-invite-onboarding";
 import logoPath from "@assets/Logo_1764384177823.png";
 
 interface WorkHistoryItem {
@@ -76,9 +84,20 @@ const timezones = [
   "UTC",
 ];
 
+const languageLabels: Record<QuickInviteLanguage, string> = {
+  en: "English",
+  "pt-BR": "Português",
+  es: "Español",
+};
+
 export default function QuickInviteOnboarding() {
   const { token } = useParams<{ token: string }>();
   const { toast } = useToast();
+  const [language, setLanguage] = useState<QuickInviteLanguage>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return normalizeQuickInviteLanguage(params.get("lang"));
+  });
+  const t = quickInviteTranslations[language];
   const [step, setStep] = useState(1);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [formData, setFormData] = useState({
@@ -101,11 +120,20 @@ export default function QuickInviteOnboarding() {
     sampleAnswers: [] as Array<{ questionId: number; answerText: string }>,
   });
 
+  const updateLanguage = (value: QuickInviteLanguage) => {
+    setLanguage(value);
+    const params = new URLSearchParams(window.location.search);
+    params.set("lang", value);
+    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+  };
+
+  const legalUrl = (path: "/terms" | "/privacy") => `${path}?lang=${encodeURIComponent(language)}`;
+
   const { data: inviteData, isLoading, error } = useQuery<InviteData>({
     queryKey: [`/api/quick-invite/${token}`],
     queryFn: async () => {
       const res = await fetch(resolveApiUrl(`/api/quick-invite/${token}`));
-      if (!res.ok) throw new Error("Invalid invite link");
+      if (!res.ok) throw new Error(t.invalidInviteError);
       return res.json();
     },
   });
@@ -140,6 +168,9 @@ export default function QuickInviteOnboarding() {
           ...formData,
           availability,
           conflictCheck,
+          consentLanguage: language,
+          termsVersion: TERMS_VERSION,
+          privacyPolicyVersion: PRIVACY_POLICY_VERSION,
           expectedHourlyRateUsd: Number(formData.expectedHourlyRateUsd),
           yearsOfExperience: 0,
           sectorExpertise: "",
@@ -149,14 +180,14 @@ export default function QuickInviteOnboarding() {
       });
       if (!res.ok) {
         const errorData = await res.json();
-        throw new Error(errorData.error || "Submission failed");
+        throw new Error(errorData.error || t.submissionFailed);
       }
       return res.json();
     },
     onSuccess: () => setIsSubmitted(true),
     onError: (submitError: Error) => {
       toast({
-        title: "Could not submit onboarding",
+        title: t.submitErrorTitle,
         description: submitError.message,
         variant: "destructive",
       });
@@ -248,7 +279,7 @@ export default function QuickInviteOnboarding() {
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-muted-foreground">Loading invitation...</p>
+            <p className="text-muted-foreground">{t.loadingInvite}</p>
           </CardContent>
         </Card>
       </div>
@@ -262,8 +293,8 @@ export default function QuickInviteOnboarding() {
           <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
             <AlertCircle className="h-8 w-8 text-destructive" />
             <div>
-              <h2 className="text-xl font-semibold">Invalid invite link</h2>
-              <p className="mt-2 text-muted-foreground">This link has expired or is no longer valid.</p>
+              <h2 className="text-xl font-semibold">{t.invalidInviteTitle}</h2>
+              <p className="mt-2 text-muted-foreground">{t.invalidInviteDescription}</p>
             </div>
           </CardContent>
         </Card>
@@ -278,9 +309,9 @@ export default function QuickInviteOnboarding() {
           <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
             <CheckCircle className="h-10 w-10 text-green-600" />
             <div>
-              <h2 className="text-xl font-semibold">Application submitted</h2>
+              <h2 className="text-xl font-semibold">{t.submittedTitle}</h2>
               <p className="mt-2 text-muted-foreground">
-                Thank you. The Mirae Connext team will review your profile and project responses.
+                {t.submittedDescription}
               </p>
             </div>
           </CardContent>
@@ -294,14 +325,28 @@ export default function QuickInviteOnboarding() {
       <div className="mx-auto max-w-3xl space-y-6">
         <div className="flex items-center justify-between">
           <img src={logoPath} alt="Mirae Connext" className="h-10 w-auto" />
-          <Badge variant="outline">Step {step} of 2</Badge>
+          <div className="flex items-center gap-3">
+            <Select value={language} onValueChange={(value) => updateLanguage(value as QuickInviteLanguage)}>
+              <SelectTrigger className="w-[160px]" data-testid="select-onboarding-language">
+                <SelectValue placeholder={t.languageLabel} />
+              </SelectTrigger>
+              <SelectContent>
+                {quickInviteLanguages.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {languageLabels[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Badge variant="outline">{t.stepLabel.replace("{step}", String(step))}</Badge>
+          </div>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Expert onboarding</CardTitle>
+            <CardTitle>{t.pageTitle}</CardTitle>
             <CardDescription>
-              Complete your profile so Mirae Connext can review your fit for this project.
+              {t.pageDescription}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -309,8 +354,8 @@ export default function QuickInviteOnboarding() {
         {step === 1 && (
           <Card>
             <CardHeader>
-              <CardTitle>Consent, basic details, and work history</CardTitle>
-              <CardDescription>All rates are collected in USD for this project application.</CardDescription>
+              <CardTitle>{t.stepOneTitle}</CardTitle>
+              <CardDescription>{t.stepOneDescription}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="space-y-3 rounded-md border p-4">
@@ -323,8 +368,18 @@ export default function QuickInviteOnboarding() {
                     }
                     data-testid="checkbox-terms"
                   />
-                  <Label htmlFor="termsAccepted" className="cursor-pointer leading-relaxed">
-                    I accept Mirae Connext's Terms & Conditions.
+                  <Label htmlFor="termsAccepted" className="leading-relaxed">
+                    {t.termsPrefix}{" "}
+                    <a
+                      className="text-primary underline underline-offset-2"
+                      href={legalUrl("/terms")}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {t.termsLink}
+                    </a>
+                    .
                   </Label>
                 </div>
                 <div className="flex items-start gap-3">
@@ -336,15 +391,25 @@ export default function QuickInviteOnboarding() {
                     }
                     data-testid="checkbox-lgpd"
                   />
-                  <Label htmlFor="lgpdAccepted" className="cursor-pointer leading-relaxed">
-                    I consent to the collection and processing of my personal data in accordance with LGPD and the Privacy Policy.
+                  <Label htmlFor="lgpdAccepted" className="leading-relaxed">
+                    {t.privacyPrefix}{" "}
+                    <a
+                      className="text-primary underline underline-offset-2"
+                      href={legalUrl("/privacy")}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {t.privacyLink}
+                    </a>
+                    .
                   </Label>
                 </div>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="fullName">Full name</Label>
+                  <Label htmlFor="fullName">{t.fullName}</Label>
                   <Input
                     id="fullName"
                     value={formData.fullName}
@@ -353,7 +418,7 @@ export default function QuickInviteOnboarding() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="email">{t.email}</Label>
                   <Input
                     id="email"
                     type="email"
@@ -363,7 +428,7 @@ export default function QuickInviteOnboarding() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="phoneWhatsapp">Phone/WhatsApp</Label>
+                  <Label htmlFor="phoneWhatsapp">{t.phoneWhatsapp}</Label>
                   <Input
                     id="phoneWhatsapp"
                     value={formData.phoneWhatsapp}
@@ -372,7 +437,7 @@ export default function QuickInviteOnboarding() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="country">Country</Label>
+                  <Label htmlFor="country">{t.country}</Label>
                   <Input
                     id="country"
                     value={formData.country}
@@ -381,7 +446,7 @@ export default function QuickInviteOnboarding() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="city">City</Label>
+                  <Label htmlFor="city">{t.city}</Label>
                   <Input
                     id="city"
                     value={formData.city}
@@ -390,7 +455,7 @@ export default function QuickInviteOnboarding() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="currentTitle">Current title</Label>
+                  <Label htmlFor="currentTitle">{t.currentTitle}</Label>
                   <Input
                     id="currentTitle"
                     value={formData.currentTitle}
@@ -399,7 +464,7 @@ export default function QuickInviteOnboarding() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="currentCompany">Current company</Label>
+                  <Label htmlFor="currentCompany">{t.currentCompany}</Label>
                   <Input
                     id="currentCompany"
                     value={formData.currentCompany}
@@ -408,7 +473,7 @@ export default function QuickInviteOnboarding() {
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="expectedHourlyRateUsd">Expected hourly rate (USD)</Label>
+                  <Label htmlFor="expectedHourlyRateUsd">{t.expectedHourlyRateUsd}</Label>
                   <Input
                     id="expectedHourlyRateUsd"
                     type="number"
@@ -422,7 +487,7 @@ export default function QuickInviteOnboarding() {
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label>Work history</Label>
+                  <Label>{t.workHistory}</Label>
                   <Button
                     type="button"
                     variant="outline"
@@ -436,32 +501,32 @@ export default function QuickInviteOnboarding() {
                     data-testid="button-add-work-history"
                   >
                     <Plus className="mr-2 h-4 w-4" />
-                    Add role
+                    {t.addRole}
                   </Button>
                 </div>
                 {formData.workHistory.map((item, index) => (
                   <div key={index} className="grid gap-3 rounded-md border p-4 sm:grid-cols-2">
                     <Input
-                      placeholder="Company"
+                      placeholder={t.companyPlaceholder}
                       value={item.company}
                       onChange={(event) => updateWorkHistory(index, { company: event.target.value })}
                       data-testid={`input-work-company-${index}`}
                     />
                     <Input
-                      placeholder="Job title"
+                      placeholder={t.jobTitlePlaceholder}
                       value={item.jobTitle}
                       onChange={(event) => updateWorkHistory(index, { jobTitle: event.target.value })}
                       data-testid={`input-work-title-${index}`}
                     />
                     <Input
-                      placeholder="From year"
+                      placeholder={t.fromYearPlaceholder}
                       value={item.fromYear}
                       onChange={(event) => updateWorkHistory(index, { fromYear: event.target.value })}
                       data-testid={`input-work-from-${index}`}
                     />
                     <div className="flex gap-2">
                       <Input
-                        placeholder="To year or Present"
+                        placeholder={t.toYearPlaceholder}
                         value={item.toYear}
                         onChange={(event) => updateWorkHistory(index, { toYear: event.target.value })}
                         data-testid={`input-work-to-${index}`}
@@ -488,13 +553,13 @@ export default function QuickInviteOnboarding() {
         {step === 2 && (
           <Card>
             <CardHeader>
-              <CardTitle>Availability, conflict check, and vetting answers</CardTitle>
-              <CardDescription>Answer the project-specific questions so Mirae Connext can review your fit.</CardDescription>
+              <CardTitle>{t.stepTwoTitle}</CardTitle>
+              <CardDescription>{t.stepTwoDescription}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="space-y-3 rounded-md border p-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">Project</p>
+                  <p className="text-sm text-muted-foreground">{t.project}</p>
                   <p className="font-medium">{inviteData.project.name}</p>
                 </div>
                 {inviteData.project.projectOverview && (
@@ -513,13 +578,13 @@ export default function QuickInviteOnboarding() {
 
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <Label>Weekly availability</Label>
+                  <Label>{t.weeklyAvailability}</Label>
                   <Select
                     value={formData.availabilityTimezone}
                     onValueChange={(value) => setFormData({ ...formData, availabilityTimezone: value })}
                   >
                     <SelectTrigger className="w-full sm:w-[220px]" data-testid="select-availability-timezone">
-                      <SelectValue placeholder="Timezone" />
+                      <SelectValue placeholder={t.timezone} />
                     </SelectTrigger>
                     <SelectContent>
                       {timezones.map((timezone) => (
@@ -533,7 +598,7 @@ export default function QuickInviteOnboarding() {
                 <div className="overflow-x-auto rounded-md border">
                   <div className="min-w-[560px]">
                     <div className="grid grid-cols-8 border-b bg-muted/40 text-xs font-medium">
-                      <div className="p-2">Block</div>
+                      <div className="p-2">{t.block}</div>
                       {weekDays.map((day) => (
                         <div key={day} className="p-2 text-center">
                           {day}
@@ -561,7 +626,7 @@ export default function QuickInviteOnboarding() {
                               onClick={() => toggleAvailabilitySlot(slot)}
                               data-testid={`button-availability-${day}-${block.label.toLowerCase()}`}
                             >
-                              {selected ? "Available" : "Select"}
+                              {selected ? t.available : t.select}
                             </button>
                           );
                         })}
@@ -571,14 +636,14 @@ export default function QuickInviteOnboarding() {
                 </div>
                 <Textarea
                   className="min-h-[80px]"
-                  placeholder="Optional notes, e.g. flexible with advance notice."
+                  placeholder={t.availabilityNotesPlaceholder}
                   value={formData.availabilityNotes}
                   onChange={(event) => setFormData({ ...formData, availabilityNotes: event.target.value })}
                   data-testid="input-availability-notes"
                 />
               </div>
               <div className="space-y-3">
-                <Label>Conflict check</Label>
+                <Label>{t.conflictCheck}</Label>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <Button
                     type="button"
@@ -586,7 +651,7 @@ export default function QuickInviteOnboarding() {
                     onClick={() => setFormData({ ...formData, conflictChoice: "no", conflictDetails: "" })}
                     data-testid="button-conflict-no"
                   >
-                    No conflict
+                    {t.noConflict}
                   </Button>
                   <Button
                     type="button"
@@ -594,13 +659,13 @@ export default function QuickInviteOnboarding() {
                     onClick={() => setFormData({ ...formData, conflictChoice: "yes" })}
                     data-testid="button-conflict-yes"
                   >
-                    Yes, I have a conflict
+                    {t.hasConflict}
                   </Button>
                 </div>
                 {formData.conflictChoice === "yes" && (
                   <Textarea
                     className="min-h-[90px]"
-                    placeholder="Please describe the conflict, restriction, or sensitive relationship."
+                    placeholder={t.conflictDetailsPlaceholder}
                     value={formData.conflictDetails}
                     onChange={(event) => setFormData({ ...formData, conflictDetails: event.target.value })}
                     data-testid="input-conflict-details"
@@ -611,9 +676,9 @@ export default function QuickInviteOnboarding() {
               <Separator />
 
               <div className="space-y-4">
-                <Label>Vetting questions</Label>
+                <Label>{t.vettingQuestions}</Label>
                 {inviteData.vettingQuestions.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No vetting questions have been added for this project yet.</p>
+                  <p className="text-sm text-muted-foreground">{t.noVettingQuestions}</p>
                 ) : (
                   inviteData.vettingQuestions
                     .slice()
@@ -655,7 +720,7 @@ export default function QuickInviteOnboarding() {
             data-testid="button-back"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back
+            {t.back}
           </Button>
 
           {step < 2 ? (
@@ -665,7 +730,7 @@ export default function QuickInviteOnboarding() {
               onClick={() => setStep((current) => Math.min(2, current + 1))}
               data-testid="button-next"
             >
-              Continue
+              {t.continue}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           ) : (
@@ -678,10 +743,10 @@ export default function QuickInviteOnboarding() {
               {submitMutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Submitting...
+                  {t.submitting}
                 </>
               ) : (
-                "Submit application"
+                t.submit
               )}
             </Button>
           )}
