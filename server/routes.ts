@@ -2757,10 +2757,41 @@ export async function registerRoutes(
   });
 
   // ==================== INSIGHT HUB ====================
-  app.get("/api/insights", authMiddleware, async (req, res) => {
+  app.get("/api/insights", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const insights = await storage.getInsights();
-      res.json(insights);
+      const user = req.user!;
+      const projectIdQuery = req.query.projectId;
+      const hasProjectScope = projectIdQuery !== undefined && projectIdQuery !== null && String(projectIdQuery).trim() !== "";
+      const projectIdParam = hasProjectScope ? Number(projectIdQuery) : null;
+
+      if (!hasProjectScope) {
+        if (user.role !== "admin") {
+          return res.status(403).json({ error: "Global Insight Hub access is restricted to admin users" });
+        }
+        const insights = await storage.getInsights();
+        return res.json(insights);
+      }
+
+      if (!Number.isInteger(projectIdParam) || projectIdParam <= 0) {
+        return res.status(400).json({ error: "Invalid projectId" });
+      }
+      const projectId = projectIdParam as number;
+
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      if (user.role === "pm" && project.createdByPmId !== user.id) {
+        return res.status(403).json({ error: "Access denied for this project" });
+      }
+
+      if (!["admin", "pm"].includes(user.role)) {
+        return res.status(403).json({ error: "Project insight access is restricted to admin and owning PM users" });
+      }
+
+      const insights = await storage.getInsightsByProjectId(projectId);
+      return res.json(insights);
     } catch (error) {
       console.error("Failed to fetch insights:", error);
       res.status(500).json({ error: "Failed to fetch insights" });
@@ -2780,12 +2811,50 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/insights", authMiddleware, async (req, res) => {
+  app.post("/api/insights", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      const user = req.user!;
+      if (!["admin", "pm"].includes(user.role)) {
+        return res.status(403).json({ error: "Insight creation is restricted to admin and PM users" });
+      }
+
       const result = insertInsightSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
+
+      const callRecordId = result.data.callRecordId;
+      if (!callRecordId) {
+        if (user.role === "admin") {
+          const insight = await storage.createInsight(result.data);
+          return res.status(201).json(insight);
+        }
+        return res.status(400).json({ error: "callRecordId is required to create a project insight" });
+      }
+
+      const callRecord = await storage.getCallRecord(callRecordId);
+      if (!callRecord) {
+        return res.status(404).json({ error: "Call record not found" });
+      }
+
+      if (callRecord.status !== "completed") {
+        return res.status(400).json({ error: "Insights can only be created from completed calls" });
+      }
+
+      const project = await storage.getProject(callRecord.projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      if (user.role === "pm" && project.createdByPmId !== user.id) {
+        return res.status(403).json({ error: "Access denied for this project" });
+      }
+
+      const existingInsight = await storage.getInsightByCallRecordId(callRecordId);
+      if (existingInsight) {
+        return res.status(409).json({ error: "An insight already exists for this call record" });
+      }
+
       const insight = await storage.createInsight(result.data);
       res.status(201).json(insight);
     } catch (error) {
