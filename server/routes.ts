@@ -3528,6 +3528,47 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== PM PERFORMANCE (READ-ONLY) ====================
+  app.get("/api/performance/pm", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const parseOptionalDate = (value: unknown, endOfDay = false) => {
+        if (!value) return undefined;
+        const date = new Date(`${String(value)}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
+        return Number.isNaN(date.getTime()) ? undefined : date;
+      };
+      const parseOptionalInteger = (value: unknown, fallback: number) => {
+        if (!value) return fallback;
+        const parsed = parseInt(String(value), 10);
+        return Number.isNaN(parsed) ? fallback : parsed;
+      };
+      const requestedSortBy = String(req.query.sortBy || "totalCUUsed");
+      const sortBy =
+        requestedSortBy === "completedCalls" ||
+        requestedSortBy === "activeProjects" ||
+        requestedSortBy === "cuPerRequest" ||
+        requestedSortBy === "totalCUUsed"
+          ? requestedSortBy
+          : "totalCUUsed";
+      const requestedOrder = String(req.query.order || "desc");
+      const order = requestedOrder === "asc" ? "asc" : "desc";
+
+      const report = await storage.getPmPerformance({
+        startDate: parseOptionalDate(req.query.startDate),
+        endDate: parseOptionalDate(req.query.endDate, true),
+        search: req.query.search ? String(req.query.search) : undefined,
+        sortBy,
+        order,
+        limit: parseOptionalInteger(req.query.limit, 50),
+        offset: parseOptionalInteger(req.query.offset, 0),
+      });
+
+      res.json(report);
+    } catch (error) {
+      console.error("Failed to fetch PM performance:", error);
+      res.status(500).json({ error: "Failed to fetch PM performance" });
+    }
+  });
+
   // ==================== USAGE RECORDS (LEGACY) ====================
   app.get("/api/usage", authMiddleware, async (req, res) => {
     try {

@@ -101,6 +101,49 @@ export interface OperationsAnalytics {
   };
 }
 
+export type PmPerformanceSortBy = "totalCUUsed" | "completedCalls" | "activeProjects" | "cuPerRequest";
+
+export interface PmPerformanceFilters {
+  startDate?: Date;
+  endDate?: Date;
+  search?: string;
+  sortBy?: PmPerformanceSortBy;
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+export interface PmPerformanceRow {
+  pmId: number;
+  pmName: string;
+  pmEmail: string;
+  activeProjects: number;
+  requestsHandled: number;
+  completedCalls: number;
+  totalCUUsed: number;
+  cuPerRequest: number;
+  callsPerRequest: number;
+  totalCompletedMinutes: number;
+  avgCUPerCall: number;
+  signalsCaptured: number;
+  lastCompletedCallDate: Date | null;
+}
+
+export interface PmPerformanceReport {
+  summary: {
+    totalPMs: number;
+    requestsHandled: number;
+    completedCalls: number;
+    totalCUUsed: number;
+  };
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+  };
+  rows: PmPerformanceRow[];
+}
+
 export interface IStorage {
   // Users (Employees)
   getUsers(): Promise<User[]>;
@@ -210,6 +253,7 @@ export interface IStorage {
   getCallRecordsByExpert(expertId: number): Promise<CallRecord[]>;
   getCuLedgerRows(filters: CuLedgerFilters): Promise<CuLedgerRow[]>;
   getOperationsAnalytics(filters: OperationsAnalyticsFilters): Promise<OperationsAnalytics>;
+  getPmPerformance(filters: PmPerformanceFilters): Promise<PmPerformanceReport>;
   createCallRecord(record: InsertCallRecord): Promise<CallRecord>;
   updateCallRecord(id: number, record: Partial<InsertCallRecord>): Promise<CallRecord | undefined>;
   deleteCallRecord(id: number): Promise<boolean>;
@@ -1197,6 +1241,152 @@ export class DatabaseStorage implements IStorage {
           .map(([status, count]) => ({ status, count }))
           .sort((a, b) => a.status.localeCompare(b.status)),
       },
+    };
+  }
+
+  async getPmPerformance(filters: PmPerformanceFilters): Promise<PmPerformanceReport> {
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const sortBy = filters.sortBy || "totalCUUsed";
+    const order = filters.order || "desc";
+    const limit = Math.max(1, Math.min(filters.limit || 50, 100));
+    const offset = Math.max(0, filters.offset || 0);
+    const normalizedSearch = filters.search?.trim().toLowerCase();
+    const activeStatuses = new Set(["new", "sourcing", "shortlisted", "confirmed"]);
+
+    const allUsers = await db.select().from(users);
+    const pmUsers = allUsers.filter((user) => {
+      const role = user.role.toLowerCase();
+      const isPm = role === "pm" || role === "project manager";
+      if (!isPm) return false;
+      if (!normalizedSearch) return true;
+      return (
+        user.fullName.toLowerCase().includes(normalizedSearch) ||
+        user.email.toLowerCase().includes(normalizedSearch)
+      );
+    });
+    const pmById = new Map(pmUsers.map((user) => [user.id, user]));
+
+    const rowsByPm = new Map<number, PmPerformanceRow & { requestProjectIds: Set<number> }>();
+    pmUsers.forEach((pm) => {
+      rowsByPm.set(pm.id, {
+        pmId: pm.id,
+        pmName: pm.fullName,
+        pmEmail: pm.email,
+        activeProjects: 0,
+        requestsHandled: 0,
+        completedCalls: 0,
+        totalCUUsed: 0,
+        cuPerRequest: 0,
+        callsPerRequest: 0,
+        totalCompletedMinutes: 0,
+        avgCUPerCall: 0,
+        signalsCaptured: 0,
+        lastCompletedCallDate: null,
+        requestProjectIds: new Set<number>(),
+      });
+    });
+
+    const allProjects = await db.select().from(projects);
+    allProjects.forEach((project) => {
+      if (!project.createdByPmId || !activeStatuses.has(project.status)) return;
+      const row = rowsByPm.get(project.createdByPmId);
+      if (row) row.activeProjects += 1;
+    });
+
+    const conditions = [eq(callRecords.status, "completed")];
+    if (filters.startDate) conditions.push(gte(callRecords.callDate, filters.startDate));
+    if (filters.endDate) conditions.push(lte(callRecords.callDate, filters.endDate));
+
+    const completedRows = await db
+      .select({
+        callRecordId: callRecords.id,
+        projectId: callRecords.projectId,
+        pmId: callRecords.pmId,
+        callDate: callRecords.callDate,
+        durationMinutes: callRecords.durationMinutes,
+        actualDurationMinutes: callRecords.actualDurationMinutes,
+        cuUsed: callRecords.cuUsed,
+      })
+      .from(callRecords)
+      .where(and(...conditions));
+
+    completedRows.forEach((call) => {
+      if (!call.pmId || !pmById.has(call.pmId)) return;
+      const row = rowsByPm.get(call.pmId);
+      if (!row) return;
+
+      const cuUsed = Number(call.cuUsed || 0);
+      const completedMinutes = call.actualDurationMinutes || call.durationMinutes || 0;
+      row.completedCalls += 1;
+      row.totalCUUsed += cuUsed;
+      row.totalCompletedMinutes += completedMinutes;
+      row.requestProjectIds.add(call.projectId);
+
+      if (!row.lastCompletedCallDate || call.callDate > row.lastCompletedCallDate) {
+        row.lastCompletedCallDate = call.callDate;
+      }
+    });
+
+    const signalConditions = [eq(callRecords.status, "completed")];
+    if (filters.startDate) signalConditions.push(gte(callRecords.callDate, filters.startDate));
+    if (filters.endDate) signalConditions.push(lte(callRecords.callDate, filters.endDate));
+
+    const signalRows = await db
+      .select({
+        pmId: callRecords.pmId,
+        insightId: insights.id,
+      })
+      .from(insights)
+      .innerJoin(callRecords, eq(insights.callRecordId, callRecords.id))
+      .where(and(...signalConditions));
+
+    signalRows.forEach((signal) => {
+      if (!signal.pmId || !pmById.has(signal.pmId)) return;
+      const row = rowsByPm.get(signal.pmId);
+      if (row) row.signalsCaptured += 1;
+    });
+
+    const rows = Array.from(rowsByPm.values()).map(({ requestProjectIds, ...row }) => {
+      const requestsHandled = requestProjectIds.size;
+      const completedCalls = row.completedCalls;
+      const totalCUUsed = round(row.totalCUUsed);
+
+      return {
+        ...row,
+        requestsHandled,
+        totalCUUsed,
+        cuPerRequest: requestsHandled > 0 ? round(row.totalCUUsed / requestsHandled) : 0,
+        callsPerRequest: requestsHandled > 0 ? round(completedCalls / requestsHandled) : 0,
+        totalCompletedMinutes: row.totalCompletedMinutes,
+        avgCUPerCall: completedCalls > 0 ? round(row.totalCUUsed / completedCalls) : 0,
+      };
+    });
+
+    rows.sort((a, b) => {
+      const aValue = a[sortBy] || 0;
+      const bValue = b[sortBy] || 0;
+      const comparison = aValue === bValue ? a.pmName.localeCompare(b.pmName) : aValue - bValue;
+      return order === "asc" ? comparison : -comparison;
+    });
+
+    const summaryRows = rows;
+    const totalCUUsed = summaryRows.reduce((sum, row) => sum + row.totalCUUsed, 0);
+    const completedCalls = summaryRows.reduce((sum, row) => sum + row.completedCalls, 0);
+    const requestsHandled = summaryRows.reduce((sum, row) => sum + row.requestsHandled, 0);
+
+    return {
+      summary: {
+        totalPMs: rows.length,
+        requestsHandled,
+        completedCalls,
+        totalCUUsed: round(totalCUUsed),
+      },
+      pagination: {
+        total: rows.length,
+        limit,
+        offset,
+      },
+      rows: rows.slice(offset, offset + limit),
     };
   }
 
