@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { AlertCircle, CreditCard, FileText, RefreshCw } from "lucide-react";
+import { AlertCircle, CreditCard, FileText, RefreshCw, Settings } from "lucide-react";
+import { Link } from "wouter";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -138,6 +139,7 @@ export default function BillableUsage() {
   const [customStartDate, setCustomStartDate] = useState(() => toDateInputValue(new Date()));
   const [customEndDate, setCustomEndDate] = useState(() => toDateInputValue(new Date()));
   const [status, setStatus] = useState<BillableStatus>("all");
+  const [missingRateOnly, setMissingRateOnly] = useState(false);
 
   const dateRange = useMemo(
     () => getPresetRange(datePreset, customStartDate, customEndDate),
@@ -178,7 +180,35 @@ export default function BillableUsage() {
     },
   });
 
-  const rows = data?.rows || [];
+  const refreshRatesMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/billable-usage/refresh-rates");
+      return response.json() as Promise<{
+        updatedCount: number;
+        skippedCount: number;
+        stillMissingRateCount: number;
+      }>;
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: [billableUsageUrl] });
+      toast({
+        title: "Rates refreshed",
+        description: `${result.updatedCount} updated, ${result.stillMissingRateCount} still missing rates.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Rate refresh failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const allRows = data?.rows || [];
+  const rows = missingRateOnly
+    ? allRows.filter((row) => !row.cuRate || Number(row.cuRate) <= 0 || !row.amount || Number(row.amount) <= 0)
+    : allRows;
   const summary = data?.summary || {
     unbilledItems: 0,
     totalCU: 0,
@@ -196,15 +226,36 @@ export default function BillableUsage() {
             Review billable usage generated from completed consultation records before invoice drafting.
           </p>
         </div>
-        <Button
-          onClick={() => syncMutation.mutate()}
-          disabled={syncMutation.isPending}
-          className="gap-2"
-          data-testid="button-sync-billable-usage"
-        >
-          <RefreshCw className="h-4 w-4" />
-          {syncMutation.isPending ? "Syncing..." : "Sync from Completed Calls"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {summary.missingRateItems > 0 && (
+            <Button asChild variant="outline" className="gap-2" data-testid="button-go-to-contracts">
+              <Link href="/contracts">
+                <Settings className="h-4 w-4" />
+                Go to Contracts
+              </Link>
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => refreshRatesMutation.mutate()}
+            disabled={refreshRatesMutation.isPending}
+            title="Recalculates missing rates for unbilled items using project and client contract rates."
+            className="gap-2"
+            data-testid="button-refresh-billable-rates"
+          >
+            <RefreshCw className="h-4 w-4" />
+            {refreshRatesMutation.isPending ? "Refreshing..." : "Refresh Rates"}
+          </Button>
+          <Button
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            className="gap-2"
+            data-testid="button-sync-billable-usage"
+          >
+            <RefreshCw className="h-4 w-4" />
+            {syncMutation.isPending ? "Syncing..." : "Sync from Completed Calls"}
+          </Button>
+        </div>
       </div>
 
       <Alert>
@@ -212,6 +263,9 @@ export default function BillableUsage() {
         <AlertTitle>Finance review layer</AlertTitle>
         <AlertDescription>
           Billable usage is generated from completed call records and reviewed here before invoice drafting. This does not issue invoices or mutate call records.
+          <span className="mt-1 block">
+            Refresh Rates recalculates missing rates for unbilled items using project and client contract rates.
+          </span>
         </AlertDescription>
       </Alert>
 
@@ -250,6 +304,17 @@ export default function BillableUsage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex items-end">
+              <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={missingRateOnly}
+                  onChange={(event) => setMissingRateOnly(event.target.checked)}
+                  data-testid="checkbox-missing-rate-only"
+                />
+                Missing rate only
+              </label>
             </div>
             {datePreset === "custom" && (
               <>
