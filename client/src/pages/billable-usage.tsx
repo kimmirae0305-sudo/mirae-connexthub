@@ -36,6 +36,9 @@ interface BillableUsageRow {
   id: number;
   callRecordId: number;
   clientOrganizationId: number | null;
+  billableUsageClientOrganizationId?: number | null;
+  projectClientOrganizationId?: number | null;
+  clientLinkSource?: "billable_usage" | "project" | "fallback";
   clientName: string;
   projectId: number;
   projectName: string;
@@ -409,7 +412,9 @@ export default function BillableUsage() {
                       <TableCell>{row.clientName}</TableCell>
                       <TableCell>
                         {row.clientOrganizationId ? (
-                          <Badge variant="secondary">Linked</Badge>
+                          <Badge variant="secondary">
+                            {row.clientLinkSource === "project" ? "Project linked" : "Linked"}
+                          </Badge>
                         ) : (
                           <Badge variant="outline">Fallback name only</Badge>
                         )}

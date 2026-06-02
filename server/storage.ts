@@ -92,6 +92,9 @@ export interface BillableUsageRow {
   id: number;
   callRecordId: number;
   clientOrganizationId: number | null;
+  billableUsageClientOrganizationId: number | null;
+  projectClientOrganizationId: number | null;
+  clientLinkSource: "billable_usage" | "project" | "fallback";
   clientName: string;
   projectId: number;
   projectName: string;
@@ -1551,7 +1554,15 @@ export class DatabaseStorage implements IStorage {
     if (filters.endDate) conditions.push(lte(billableUsage.callDate, filters.endDate));
     if (filters.status && filters.status !== "all") conditions.push(eq(billableUsage.status, filters.status));
     if (filters.clientOrganizationId) {
-      conditions.push(eq(billableUsage.clientOrganizationId, filters.clientOrganizationId));
+      conditions.push(
+        or(
+          eq(billableUsage.clientOrganizationId, filters.clientOrganizationId),
+          and(
+            sql`${billableUsage.clientOrganizationId} IS NULL`,
+            eq(projects.clientOrganizationId, filters.clientOrganizationId)
+          )
+        )
+      );
     }
     if (filters.projectId) conditions.push(eq(billableUsage.projectId, filters.projectId));
 
@@ -1559,7 +1570,8 @@ export class DatabaseStorage implements IStorage {
       .select({
         id: billableUsage.id,
         callRecordId: billableUsage.callRecordId,
-        clientOrganizationId: billableUsage.clientOrganizationId,
+        billableUsageClientOrganizationId: billableUsage.clientOrganizationId,
+        projectClientOrganizationId: projects.clientOrganizationId,
         clientOrganizationName: clientOrganizations.name,
         projectClientName: projects.clientName,
         projectClientCompany: projects.clientCompany,
@@ -1586,26 +1598,39 @@ export class DatabaseStorage implements IStorage {
     const rows = await (conditions.length > 0 ? query.where(and(...conditions)) : query)
       .orderBy(desc(billableUsage.callDate), desc(billableUsage.createdAt));
 
-    const mappedRows: BillableUsageRow[] = rows.map((row) => ({
-      id: row.id,
-      callRecordId: row.callRecordId,
-      clientOrganizationId: row.clientOrganizationId,
-      clientName: row.clientOrganizationName || row.projectClientName || row.projectClientCompany || "-",
-      projectId: row.projectId,
-      projectName: row.projectName,
-      expertId: row.expertId,
-      expertName: row.expertName,
-      callDate: row.callDate,
-      cuUsed: row.cuUsed,
-      currency: row.currency,
-      cuRate: row.cuRate,
-      amount: row.amount,
-      status: row.status,
-      source: row.source,
-      adjustmentReason: row.adjustmentReason,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    }));
+    const mappedRows: BillableUsageRow[] = rows.map((row) => {
+      const resolvedClientOrganizationId =
+        row.billableUsageClientOrganizationId ?? row.projectClientOrganizationId ?? null;
+      const clientLinkSource = row.billableUsageClientOrganizationId
+        ? "billable_usage"
+        : row.projectClientOrganizationId
+          ? "project"
+          : "fallback";
+
+      return {
+        id: row.id,
+        callRecordId: row.callRecordId,
+        clientOrganizationId: resolvedClientOrganizationId,
+        billableUsageClientOrganizationId: row.billableUsageClientOrganizationId,
+        projectClientOrganizationId: row.projectClientOrganizationId,
+        clientLinkSource,
+        clientName: row.clientOrganizationName || row.projectClientName || row.projectClientCompany || "-",
+        projectId: row.projectId,
+        projectName: row.projectName,
+        expertId: row.expertId,
+        expertName: row.expertName,
+        callDate: row.callDate,
+        cuUsed: row.cuUsed,
+        currency: row.currency,
+        cuRate: row.cuRate,
+        amount: row.amount,
+        status: row.status,
+        source: row.source,
+        adjustmentReason: row.adjustmentReason,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    });
 
     const round = (value: number) => Math.round(value * 100) / 100;
     const totalCU = mappedRows.reduce((sum, row) => sum + Number(row.cuUsed || 0), 0);
@@ -1674,27 +1699,39 @@ export class DatabaseStorage implements IStorage {
       .onConflictDoNothing({ target: billableUsage.callRecordId })
       .returning();
 
-    const backfilledRows = await db
-      .update(billableUsage)
-      .set({
+    const rowsNeedingClientBackfill = await db
+      .select({
+        id: billableUsage.id,
         clientOrganizationId: projects.clientOrganizationId,
-        updatedAt: new Date(),
       })
-      .from(projects)
+      .from(billableUsage)
+      .innerJoin(projects, eq(billableUsage.projectId, projects.id))
       .where(
         and(
-          eq(billableUsage.projectId, projects.id),
           eq(billableUsage.status, "unbilled"),
           sql`${billableUsage.clientOrganizationId} IS NULL`,
           sql`${projects.clientOrganizationId} IS NOT NULL`
         )
-      )
-      .returning();
+      );
+
+    let clientOrganizationBackfilledCount = 0;
+    for (const row of rowsNeedingClientBackfill) {
+      if (!row.clientOrganizationId) continue;
+      const updatedRows = await db
+        .update(billableUsage)
+        .set({
+          clientOrganizationId: row.clientOrganizationId,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(billableUsage.id, row.id), sql`${billableUsage.clientOrganizationId} IS NULL`))
+        .returning();
+      clientOrganizationBackfilledCount += updatedRows.length;
+    }
 
     return {
       createdCount: createdRows.length,
       skippedCount: completedRows.length - createdRows.length,
-      clientOrganizationBackfilledCount: backfilledRows.length,
+      clientOrganizationBackfilledCount,
     };
   }
 
@@ -1868,7 +1905,8 @@ export class DatabaseStorage implements IStorage {
     const selectedRows = await db
       .select({
         id: billableUsage.id,
-        clientOrganizationId: billableUsage.clientOrganizationId,
+        billableUsageClientOrganizationId: billableUsage.clientOrganizationId,
+        projectClientOrganizationId: projects.clientOrganizationId,
         clientName: clientOrganizations.name,
         projectId: billableUsage.projectId,
         projectName: projects.name,
@@ -1891,33 +1929,38 @@ export class DatabaseStorage implements IStorage {
       throw new Error("One or more selected billable usage items were not found.");
     }
 
-    const invalidStatus = selectedRows.find((row) => row.status !== "unbilled");
+    const resolvedSelectedRows = selectedRows.map((row) => ({
+      ...row,
+      clientOrganizationId: row.billableUsageClientOrganizationId ?? row.projectClientOrganizationId ?? null,
+    }));
+
+    const invalidStatus = resolvedSelectedRows.find((row) => row.status !== "unbilled");
     if (invalidStatus) {
       throw new Error("Only unbilled billable usage items can be added to an invoice draft.");
     }
 
-    const missingClient = selectedRows.find((row) => !row.clientOrganizationId);
+    const missingClient = resolvedSelectedRows.find((row) => !row.clientOrganizationId);
     if (missingClient) {
       throw new Error("All selected billable usage items must be linked to a client organization.");
     }
 
-    const clientOrganizationId = selectedRows[0].clientOrganizationId;
-    const mixedClient = selectedRows.find((row) => row.clientOrganizationId !== clientOrganizationId);
+    const clientOrganizationId = resolvedSelectedRows[0].clientOrganizationId;
+    const mixedClient = resolvedSelectedRows.find((row) => row.clientOrganizationId !== clientOrganizationId);
     if (mixedClient || !clientOrganizationId) {
       throw new Error("All selected billable usage items must belong to the same client organization.");
     }
 
-    const nonUsd = selectedRows.find((row) => (row.currency || "USD") !== "USD");
+    const nonUsd = resolvedSelectedRows.find((row) => (row.currency || "USD") !== "USD");
     if (nonUsd) {
       throw new Error("Invoice drafts can only include USD billable usage items.");
     }
 
-    const missingRate = selectedRows.find((row) => Number(row.cuRate || 0) <= 0);
+    const missingRate = resolvedSelectedRows.find((row) => Number(row.cuRate || 0) <= 0);
     if (missingRate) {
       throw new Error("All selected billable usage items must have a valid USD CU rate.");
     }
 
-    const missingAmount = selectedRows.find((row) => Number(row.amount || 0) <= 0);
+    const missingAmount = resolvedSelectedRows.find((row) => Number(row.amount || 0) <= 0);
     if (missingAmount) {
       throw new Error("All selected billable usage items must have a valid USD amount.");
     }
@@ -1931,12 +1974,12 @@ export class DatabaseStorage implements IStorage {
     }
 
     const round = (value: number) => Math.round(value * 100) / 100;
-    const total = round(selectedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
-    const periodStart = selectedRows.reduce<Date | null>(
+    const total = round(resolvedSelectedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+    const periodStart = resolvedSelectedRows.reduce<Date | null>(
       (earliest, row) => (!earliest || row.callDate < earliest ? row.callDate : earliest),
       null
     );
-    const periodEnd = selectedRows.reduce<Date | null>(
+    const periodEnd = resolvedSelectedRows.reduce<Date | null>(
       (latest, row) => (!latest || row.callDate > latest ? row.callDate : latest),
       null
     );
@@ -1960,7 +2003,7 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     await db.insert(invoiceLineItems).values(
-      selectedRows.map((row) => ({
+      resolvedSelectedRows.map((row) => ({
         invoiceId: createdInvoice.id,
         billableUsageId: row.id,
         description: `${row.projectName} - ${row.expertName}`,
@@ -1972,6 +2015,18 @@ export class DatabaseStorage implements IStorage {
         amount: Number(row.amount || 0).toFixed(2),
       }))
     );
+
+    const rowsNeedingClientBackfill = resolvedSelectedRows.filter((row) => !row.billableUsageClientOrganizationId);
+    for (const row of rowsNeedingClientBackfill) {
+      if (!row.clientOrganizationId) continue;
+      await db
+        .update(billableUsage)
+        .set({
+          clientOrganizationId: row.clientOrganizationId,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(billableUsage.id, row.id), sql`${billableUsage.clientOrganizationId} IS NULL`));
+    }
 
     const updatedRows = await db
       .update(billableUsage)

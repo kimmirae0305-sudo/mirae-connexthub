@@ -69,6 +69,10 @@ interface InvoiceDetail {
 interface BillableUsageRow {
   id: number;
   clientOrganizationId: number | null;
+  resolvedClientOrganizationId?: number | string | null;
+  billableUsageClientOrganizationId?: number | string | null;
+  projectClientOrganizationId?: number | string | null;
+  clientLinkSource?: string | null;
   clientOrganizationID?: number | string | null;
   client_organization_id?: number | string | null;
   clientId?: number | string | null;
@@ -136,7 +140,16 @@ const normalizedStatus = (row: BillableUsageRow) => String(row.status || "").tri
 const normalizedCurrency = (row: BillableUsageRow) =>
   String(readFirstValue(row, ["invoiceCurrency", "invoice_currency", "currency"]) || "USD").trim().toUpperCase();
 const getClientOrganizationId = (row: BillableUsageRow) =>
-  parseAmount(readFirstValue(row, ["clientOrganizationId", "clientOrganizationID", "client_organization_id", "clientId", "client_id"]));
+  parseAmount(readFirstValue(row, [
+    "clientOrganizationId",
+    "resolvedClientOrganizationId",
+    "billableUsageClientOrganizationId",
+    "projectClientOrganizationId",
+    "clientOrganizationID",
+    "client_organization_id",
+    "clientId",
+    "client_id",
+  ]));
 const getUsdCuRate = (row: BillableUsageRow) =>
   parseAmount(readFirstValue(row, ["cuRate", "cu_rate", "usdCuRate", "usd_cu_rate", "usdCuRateUsd", "cuRateUsd", "cu_rate_usd"]));
 const getAmountUsd = (row: BillableUsageRow) =>
