@@ -215,7 +215,7 @@ export default function BillableUsage() {
     billableAmount: 0,
     missingRateItems: 0,
   };
-  const primaryCurrency = rows[0]?.currency || "USD";
+  const invoiceCurrency = "USD";
 
   return (
     <div className="space-y-6 p-8">
@@ -224,6 +224,7 @@ export default function BillableUsage() {
           <h1 className="text-3xl font-semibold text-foreground">Billable Usage</h1>
           <p className="text-sm text-muted-foreground">
             Review billable usage generated from completed consultation records before invoice drafting.
+            <span className="block">Billable amounts are calculated for USD client invoicing.</span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -313,7 +314,7 @@ export default function BillableUsage() {
                   onChange={(event) => setMissingRateOnly(event.target.checked)}
                   data-testid="checkbox-missing-rate-only"
                 />
-                Missing rate only
+                USD rate missing only
               </label>
             </div>
             {datePreset === "custom" && (
@@ -356,13 +357,13 @@ export default function BillableUsage() {
           icon={CreditCard}
         />
         <MetricCard
-          title="Billable Amount"
-          value={formatMoney(summary.billableAmount, primaryCurrency)}
-          subtitle="Based on captured CU rates"
+          title="Billable Amount (USD)"
+          value={formatMoney(summary.billableAmount, invoiceCurrency)}
+          subtitle="Based on captured USD CU rates"
           icon={CreditCard}
         />
         <MetricCard
-          title="Missing Rate Items"
+          title="USD CU Rate Missing"
           value={summary.missingRateItems}
           subtitle="Need rate review before invoicing"
           icon={AlertCircle}
@@ -392,9 +393,9 @@ export default function BillableUsage() {
                     <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">CU Used</TableHead>
-                    <TableHead className="text-right text-xs font-semibold uppercase">CU Rate</TableHead>
-                    <TableHead className="text-right text-xs font-semibold uppercase">Amount</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase">Currency</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase">USD CU Rate</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase">Amount (USD)</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Invoice Currency</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Source</TableHead>
                   </TableRow>
@@ -413,7 +414,7 @@ export default function BillableUsage() {
                       <TableCell className="text-right font-mono">
                         {row.amount ? Number(row.amount).toFixed(2) : "-"}
                       </TableCell>
-                      <TableCell>{row.currency}</TableCell>
+                      <TableCell>{invoiceCurrency}</TableCell>
                       <TableCell>{statusLabels[row.status as BillableStatus] || row.status}</TableCell>
                       <TableCell>{formatSource(row.source)}</TableCell>
                     </TableRow>
