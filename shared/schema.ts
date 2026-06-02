@@ -313,6 +313,38 @@ export const billableUsage = pgTable("billable_usage", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Invoices table (Finance draft layer; issuing/payment handled later)
+export const invoices = pgTable("invoices", {
+  id: serial("id").primaryKey(),
+  draftNumber: text("draft_number").notNull().unique(),
+  clientOrganizationId: integer("client_organization_id").notNull().references(() => clientOrganizations.id, { onDelete: "restrict" }),
+  invoiceDate: timestamp("invoice_date").notNull(),
+  periodStart: timestamp("period_start"),
+  periodEnd: timestamp("period_end"),
+  currency: text("currency").notNull().default("USD"),
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 12, scale: 2 }).notNull().default("0"),
+  status: text("status").notNull().default("draft"), // draft, issued, void
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Invoice line items table (one billable usage row can appear in one invoice only)
+export const invoiceLineItems = pgTable("invoice_line_items", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id").notNull().references(() => invoices.id, { onDelete: "cascade" }),
+  billableUsageId: integer("billable_usage_id").notNull().references(() => billableUsage.id, { onDelete: "restrict" }).unique(),
+  description: text("description").notNull(),
+  serviceDate: timestamp("service_date").notNull(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "restrict" }),
+  expertId: integer("expert_id").notNull().references(() => experts.id, { onDelete: "restrict" }),
+  cuUsed: decimal("cu_used", { precision: 10, scale: 2 }).notNull(),
+  cuRate: decimal("cu_rate", { precision: 10, scale: 2 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   managedOrganizations: many(clientOrganizations),
@@ -327,6 +359,7 @@ export const clientOrganizationsRelations = relations(clientOrganizations, ({ on
   }),
   pocs: many(clientPocs),
   projects: many(projects),
+  invoices: many(invoices),
 }));
 
 export const clientPocsRelations = relations(clientPocs, ({ one }) => ({
@@ -499,6 +532,33 @@ export const billableUsageRelations = relations(billableUsage, ({ one }) => ({
   }),
 }));
 
+export const invoicesRelations = relations(invoices, ({ one, many }) => ({
+  clientOrganization: one(clientOrganizations, {
+    fields: [invoices.clientOrganizationId],
+    references: [clientOrganizations.id],
+  }),
+  lineItems: many(invoiceLineItems),
+}));
+
+export const invoiceLineItemsRelations = relations(invoiceLineItems, ({ one }) => ({
+  invoice: one(invoices, {
+    fields: [invoiceLineItems.invoiceId],
+    references: [invoices.id],
+  }),
+  billableUsage: one(billableUsage, {
+    fields: [invoiceLineItems.billableUsageId],
+    references: [billableUsage.id],
+  }),
+  project: one(projects, {
+    fields: [invoiceLineItems.projectId],
+    references: [projects.id],
+  }),
+  expert: one(experts, {
+    fields: [invoiceLineItems.expertId],
+    references: [experts.id],
+  }),
+}));
+
 // Helper for coercing date strings to Date objects
 const coerceDate = z.preprocess((val) => {
   if (val === null || val === undefined || val === "") return null;
@@ -627,6 +687,23 @@ export const insertBillableUsageSchema = createInsertSchema(billableUsage).omit(
   callDate: coerceDateRequired,
 });
 
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  invoiceDate: coerceDateRequired,
+  periodStart: coerceDate.optional(),
+  periodEnd: coerceDate.optional(),
+});
+
+export const insertInvoiceLineItemSchema = createInsertSchema(invoiceLineItems).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  serviceDate: coerceDateRequired,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -669,6 +746,12 @@ export type InsertUsageRecord = z.infer<typeof insertUsageRecordSchema>;
 
 export type BillableUsage = typeof billableUsage.$inferSelect;
 export type InsertBillableUsage = z.infer<typeof insertBillableUsageSchema>;
+
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+
+export type InvoiceLineItem = typeof invoiceLineItems.$inferSelect;
+export type InsertInvoiceLineItem = z.infer<typeof insertInvoiceLineItemSchema>;
 
 export type ProjectActivity = typeof projectActivities.$inferSelect;
 export type InsertProjectActivity = z.infer<typeof insertProjectActivitySchema>;
