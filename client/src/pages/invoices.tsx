@@ -148,6 +148,17 @@ const isUsd = (row: BillableUsageRow) => normalizedCurrency(row) === "USD";
 const isEligibleForInvoiceDraft = (row: BillableUsageRow) =>
   isUnbilled(row) && hasClientOrganization(row) && isUsd(row) && hasValidRate(row);
 
+const getExclusionReason = (row: BillableUsageRow) => {
+  if (!isUnbilled(row)) return "Status is not unbilled";
+  if (!hasValidRate(row)) {
+    if (getUsdCuRate(row) <= 0) return "USD CU rate is missing or invalid";
+    return "Amount is missing or invalid";
+  }
+  if (!isUsd(row)) return "Invoice currency is not USD";
+  if (!hasClientOrganization(row)) return "Client organization link is missing";
+  return "Other eligibility issue";
+};
+
 export default function Invoices() {
   const { toast } = useToast();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -181,6 +192,13 @@ export default function Invoices() {
   const missingRateRows = unbilledRows.filter((row) => isUnbilled(row) && !hasValidRate(row));
   const missingClientRows = unbilledRows.filter((row) => isUnbilled(row) && hasValidRate(row) && isUsd(row) && !hasClientOrganization(row));
   const nonUsdRows = unbilledRows.filter((row) => isUnbilled(row) && hasValidRate(row) && hasClientOrganization(row) && !isUsd(row));
+  const otherIneligibleRows = unbilledRows.filter(
+    (row) =>
+      !isEligibleForInvoiceDraft(row) &&
+      !missingRateRows.includes(row) &&
+      !missingClientRows.includes(row) &&
+      !nonUsdRows.includes(row)
+  );
 
   const selectedRows = useMemo(
     () => eligibleRows.filter((row) => selectedBillableUsageIds.includes(row.id)),
@@ -320,6 +338,7 @@ export default function Invoices() {
               <AlertDescription>
                 {missingRateRows.length} unbilled item{missingRateRows.length === 1 ? "" : "s"} need USD CU rate review before invoice drafting.
               </AlertDescription>
+              <ExcludedBillableUsageTable rows={missingRateRows} getReason={getExclusionReason} />
             </Alert>
           )}
 
@@ -330,6 +349,7 @@ export default function Invoices() {
               <AlertDescription>
                 {missingClientRows.length} unbilled item{missingClientRows.length === 1 ? "" : "s"} have valid USD rates, but need a linked client organization before invoice drafting.
               </AlertDescription>
+              <ExcludedBillableUsageTable rows={missingClientRows} getReason={getExclusionReason} />
             </Alert>
           )}
 
@@ -340,6 +360,18 @@ export default function Invoices() {
               <AlertDescription>
                 {nonUsdRows.length} unbilled item{nonUsdRows.length === 1 ? "" : "s"} are not marked as USD invoice currency.
               </AlertDescription>
+              <ExcludedBillableUsageTable rows={nonUsdRows} getReason={getExclusionReason} />
+            </Alert>
+          )}
+
+          {otherIneligibleRows.length > 0 && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Other ineligible items</AlertTitle>
+              <AlertDescription>
+                {otherIneligibleRows.length} item{otherIneligibleRows.length === 1 ? "" : "s"} could not be included in this draft.
+              </AlertDescription>
+              <ExcludedBillableUsageTable rows={otherIneligibleRows} getReason={getExclusionReason} />
             </Alert>
           )}
 
@@ -507,6 +539,47 @@ export default function Invoices() {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function ExcludedBillableUsageTable({
+  rows,
+  getReason,
+}: {
+  rows: BillableUsageRow[];
+  getReason: (row: BillableUsageRow) => string;
+}) {
+  return (
+    <div className="mt-3 overflow-x-auto rounded-md border bg-background">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
+            <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
+            <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
+            <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
+            <TableHead className="text-xs font-semibold uppercase">Currency</TableHead>
+            <TableHead className="text-right text-xs font-semibold uppercase">USD CU Rate</TableHead>
+            <TableHead className="text-right text-xs font-semibold uppercase">Amount (USD)</TableHead>
+            <TableHead className="text-xs font-semibold uppercase">Exclusion Reason</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell>{row.clientName || "-"}</TableCell>
+              <TableCell>{row.projectName || "-"}</TableCell>
+              <TableCell>{row.expertName || "-"}</TableCell>
+              <TableCell>{row.status || "-"}</TableCell>
+              <TableCell>{normalizedCurrency(row)}</TableCell>
+              <TableCell className="text-right font-mono">{getUsdCuRate(row).toFixed(2)}</TableCell>
+              <TableCell className="text-right font-mono">{getAmountUsd(row).toFixed(2)}</TableCell>
+              <TableCell>{getReason(row)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { format } from "date-fns";
 import { AlertCircle, CreditCard, FileText, RefreshCw, Settings } from "lucide-react";
 import { Link } from "wouter";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -390,6 +391,7 @@ export default function BillableUsage() {
                   <TableRow>
                     <TableHead className="text-xs font-semibold uppercase">Call Date</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Client Link</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">CU Used</TableHead>
@@ -405,6 +407,13 @@ export default function BillableUsage() {
                     <TableRow key={row.id} data-testid={`row-billable-usage-${row.id}`}>
                       <TableCell className="font-mono text-sm">{formatDate(row.callDate)}</TableCell>
                       <TableCell>{row.clientName}</TableCell>
+                      <TableCell>
+                        {row.clientOrganizationId ? (
+                          <Badge variant="secondary">Linked</Badge>
+                        ) : (
+                          <Badge variant="outline">Fallback name only</Badge>
+                        )}
+                      </TableCell>
                       <TableCell>{row.projectName}</TableCell>
                       <TableCell>{row.expertName}</TableCell>
                       <TableCell className="text-right font-mono">{Number(row.cuUsed || 0).toFixed(2)}</TableCell>
