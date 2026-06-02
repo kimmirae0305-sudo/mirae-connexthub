@@ -162,13 +162,13 @@ export default function BillableUsage() {
   const syncMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/billable-usage/sync");
-      return response.json() as Promise<{ createdCount: number; skippedCount: number }>;
+      return response.json() as Promise<{ createdCount: number; skippedCount: number; clientOrganizationBackfilledCount?: number }>;
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: [billableUsageUrl] });
       toast({
         title: "Billable usage synced",
-        description: `${result.createdCount} created, ${result.skippedCount} skipped as already linked.`,
+        description: `${result.createdCount} created, ${result.skippedCount} skipped as already linked, ${result.clientOrganizationBackfilledCount || 0} client links repaired.`,
       });
     },
     onError: (error: Error) => {

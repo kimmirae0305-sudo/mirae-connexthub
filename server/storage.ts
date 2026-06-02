@@ -122,6 +122,7 @@ export interface BillableUsageReport {
 export interface BillableUsageSyncResult {
   createdCount: number;
   skippedCount: number;
+  clientOrganizationBackfilledCount?: number;
 }
 
 export interface BillableUsageRateRefreshResult {
@@ -1673,9 +1674,27 @@ export class DatabaseStorage implements IStorage {
       .onConflictDoNothing({ target: billableUsage.callRecordId })
       .returning();
 
+    const backfilledRows = await db
+      .update(billableUsage)
+      .set({
+        clientOrganizationId: projects.clientOrganizationId,
+        updatedAt: new Date(),
+      })
+      .from(projects)
+      .where(
+        and(
+          eq(billableUsage.projectId, projects.id),
+          eq(billableUsage.status, "unbilled"),
+          sql`${billableUsage.clientOrganizationId} IS NULL`,
+          sql`${projects.clientOrganizationId} IS NOT NULL`
+        )
+      )
+      .returning();
+
     return {
       createdCount: createdRows.length,
       skippedCount: completedRows.length - createdRows.length,
+      clientOrganizationBackfilledCount: backfilledRows.length,
     };
   }
 

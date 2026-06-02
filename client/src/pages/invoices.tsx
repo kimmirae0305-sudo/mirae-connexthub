@@ -178,9 +178,9 @@ export default function Invoices() {
 
   const unbilledRows = billableUsageData?.rows || [];
   const eligibleRows = unbilledRows.filter(isEligibleForInvoiceDraft);
-  const missingRateRows = unbilledRows.filter(
-    (row) => isUnbilled(row) && (!hasValidRate(row) || !hasClientOrganization(row) || !isUsd(row))
-  );
+  const missingRateRows = unbilledRows.filter((row) => isUnbilled(row) && !hasValidRate(row));
+  const missingClientRows = unbilledRows.filter((row) => isUnbilled(row) && hasValidRate(row) && isUsd(row) && !hasClientOrganization(row));
+  const nonUsdRows = unbilledRows.filter((row) => isUnbilled(row) && hasValidRate(row) && hasClientOrganization(row) && !isUsd(row));
 
   const selectedRows = useMemo(
     () => eligibleRows.filter((row) => selectedBillableUsageIds.includes(row.id)),
@@ -319,6 +319,26 @@ export default function Invoices() {
               <AlertTitle>Missing-rate items excluded</AlertTitle>
               <AlertDescription>
                 {missingRateRows.length} unbilled item{missingRateRows.length === 1 ? "" : "s"} need USD CU rate review before invoice drafting.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {missingClientRows.length > 0 && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Client organization link required</AlertTitle>
+              <AlertDescription>
+                {missingClientRows.length} unbilled item{missingClientRows.length === 1 ? "" : "s"} have valid USD rates, but need a linked client organization before invoice drafting.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {nonUsdRows.length > 0 && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Non-USD items excluded</AlertTitle>
+              <AlertDescription>
+                {nonUsdRows.length} unbilled item{nonUsdRows.length === 1 ? "" : "s"} are not marked as USD invoice currency.
               </AlertDescription>
             </Alert>
           )}
