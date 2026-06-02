@@ -5,6 +5,8 @@ import {
   projectExperts,
   usageRecords,
   billableUsage,
+  invoices,
+  invoiceLineItems,
   users,
   clients,
   clientOrganizations,
@@ -126,6 +128,49 @@ export interface BillableUsageRateRefreshResult {
   updatedCount: number;
   skippedCount: number;
   stillMissingRateCount: number;
+}
+
+export interface InvoiceListRow {
+  id: number;
+  draftNumber: string;
+  clientOrganizationId: number;
+  clientName: string;
+  invoiceDate: Date;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  currency: string;
+  subtotal: string;
+  total: string;
+  status: string;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  lineItemCount: number;
+}
+
+export interface InvoiceLineItemRow {
+  id: number;
+  invoiceId: number;
+  billableUsageId: number;
+  description: string;
+  serviceDate: Date;
+  projectId: number;
+  projectName: string;
+  expertId: number;
+  expertName: string;
+  cuUsed: string;
+  cuRate: string;
+  amount: string;
+  createdAt: Date;
+}
+
+export interface InvoiceDetail {
+  invoice: InvoiceListRow;
+  lineItems: InvoiceLineItemRow[];
+}
+
+export interface CreateInvoiceDraftResult extends InvoiceDetail {
+  billableUsageUpdatedCount: number;
 }
 
 export interface OperationsAnalyticsFilters {
@@ -341,6 +386,11 @@ export interface IStorage {
   getBillableUsage(filters: BillableUsageFilters): Promise<BillableUsageReport>;
   syncBillableUsageFromCompletedCalls(): Promise<BillableUsageSyncResult>;
   refreshMissingBillableUsageRates(): Promise<BillableUsageRateRefreshResult>;
+
+  // Invoices (Finance draft layer)
+  getInvoices(): Promise<InvoiceListRow[]>;
+  getInvoiceById(id: number): Promise<InvoiceDetail | undefined>;
+  createInvoiceDraft(billableUsageIds: number[]): Promise<CreateInvoiceDraftResult>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1695,6 +1745,232 @@ export class DatabaseStorage implements IStorage {
       updatedCount,
       skippedCount: protectedMissingRateRows.length,
       stillMissingRateCount,
+    };
+  }
+
+  async getInvoices(): Promise<InvoiceListRow[]> {
+    const invoiceRows = await db
+      .select({
+        id: invoices.id,
+        draftNumber: invoices.draftNumber,
+        clientOrganizationId: invoices.clientOrganizationId,
+        clientName: clientOrganizations.name,
+        invoiceDate: invoices.invoiceDate,
+        periodStart: invoices.periodStart,
+        periodEnd: invoices.periodEnd,
+        currency: invoices.currency,
+        subtotal: invoices.subtotal,
+        total: invoices.total,
+        status: invoices.status,
+        notes: invoices.notes,
+        createdAt: invoices.createdAt,
+        updatedAt: invoices.updatedAt,
+      })
+      .from(invoices)
+      .innerJoin(clientOrganizations, eq(invoices.clientOrganizationId, clientOrganizations.id))
+      .orderBy(desc(invoices.createdAt));
+
+    const lineCounts = await db
+      .select({
+        invoiceId: invoiceLineItems.invoiceId,
+        count: sql<number>`count(*)`,
+      })
+      .from(invoiceLineItems)
+      .groupBy(invoiceLineItems.invoiceId);
+    const countByInvoiceId = new Map(lineCounts.map((row) => [row.invoiceId, Number(row.count || 0)]));
+
+    return invoiceRows.map((row) => ({
+      ...row,
+      lineItemCount: countByInvoiceId.get(row.id) || 0,
+    }));
+  }
+
+  async getInvoiceById(id: number): Promise<InvoiceDetail | undefined> {
+    const [invoiceRow] = await db
+      .select({
+        id: invoices.id,
+        draftNumber: invoices.draftNumber,
+        clientOrganizationId: invoices.clientOrganizationId,
+        clientName: clientOrganizations.name,
+        invoiceDate: invoices.invoiceDate,
+        periodStart: invoices.periodStart,
+        periodEnd: invoices.periodEnd,
+        currency: invoices.currency,
+        subtotal: invoices.subtotal,
+        total: invoices.total,
+        status: invoices.status,
+        notes: invoices.notes,
+        createdAt: invoices.createdAt,
+        updatedAt: invoices.updatedAt,
+      })
+      .from(invoices)
+      .innerJoin(clientOrganizations, eq(invoices.clientOrganizationId, clientOrganizations.id))
+      .where(eq(invoices.id, id));
+
+    if (!invoiceRow) return undefined;
+
+    const lineItems = await db
+      .select({
+        id: invoiceLineItems.id,
+        invoiceId: invoiceLineItems.invoiceId,
+        billableUsageId: invoiceLineItems.billableUsageId,
+        description: invoiceLineItems.description,
+        serviceDate: invoiceLineItems.serviceDate,
+        projectId: invoiceLineItems.projectId,
+        projectName: projects.name,
+        expertId: invoiceLineItems.expertId,
+        expertName: experts.name,
+        cuUsed: invoiceLineItems.cuUsed,
+        cuRate: invoiceLineItems.cuRate,
+        amount: invoiceLineItems.amount,
+        createdAt: invoiceLineItems.createdAt,
+      })
+      .from(invoiceLineItems)
+      .innerJoin(projects, eq(invoiceLineItems.projectId, projects.id))
+      .innerJoin(experts, eq(invoiceLineItems.expertId, experts.id))
+      .where(eq(invoiceLineItems.invoiceId, id))
+      .orderBy(invoiceLineItems.serviceDate, invoiceLineItems.id);
+
+    return {
+      invoice: {
+        ...invoiceRow,
+        lineItemCount: lineItems.length,
+      },
+      lineItems,
+    };
+  }
+
+  async createInvoiceDraft(billableUsageIds: number[]): Promise<CreateInvoiceDraftResult> {
+    const uniqueIds = Array.from(new Set(billableUsageIds.filter((id) => Number.isInteger(id) && id > 0)));
+    if (uniqueIds.length === 0) {
+      throw new Error("At least one billable usage item is required.");
+    }
+
+    const selectedRows = await db
+      .select({
+        id: billableUsage.id,
+        clientOrganizationId: billableUsage.clientOrganizationId,
+        clientName: clientOrganizations.name,
+        projectId: billableUsage.projectId,
+        projectName: projects.name,
+        expertId: billableUsage.expertId,
+        expertName: experts.name,
+        callDate: billableUsage.callDate,
+        cuUsed: billableUsage.cuUsed,
+        currency: billableUsage.currency,
+        cuRate: billableUsage.cuRate,
+        amount: billableUsage.amount,
+        status: billableUsage.status,
+      })
+      .from(billableUsage)
+      .innerJoin(projects, eq(billableUsage.projectId, projects.id))
+      .innerJoin(experts, eq(billableUsage.expertId, experts.id))
+      .leftJoin(clientOrganizations, eq(billableUsage.clientOrganizationId, clientOrganizations.id))
+      .where(inArray(billableUsage.id, uniqueIds));
+
+    if (selectedRows.length !== uniqueIds.length) {
+      throw new Error("One or more selected billable usage items were not found.");
+    }
+
+    const invalidStatus = selectedRows.find((row) => row.status !== "unbilled");
+    if (invalidStatus) {
+      throw new Error("Only unbilled billable usage items can be added to an invoice draft.");
+    }
+
+    const missingClient = selectedRows.find((row) => !row.clientOrganizationId);
+    if (missingClient) {
+      throw new Error("All selected billable usage items must be linked to a client organization.");
+    }
+
+    const clientOrganizationId = selectedRows[0].clientOrganizationId;
+    const mixedClient = selectedRows.find((row) => row.clientOrganizationId !== clientOrganizationId);
+    if (mixedClient || !clientOrganizationId) {
+      throw new Error("All selected billable usage items must belong to the same client organization.");
+    }
+
+    const nonUsd = selectedRows.find((row) => (row.currency || "USD") !== "USD");
+    if (nonUsd) {
+      throw new Error("Invoice drafts can only include USD billable usage items.");
+    }
+
+    const missingRate = selectedRows.find((row) => Number(row.cuRate || 0) <= 0);
+    if (missingRate) {
+      throw new Error("All selected billable usage items must have a valid USD CU rate.");
+    }
+
+    const missingAmount = selectedRows.find((row) => Number(row.amount || 0) <= 0);
+    if (missingAmount) {
+      throw new Error("All selected billable usage items must have a valid USD amount.");
+    }
+
+    const existingLineItems = await db
+      .select({ billableUsageId: invoiceLineItems.billableUsageId })
+      .from(invoiceLineItems)
+      .where(inArray(invoiceLineItems.billableUsageId, uniqueIds));
+    if (existingLineItems.length > 0) {
+      throw new Error("One or more selected billable usage items are already linked to an invoice.");
+    }
+
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const total = round(selectedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+    const periodStart = selectedRows.reduce<Date | null>(
+      (earliest, row) => (!earliest || row.callDate < earliest ? row.callDate : earliest),
+      null
+    );
+    const periodEnd = selectedRows.reduce<Date | null>(
+      (latest, row) => (!latest || row.callDate > latest ? row.callDate : latest),
+      null
+    );
+    const now = new Date();
+    const dateStamp = now.toISOString().slice(0, 10).replace(/-/g, "");
+    const draftNumber = `DRAFT-${dateStamp}-${now.getTime()}`;
+
+    const [createdInvoice] = await db
+      .insert(invoices)
+      .values({
+        draftNumber,
+        clientOrganizationId,
+        invoiceDate: now,
+        periodStart,
+        periodEnd,
+        currency: "USD",
+        subtotal: total.toFixed(2),
+        total: total.toFixed(2),
+        status: "draft",
+      })
+      .returning();
+
+    await db.insert(invoiceLineItems).values(
+      selectedRows.map((row) => ({
+        invoiceId: createdInvoice.id,
+        billableUsageId: row.id,
+        description: `${row.projectName} - ${row.expertName}`,
+        serviceDate: row.callDate,
+        projectId: row.projectId,
+        expertId: row.expertId,
+        cuUsed: Number(row.cuUsed || 0).toFixed(2),
+        cuRate: Number(row.cuRate || 0).toFixed(2),
+        amount: Number(row.amount || 0).toFixed(2),
+      }))
+    );
+
+    const updatedRows = await db
+      .update(billableUsage)
+      .set({
+        status: "draft",
+        updatedAt: new Date(),
+      })
+      .where(and(inArray(billableUsage.id, uniqueIds), eq(billableUsage.status, "unbilled")))
+      .returning();
+
+    const detail = await this.getInvoiceById(createdInvoice.id);
+    if (!detail) {
+      throw new Error("Invoice draft was created but could not be loaded.");
+    }
+
+    return {
+      ...detail,
+      billableUsageUpdatedCount: updatedRows.length,
     };
   }
 

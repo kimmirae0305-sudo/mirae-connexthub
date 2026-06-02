@@ -8,6 +8,7 @@ import {
   TrendingUp,
   Building2,
   Phone,
+  Receipt,
   LogOut,
   UsersRound,
   Award,
@@ -120,6 +121,12 @@ const financeItems: NavItem[] = [
     url: "/contracts",
     icon: Briefcase,
     pageKey: "contracts",
+  },
+  {
+    title: "Invoices",
+    url: "/invoices",
+    icon: Receipt,
+    pageKey: "invoices",
   },
 ];
 

@@ -3550,6 +3550,55 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== INVOICES (FINANCE DRAFT LAYER) ====================
+  app.get("/api/invoices", authMiddleware, requireRoles("admin", "finance"), async (_req, res) => {
+    try {
+      const invoices = await storage.getInvoices();
+      res.json(invoices);
+    } catch (error) {
+      console.error("Failed to fetch invoices:", error);
+      res.status(500).json({ error: "Failed to fetch invoices" });
+    }
+  });
+
+  app.get("/api/invoices/:id", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) {
+        return res.status(400).json({ error: "Invalid invoice id" });
+      }
+
+      const invoice = await storage.getInvoiceById(id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+
+      res.json(invoice);
+    } catch (error) {
+      console.error("Failed to fetch invoice:", error);
+      res.status(500).json({ error: "Failed to fetch invoice" });
+    }
+  });
+
+  app.post("/api/invoices/draft", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const billableUsageIds = Array.isArray(req.body?.billableUsageIds)
+        ? req.body.billableUsageIds.map((id: unknown) => Number(id)).filter((id: number) => Number.isInteger(id) && id > 0)
+        : [];
+
+      if (billableUsageIds.length === 0) {
+        return res.status(400).json({ error: "At least one billable usage id is required" });
+      }
+
+      const invoiceDraft = await storage.createInvoiceDraft(billableUsageIds);
+      res.status(201).json(invoiceDraft);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create invoice draft";
+      console.error("Failed to create invoice draft:", error);
+      res.status(400).json({ error: message });
+    }
+  });
+
   // ==================== OPERATIONS ANALYTICS (READ-ONLY) ====================
   app.get("/api/analytics/operations", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
     try {
