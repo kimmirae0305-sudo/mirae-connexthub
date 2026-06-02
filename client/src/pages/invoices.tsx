@@ -69,14 +69,34 @@ interface InvoiceDetail {
 interface BillableUsageRow {
   id: number;
   clientOrganizationId: number | null;
+  clientOrganizationID?: number | string | null;
+  client_organization_id?: number | string | null;
+  clientId?: number | string | null;
+  client_id?: number | string | null;
   clientName: string;
   projectName: string;
   expertName: string;
   callDate: string;
   cuUsed: string;
   currency: string;
+  invoiceCurrency?: string | null;
+  invoice_currency?: string | null;
   cuRate: string | null;
+  cu_rate?: string | number | null;
+  usdCuRate?: string | number | null;
+  usd_cu_rate?: string | number | null;
+  usdCuRateUsd?: string | number | null;
+  cuRateUsd?: string | number | null;
+  cu_rate_usd?: string | number | null;
   amount: string | null;
+  amountUsd?: string | number | null;
+  amount_usd?: string | number | null;
+  billableAmount?: string | number | null;
+  billable_amount?: string | number | null;
+  billableAmountUsd?: string | number | null;
+  billable_amount_usd?: string | number | null;
+  usdAmount?: string | number | null;
+  usd_amount?: string | number | null;
   status: string;
 }
 
@@ -97,16 +117,32 @@ const formatMoney = (value: string | number | null | undefined) => {
   return `USD ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const parseAmount = (value: string | number | null | undefined) => {
+const readFirstValue = (row: BillableUsageRow | InvoiceLineItemRow, fieldNames: string[]) => {
+  const record = row as unknown as Record<string, unknown>;
+  for (const fieldName of fieldNames) {
+    const value = record[fieldName];
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return undefined;
+};
+
+const parseAmount = (value: unknown) => {
   if (value === null || value === undefined || value === "") return 0;
-  const amount = typeof value === "number" ? value : Number(String(value).replace(/,/g, ""));
+  const amount = typeof value === "number" ? value : Number(String(value).replace(/,/g, "").replace(/USD/i, "").trim());
   return Number.isFinite(amount) ? amount : 0;
 };
 
 const normalizedStatus = (row: BillableUsageRow) => String(row.status || "").trim().toLowerCase();
-const normalizedCurrency = (row: BillableUsageRow) => String(row.currency || "USD").trim().toUpperCase();
-const hasClientOrganization = (row: BillableUsageRow) => Number(row.clientOrganizationId || 0) > 0;
-const hasValidRate = (row: BillableUsageRow) => parseAmount(row.cuRate) > 0 && parseAmount(row.amount) > 0;
+const normalizedCurrency = (row: BillableUsageRow) =>
+  String(readFirstValue(row, ["invoiceCurrency", "invoice_currency", "currency"]) || "USD").trim().toUpperCase();
+const getClientOrganizationId = (row: BillableUsageRow) =>
+  parseAmount(readFirstValue(row, ["clientOrganizationId", "clientOrganizationID", "client_organization_id", "clientId", "client_id"]));
+const getUsdCuRate = (row: BillableUsageRow) =>
+  parseAmount(readFirstValue(row, ["cuRate", "cu_rate", "usdCuRate", "usd_cu_rate", "usdCuRateUsd", "cuRateUsd", "cu_rate_usd"]));
+const getAmountUsd = (row: BillableUsageRow) =>
+  parseAmount(readFirstValue(row, ["amount", "amountUsd", "amount_usd", "billableAmount", "billable_amount", "billableAmountUsd", "billable_amount_usd", "usdAmount", "usd_amount"]));
+const hasClientOrganization = (row: BillableUsageRow) => getClientOrganizationId(row) > 0;
+const hasValidRate = (row: BillableUsageRow) => getUsdCuRate(row) > 0 && getAmountUsd(row) > 0;
 const isUnbilled = (row: BillableUsageRow) => normalizedStatus(row) === "unbilled";
 const isUsd = (row: BillableUsageRow) => normalizedCurrency(row) === "USD";
 const isEligibleForInvoiceDraft = (row: BillableUsageRow) =>
@@ -150,9 +186,9 @@ export default function Invoices() {
     () => eligibleRows.filter((row) => selectedBillableUsageIds.includes(row.id)),
     [eligibleRows, selectedBillableUsageIds]
   );
-  const selectedClientIds = Array.from(new Set(selectedRows.map((row) => row.clientOrganizationId)));
+  const selectedClientIds = Array.from(new Set(selectedRows.map(getClientOrganizationId)));
   const hasMixedClients = selectedClientIds.length > 1;
-  const selectedTotal = selectedRows.reduce((sum, row) => sum + parseAmount(row.amount), 0);
+  const selectedTotal = selectedRows.reduce((sum, row) => sum + getAmountUsd(row), 0);
   const selectedCu = selectedRows.reduce((sum, row) => sum + parseAmount(row.cuUsed), 0);
 
   const createDraftMutation = useMutation({
@@ -355,8 +391,8 @@ export default function Invoices() {
                       <TableCell>{row.projectName}</TableCell>
                       <TableCell>{row.expertName}</TableCell>
                       <TableCell className="text-right font-mono">{parseAmount(row.cuUsed).toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono">{parseAmount(row.cuRate).toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono">{parseAmount(row.amount).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono">{getUsdCuRate(row).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono">{getAmountUsd(row).toFixed(2)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
