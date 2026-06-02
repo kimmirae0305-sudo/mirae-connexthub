@@ -84,6 +84,8 @@ interface BillableUsageResponse {
   rows: BillableUsageRow[];
 }
 
+const ELIGIBLE_BILLABLE_USAGE_URL = "/api/billable-usage?status=unbilled";
+
 const formatDate = (value: string | null | undefined) => {
   if (!value) return "-";
   const date = new Date(value);
@@ -95,7 +97,20 @@ const formatMoney = (value: string | number | null | undefined) => {
   return `USD ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const hasValidRate = (row: BillableUsageRow) => Number(row.cuRate || 0) > 0 && Number(row.amount || 0) > 0;
+const parseAmount = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined || value === "") return 0;
+  const amount = typeof value === "number" ? value : Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const normalizedStatus = (row: BillableUsageRow) => String(row.status || "").trim().toLowerCase();
+const normalizedCurrency = (row: BillableUsageRow) => String(row.currency || "USD").trim().toUpperCase();
+const hasClientOrganization = (row: BillableUsageRow) => Number(row.clientOrganizationId || 0) > 0;
+const hasValidRate = (row: BillableUsageRow) => parseAmount(row.cuRate) > 0 && parseAmount(row.amount) > 0;
+const isUnbilled = (row: BillableUsageRow) => normalizedStatus(row) === "unbilled";
+const isUsd = (row: BillableUsageRow) => normalizedCurrency(row) === "USD";
+const isEligibleForInvoiceDraft = (row: BillableUsageRow) =>
+  isUnbilled(row) && hasClientOrganization(row) && isUsd(row) && hasValidRate(row);
 
 export default function Invoices() {
   const { toast } = useToast();
@@ -108,7 +123,11 @@ export default function Invoices() {
   });
 
   const { data: billableUsageData, isLoading: billableUsageLoading } = useQuery<BillableUsageResponse>({
-    queryKey: ["/api/billable-usage?status=unbilled"],
+    queryKey: [ELIGIBLE_BILLABLE_USAGE_URL],
+    queryFn: async () => {
+      const response = await apiRequest("GET", ELIGIBLE_BILLABLE_USAGE_URL);
+      return response.json();
+    },
   });
 
   const { data: selectedInvoice, isLoading: invoiceDetailLoading } = useQuery<InvoiceDetail>({
@@ -122,10 +141,10 @@ export default function Invoices() {
   });
 
   const unbilledRows = billableUsageData?.rows || [];
-  const eligibleRows = unbilledRows.filter(
-    (row) => row.status === "unbilled" && row.clientOrganizationId && row.currency === "USD" && hasValidRate(row)
+  const eligibleRows = unbilledRows.filter(isEligibleForInvoiceDraft);
+  const missingRateRows = unbilledRows.filter(
+    (row) => isUnbilled(row) && (!hasValidRate(row) || !hasClientOrganization(row) || !isUsd(row))
   );
-  const missingRateRows = unbilledRows.filter((row) => row.status === "unbilled" && !hasValidRate(row));
 
   const selectedRows = useMemo(
     () => eligibleRows.filter((row) => selectedBillableUsageIds.includes(row.id)),
@@ -133,8 +152,8 @@ export default function Invoices() {
   );
   const selectedClientIds = Array.from(new Set(selectedRows.map((row) => row.clientOrganizationId)));
   const hasMixedClients = selectedClientIds.length > 1;
-  const selectedTotal = selectedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const selectedCu = selectedRows.reduce((sum, row) => sum + Number(row.cuUsed || 0), 0);
+  const selectedTotal = selectedRows.reduce((sum, row) => sum + parseAmount(row.amount), 0);
+  const selectedCu = selectedRows.reduce((sum, row) => sum + parseAmount(row.cuUsed), 0);
 
   const createDraftMutation = useMutation({
     mutationFn: async () => {
@@ -145,7 +164,7 @@ export default function Invoices() {
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/billable-usage?status=unbilled"] });
+      queryClient.invalidateQueries({ queryKey: [ELIGIBLE_BILLABLE_USAGE_URL] });
       setSelectedBillableUsageIds([]);
       setCreateDialogOpen(false);
       setSelectedInvoiceId(result.invoice.id);
@@ -335,9 +354,9 @@ export default function Invoices() {
                       <TableCell>{row.clientName}</TableCell>
                       <TableCell>{row.projectName}</TableCell>
                       <TableCell>{row.expertName}</TableCell>
-                      <TableCell className="text-right font-mono">{Number(row.cuUsed || 0).toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono">{Number(row.cuRate || 0).toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono">{Number(row.amount || 0).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono">{parseAmount(row.cuUsed).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono">{parseAmount(row.cuRate).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono">{parseAmount(row.amount).toFixed(2)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -420,9 +439,9 @@ export default function Invoices() {
                         <TableCell>{formatDate(item.serviceDate)}</TableCell>
                         <TableCell>{item.projectName}</TableCell>
                         <TableCell>{item.expertName}</TableCell>
-                        <TableCell className="text-right font-mono">{Number(item.cuUsed || 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-right font-mono">{Number(item.cuRate || 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-right font-mono">{Number(item.amount || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono">{parseAmount(item.cuUsed).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono">{parseAmount(item.cuRate).toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono">{parseAmount(item.amount).toFixed(2)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
