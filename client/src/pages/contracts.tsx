@@ -38,7 +38,6 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { ClientOrganization, InsertClientOrganization } from "@shared/schema";
 
 const pricingModels = ["Pay-as-you-go", "Prepaid Credits", "Retainer", "Annual Contract", "Project-based", "Custom"];
-const currencies = ["USD", "BRL", "EUR", "GBP", "JPY", "KRW"];
 const retainerPeriods = ["Monthly", "Quarterly", "Annual", "Contract"];
 
 type ContractFormData = {
@@ -102,7 +101,7 @@ const hasMissingRate = (org: ClientOrganization) => {
 
 const buildFormData = (org: ClientOrganization): ContractFormData => ({
   pricingModel: org.pricingModel || "Pay-as-you-go",
-  currency: org.currency || "USD",
+  currency: "USD",
   defaultCuRate: org.defaultCuRate || "",
   purchasedCu: org.purchasedCu || "",
   retainerCuAllowance: org.retainerCuAllowance || "",
@@ -161,7 +160,7 @@ export default function Contracts() {
       legalEntityName: editingOrg.legalEntityName,
       contractType: editingOrg.contractType,
       pricingModel: formData.pricingModel || null,
-      currency: formData.currency || "USD",
+      currency: "USD",
       defaultCuRate: formData.defaultCuRate || null,
       purchasedCu: formData.purchasedCu || null,
       retainerCuAllowance: formData.retainerCuAllowance || null,
@@ -188,6 +187,7 @@ export default function Contracts() {
         <h1 className="text-3xl font-semibold text-foreground">Contracts</h1>
         <p className="text-sm text-muted-foreground">
           Manage client commercial terms used for CU billing and invoice preparation.
+          <span className="block">All client invoices are issued in USD.</span>
         </p>
       </div>
 
@@ -211,15 +211,15 @@ export default function Contracts() {
                   <TableRow>
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Pricing Model</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase">Currency</TableHead>
-                    <TableHead className="text-right text-xs font-semibold uppercase">Default CU Rate</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Invoice Currency</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase">Default USD CU Rate</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Payment Terms</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Contract Start</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Contract End</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Purchased CU</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Retainer CU Allowance</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Contracted CU</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase">Missing Rate</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">USD Rate Status</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Commercial Notes</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
                   </TableRow>
@@ -232,8 +232,8 @@ export default function Contracts() {
                         <div className="text-xs text-muted-foreground">{org.legalEntityName || org.clientType || "Client organization"}</div>
                       </TableCell>
                       <TableCell>{org.pricingModel || "-"}</TableCell>
-                      <TableCell>{org.currency || "USD"}</TableCell>
-                      <TableCell className="text-right font-mono">{formatRate(org.defaultCuRate, org.currency || "USD")}</TableCell>
+                      <TableCell>USD</TableCell>
+                      <TableCell className="text-right font-mono">{formatRate(org.defaultCuRate, "USD")}</TableCell>
                       <TableCell>{org.paymentTerms || "-"}</TableCell>
                       <TableCell>{formatDate(org.contractStartDate)}</TableCell>
                       <TableCell>{formatDate(org.contractEndDate)}</TableCell>
@@ -244,10 +244,10 @@ export default function Contracts() {
                         {hasMissingRate(org) ? (
                           <Badge variant="destructive" className="gap-1">
                             <AlertCircle className="h-3 w-3" />
-                            Missing Rate
+                            USD CU Rate Missing
                           </Badge>
                         ) : (
-                          <Badge variant="secondary">Rate Set</Badge>
+                          <Badge variant="secondary">USD Rate Set</Badge>
                         )}
                       </TableCell>
                       <TableCell className="max-w-[260px] truncate">{org.commercialNotes || "-"}</TableCell>
@@ -299,23 +299,15 @@ export default function Contracts() {
             </div>
 
             <div className="space-y-2">
-              <Label>Currency</Label>
-              <Select value={formData.currency} onValueChange={(value) => updateField("currency", value)}>
-                <SelectTrigger data-testid="select-contract-currency">
-                  <SelectValue placeholder="Select currency" />
-                </SelectTrigger>
-                <SelectContent>
-                  {currencies.map((currency) => (
-                    <SelectItem key={currency} value={currency}>
-                      {currency}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Invoice Currency</Label>
+              <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm font-medium" data-testid="field-contract-invoice-currency">
+                USD
+              </div>
+              <p className="text-xs text-muted-foreground">All client invoices are issued in USD.</p>
             </div>
 
             <LabeledInput
-              label="Default CU Rate"
+              label="Default USD CU Rate"
               value={formData.defaultCuRate}
               onChange={(value) => updateField("defaultCuRate", value)}
               type="number"
