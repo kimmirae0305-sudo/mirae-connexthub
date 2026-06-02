@@ -4,6 +4,7 @@ import {
   vettingQuestions,
   projectExperts,
   usageRecords,
+  billableUsage,
   users,
   clients,
   clientOrganizations,
@@ -75,6 +76,50 @@ export interface CuLedgerRow {
   completedAt: Date | null;
   recordingUrl: string | null;
   source: "Completed Call Record";
+}
+
+export interface BillableUsageFilters {
+  startDate?: Date;
+  endDate?: Date;
+  status?: string;
+  clientOrganizationId?: number;
+  projectId?: number;
+}
+
+export interface BillableUsageRow {
+  id: number;
+  callRecordId: number;
+  clientOrganizationId: number | null;
+  clientName: string;
+  projectId: number;
+  projectName: string;
+  expertId: number;
+  expertName: string;
+  callDate: Date;
+  cuUsed: string;
+  currency: string;
+  cuRate: string | null;
+  amount: string | null;
+  status: string;
+  source: string;
+  adjustmentReason: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface BillableUsageReport {
+  summary: {
+    unbilledItems: number;
+    totalCU: number;
+    billableAmount: number;
+    missingRateItems: number;
+  };
+  rows: BillableUsageRow[];
+}
+
+export interface BillableUsageSyncResult {
+  createdCount: number;
+  skippedCount: number;
 }
 
 export interface OperationsAnalyticsFilters {
@@ -285,6 +330,10 @@ export interface IStorage {
   getUsageRecords(): Promise<UsageRecord[]>;
   createUsageRecord(record: InsertUsageRecord): Promise<UsageRecord>;
   deleteUsageRecord(id: number): Promise<boolean>;
+
+  // Billable Usage (Finance)
+  getBillableUsage(filters: BillableUsageFilters): Promise<BillableUsageReport>;
+  syncBillableUsageFromCompletedCalls(): Promise<BillableUsageSyncResult>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1436,6 +1485,141 @@ export class DatabaseStorage implements IStorage {
   async deleteCallRecord(id: number): Promise<boolean> {
     const result = await db.delete(callRecords).where(eq(callRecords.id, id)).returning();
     return result.length > 0;
+  }
+
+  async getBillableUsage(filters: BillableUsageFilters): Promise<BillableUsageReport> {
+    const conditions = [];
+    if (filters.startDate) conditions.push(gte(billableUsage.callDate, filters.startDate));
+    if (filters.endDate) conditions.push(lte(billableUsage.callDate, filters.endDate));
+    if (filters.status && filters.status !== "all") conditions.push(eq(billableUsage.status, filters.status));
+    if (filters.clientOrganizationId) {
+      conditions.push(eq(billableUsage.clientOrganizationId, filters.clientOrganizationId));
+    }
+    if (filters.projectId) conditions.push(eq(billableUsage.projectId, filters.projectId));
+
+    const query = db
+      .select({
+        id: billableUsage.id,
+        callRecordId: billableUsage.callRecordId,
+        clientOrganizationId: billableUsage.clientOrganizationId,
+        clientOrganizationName: clientOrganizations.name,
+        projectClientName: projects.clientName,
+        projectClientCompany: projects.clientCompany,
+        projectId: billableUsage.projectId,
+        projectName: projects.name,
+        expertId: billableUsage.expertId,
+        expertName: experts.name,
+        callDate: billableUsage.callDate,
+        cuUsed: billableUsage.cuUsed,
+        currency: billableUsage.currency,
+        cuRate: billableUsage.cuRate,
+        amount: billableUsage.amount,
+        status: billableUsage.status,
+        source: billableUsage.source,
+        adjustmentReason: billableUsage.adjustmentReason,
+        createdAt: billableUsage.createdAt,
+        updatedAt: billableUsage.updatedAt,
+      })
+      .from(billableUsage)
+      .innerJoin(projects, eq(billableUsage.projectId, projects.id))
+      .innerJoin(experts, eq(billableUsage.expertId, experts.id))
+      .leftJoin(clientOrganizations, eq(billableUsage.clientOrganizationId, clientOrganizations.id));
+
+    const rows = await (conditions.length > 0 ? query.where(and(...conditions)) : query)
+      .orderBy(desc(billableUsage.callDate), desc(billableUsage.createdAt));
+
+    const mappedRows: BillableUsageRow[] = rows.map((row) => ({
+      id: row.id,
+      callRecordId: row.callRecordId,
+      clientOrganizationId: row.clientOrganizationId,
+      clientName: row.clientOrganizationName || row.projectClientName || row.projectClientCompany || "-",
+      projectId: row.projectId,
+      projectName: row.projectName,
+      expertId: row.expertId,
+      expertName: row.expertName,
+      callDate: row.callDate,
+      cuUsed: row.cuUsed,
+      currency: row.currency,
+      cuRate: row.cuRate,
+      amount: row.amount,
+      status: row.status,
+      source: row.source,
+      adjustmentReason: row.adjustmentReason,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const totalCU = mappedRows.reduce((sum, row) => sum + Number(row.cuUsed || 0), 0);
+    const billableAmount = mappedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const missingRateItems = mappedRows.filter((row) => !row.cuRate || Number(row.cuRate) <= 0).length;
+
+    return {
+      summary: {
+        unbilledItems: mappedRows.filter((row) => row.status === "unbilled").length,
+        totalCU: round(totalCU),
+        billableAmount: round(billableAmount),
+        missingRateItems,
+      },
+      rows: mappedRows,
+    };
+  }
+
+  async syncBillableUsageFromCompletedCalls(): Promise<BillableUsageSyncResult> {
+    const completedRows = await db
+      .select({
+        callRecordId: callRecords.id,
+        clientOrganizationId: projects.clientOrganizationId,
+        projectId: callRecords.projectId,
+        expertId: callRecords.expertId,
+        callDate: callRecords.callDate,
+        cuUsed: callRecords.cuUsed,
+        projectCuRatePerCU: projects.cuRatePerCU,
+        defaultCuRate: clientOrganizations.defaultCuRate,
+        currency: clientOrganizations.currency,
+      })
+      .from(callRecords)
+      .innerJoin(projects, eq(callRecords.projectId, projects.id))
+      .leftJoin(clientOrganizations, eq(projects.clientOrganizationId, clientOrganizations.id))
+      .where(eq(callRecords.status, "completed"));
+
+    if (completedRows.length === 0) {
+      return { createdCount: 0, skippedCount: 0 };
+    }
+
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const insertRows = completedRows.map((row) => {
+      const cuUsed = Number(row.cuUsed || 0);
+      const projectRate = Number(row.projectCuRatePerCU || 0);
+      const clientRate = Number(row.defaultCuRate || 0);
+      const rate = projectRate > 0 ? projectRate : clientRate > 0 ? clientRate : null;
+      const amount = rate !== null ? round(cuUsed * rate) : null;
+
+      return {
+        callRecordId: row.callRecordId,
+        clientOrganizationId: row.clientOrganizationId,
+        projectId: row.projectId,
+        expertId: row.expertId,
+        callDate: row.callDate,
+        cuUsed: row.cuUsed,
+        currency: row.currency || "USD",
+        cuRate: rate !== null ? rate.toFixed(2) : null,
+        amount: amount !== null ? amount.toFixed(2) : null,
+        status: "unbilled",
+        source: "completed_call_record",
+      };
+    });
+
+    const createdRows = await db
+      .insert(billableUsage)
+      .values(insertRows)
+      .onConflictDoNothing({ target: billableUsage.callRecordId })
+      .returning();
+
+    return {
+      createdCount: createdRows.length,
+      skippedCount: completedRows.length - createdRows.length,
+    };
   }
 
   // Insights

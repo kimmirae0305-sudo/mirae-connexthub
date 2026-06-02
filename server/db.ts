@@ -234,6 +234,23 @@ const compatibilityStatements = [
     notes text,
     created_at timestamp DEFAULT now()
   )`,
+  `CREATE TABLE IF NOT EXISTS billable_usage (
+    id serial PRIMARY KEY,
+    call_record_id integer NOT NULL UNIQUE REFERENCES call_records(id) ON DELETE RESTRICT,
+    client_organization_id integer REFERENCES client_organizations(id),
+    project_id integer NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    expert_id integer NOT NULL REFERENCES experts(id) ON DELETE RESTRICT,
+    call_date timestamp NOT NULL,
+    cu_used numeric(10,2) NOT NULL,
+    currency text NOT NULL DEFAULT 'USD',
+    cu_rate numeric(10,2),
+    amount numeric(10,2),
+    status text NOT NULL DEFAULT 'unbilled',
+    source text NOT NULL DEFAULT 'completed_call_record',
+    adjustment_reason text,
+    created_at timestamp DEFAULT now() NOT NULL,
+    updated_at timestamp DEFAULT now() NOT NULL
+  )`,
   `ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_overview text`,
   `ALTER TABLE client_organizations ADD COLUMN IF NOT EXISTS client_type text`,
   `ALTER TABLE client_organizations ADD COLUMN IF NOT EXISTS legal_entity_name text`,

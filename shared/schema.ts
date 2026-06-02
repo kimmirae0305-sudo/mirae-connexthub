@@ -294,6 +294,25 @@ export const usageRecords = pgTable("usage_records", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Billable Usage table (Finance review layer generated from completed call records)
+export const billableUsage = pgTable("billable_usage", {
+  id: serial("id").primaryKey(),
+  callRecordId: integer("call_record_id").notNull().references(() => callRecords.id, { onDelete: "restrict" }).unique(),
+  clientOrganizationId: integer("client_organization_id").references(() => clientOrganizations.id),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "restrict" }),
+  expertId: integer("expert_id").notNull().references(() => experts.id, { onDelete: "restrict" }),
+  callDate: timestamp("call_date").notNull(),
+  cuUsed: decimal("cu_used", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default("USD"),
+  cuRate: decimal("cu_rate", { precision: 10, scale: 2 }),
+  amount: decimal("amount", { precision: 10, scale: 2 }),
+  status: text("status").notNull().default("unbilled"), // unbilled, draft, invoiced, void
+  source: text("source").notNull().default("completed_call_record"),
+  adjustmentReason: text("adjustment_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   managedOrganizations: many(clientOrganizations),
@@ -461,6 +480,25 @@ export const usageRecordsRelations = relations(usageRecords, ({ one }) => ({
   }),
 }));
 
+export const billableUsageRelations = relations(billableUsage, ({ one }) => ({
+  callRecord: one(callRecords, {
+    fields: [billableUsage.callRecordId],
+    references: [callRecords.id],
+  }),
+  clientOrganization: one(clientOrganizations, {
+    fields: [billableUsage.clientOrganizationId],
+    references: [clientOrganizations.id],
+  }),
+  project: one(projects, {
+    fields: [billableUsage.projectId],
+    references: [projects.id],
+  }),
+  expert: one(experts, {
+    fields: [billableUsage.expertId],
+    references: [experts.id],
+  }),
+}));
+
 // Helper for coercing date strings to Date objects
 const coerceDate = z.preprocess((val) => {
   if (val === null || val === undefined || val === "") return null;
@@ -581,6 +619,14 @@ export const insertUsageRecordSchema = createInsertSchema(usageRecords).omit({
   callDate: coerceDateRequired,
 });
 
+export const insertBillableUsageSchema = createInsertSchema(billableUsage).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  callDate: coerceDateRequired,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -620,6 +666,9 @@ export type InsertExpertInvitationLink = z.infer<typeof insertExpertInvitationLi
 
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type InsertUsageRecord = z.infer<typeof insertUsageRecordSchema>;
+
+export type BillableUsage = typeof billableUsage.$inferSelect;
+export type InsertBillableUsage = z.infer<typeof insertBillableUsageSchema>;
 
 export type ProjectActivity = typeof projectActivities.$inferSelect;
 export type InsertProjectActivity = z.infer<typeof insertProjectActivitySchema>;
