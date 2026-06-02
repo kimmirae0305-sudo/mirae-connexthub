@@ -223,14 +223,14 @@ export default function PmPerformance() {
               </Select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Direction</label>
+              <label className="text-sm font-medium">Order</label>
               <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as SortOrder)}>
                 <SelectTrigger data-testid="select-sort-order">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="desc">Desc</SelectItem>
-                  <SelectItem value="asc">Asc</SelectItem>
+                  <SelectItem value="desc">Highest first</SelectItem>
+                  <SelectItem value="asc">Lowest first</SelectItem>
                 </SelectContent>
               </Select>
             </div>
