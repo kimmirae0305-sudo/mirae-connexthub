@@ -105,7 +105,11 @@ const EmptyChart = ({ label }: { label: string }) => (
   <div className="flex h-[300px] items-center justify-center text-muted-foreground">{label}</div>
 );
 
-const LowDataChart = () => <EmptyChart label="Not enough data for a meaningful trend yet." />;
+const LowDataChart = () => <EmptyChart label="1 data point available. More completed calls are needed to show a trend." />;
+
+const EmptyTable = ({ label }: { label: string }) => (
+  <p className="rounded-md bg-muted/40 px-3 py-4 text-sm text-muted-foreground">{label}</p>
+);
 
 const SkeletonCard = () => (
   <Card>
@@ -122,6 +126,7 @@ export default function Analytics() {
   const [datePreset, setDatePreset] = useState<DateRangePreset>("this_month");
   const [customStartDate, setCustomStartDate] = useState(() => toDateInputValue(new Date()));
   const [customEndDate, setCustomEndDate] = useState(() => toDateInputValue(new Date()));
+  const [tableSearch, setTableSearch] = useState("");
 
   const dateRange = useMemo(
     () => getPresetRange(datePreset, customStartDate, customEndDate),
@@ -165,7 +170,19 @@ export default function Analytics() {
   const callsOverTimeHasTrend = charts.callsOverTime.length > 1;
   const cuByIndustryHasSignal = charts.cuByIndustry.length > 1;
   const cuByProjectHasSignal = charts.cuByProject.length > 1;
-  const callsByPmHasSignal = charts.completedCallsByPM.length > 1;
+  const normalizedTableSearch = tableSearch.trim().toLowerCase();
+  const filteredCallsOverTime = charts.callsOverTime.filter((row) =>
+    row.period.toLowerCase().includes(normalizedTableSearch)
+  );
+  const filteredCuByIndustry = charts.cuByIndustry.filter((row) =>
+    row.industry.toLowerCase().includes(normalizedTableSearch)
+  );
+  const filteredCuByProject = charts.cuByProject.filter((row) =>
+    row.projectName.toLowerCase().includes(normalizedTableSearch)
+  );
+  const filteredPmPerformance = charts.completedCallsByPM.filter((row) =>
+    row.pmName.toLowerCase().includes(normalizedTableSearch)
+  );
 
   if (isLoading) {
     return (
@@ -312,6 +329,125 @@ export default function Analytics() {
         </Card>
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Operational Breakdown</CardTitle>
+          <CardDescription>
+            Search and review backend-aggregated tables for the selected period.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <Input
+            value={tableSearch}
+            onChange={(event) => setTableSearch(event.target.value)}
+            placeholder="Search period, industry, project, or PM..."
+            data-testid="input-analytics-table-search"
+          />
+
+          <div className="grid gap-6 xl:grid-cols-3">
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Calls Over Time</h3>
+                <p className="text-xs text-muted-foreground">Period-level completed calls and CU usage.</p>
+              </div>
+              {filteredCallsOverTime.length > 0 ? (
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                        <th className="px-3 py-2 font-medium">Period</th>
+                        <th className="px-3 py-2 text-right font-medium">Completed Calls</th>
+                        <th className="px-3 py-2 text-right font-medium">CU Used</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCallsOverTime.map((row) => (
+                        <tr key={row.period} className="border-b last:border-0">
+                          <td className="px-3 py-2 font-mono">{row.period}</td>
+                          <td className="px-3 py-2 text-right font-mono">{row.completedCalls}</td>
+                          <td className="px-3 py-2 text-right font-mono">{row.cuUsed.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyTable label="No completed calls for the selected period." />
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">CU by Industry</h3>
+                <p className="text-xs text-muted-foreground">Industry-level operational delivery.</p>
+              </div>
+              {filteredCuByIndustry.length > 0 ? (
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                        <th className="px-3 py-2 font-medium">Industry</th>
+                        <th className="px-3 py-2 text-right font-medium">Completed Calls</th>
+                        <th className="px-3 py-2 text-right font-medium">CU Used</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCuByIndustry.map((row) => (
+                        <tr key={row.industry} className="border-b last:border-0">
+                          <td className="px-3 py-2 font-medium">{row.industry}</td>
+                          <td className="px-3 py-2 text-right font-mono">{row.completedCalls}</td>
+                          <td className="px-3 py-2 text-right font-mono">{row.cuUsed.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyTable label="No completed calls for the selected period." />
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">CU by Project</h3>
+                <p className="text-xs text-muted-foreground">Project-level completed CU usage.</p>
+              </div>
+              {filteredCuByProject.length > 0 ? (
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                        <th className="px-3 py-2 font-medium">Project</th>
+                        <th className="px-3 py-2 text-right font-medium">Completed Calls</th>
+                        <th className="px-3 py-2 text-right font-medium">CU Used</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCuByProject.map((row) => (
+                        <tr key={row.projectId} className="border-b last:border-0">
+                          <td className="px-3 py-2 font-medium">{row.projectName}</td>
+                          <td className="px-3 py-2 text-right font-mono">{row.completedCalls}</td>
+                          <td className="px-3 py-2 text-right font-mono">{row.cuUsed.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyTable label="No completed calls for the selected period." />
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Operational Charts</h2>
+        <p className="text-sm text-muted-foreground">
+          Visual summaries are secondary to the tables above and appear when enough data exists.
+        </p>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -418,67 +554,77 @@ export default function Analytics() {
           </CardContent>
         </Card>
 
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Completed Calls by PM</CardTitle>
-            <CardDescription>Operational completion volume by project manager.</CardDescription>
+            <CardTitle className="text-lg">Top Experts</CardTitle>
+            <CardDescription>Secondary operational view of completed calls and CU by expert.</CardDescription>
           </CardHeader>
           <CardContent>
-            {callsByPmHasSignal ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={charts.completedCallsByPM}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="pmName" angle={-45} textAnchor="end" height={90} />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="completedCalls" name="Completed Calls" fill="#10b981" />
-                  <Bar dataKey="cuUsed" name="CU Used" fill="#3b82f6" />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : charts.completedCallsByPM.length === 1 ? (
-              <LowDataChart />
+            {charts.completedCallsByExpert.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                      <th className="py-2 font-medium">Expert</th>
+                      <th className="py-2 text-right font-medium">Completed Calls</th>
+                      <th className="py-2 text-right font-medium">CU Used</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {charts.completedCallsByExpert.map((expert) => (
+                      <tr key={expert.expertId} className="border-b last:border-0">
+                        <td className="py-3 font-medium">{expert.expertName}</td>
+                        <td className="py-3 text-right font-mono">{expert.completedCalls}</td>
+                        <td className="py-3 text-right font-mono">{expert.cuUsed.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
-              <EmptyChart label="No PM completion data for this period" />
+              <EmptyTable label="No completed calls for the selected period." />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">PM Performance Preview</CardTitle>
+            <CardDescription>
+              Compact operational preview. Detailed PM performance should live in a dedicated PM Performance page later.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {filteredPmPerformance.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                      <th className="py-2 font-medium">PM</th>
+                      <th className="py-2 text-right font-medium">Completed Calls</th>
+                      <th className="py-2 text-right font-medium">CU Used</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPmPerformance.map((pm) => (
+                      <tr key={pm.pmId ?? pm.pmName} className="border-b last:border-0">
+                        <td className="py-3 font-medium">{pm.pmName}</td>
+                        <td className="py-3 text-right font-mono">{pm.completedCalls}</td>
+                        <td className="py-3 text-right font-mono">{pm.cuUsed.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyTable label="No completed calls for the selected period." />
             )}
           </CardContent>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Top Experts</CardTitle>
-          <CardDescription>Secondary operational view of completed calls and CU by expert.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {charts.completedCallsByExpert.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs uppercase text-muted-foreground">
-                    <th className="py-2 font-medium">Expert</th>
-                    <th className="py-2 text-right font-medium">Completed Calls</th>
-                    <th className="py-2 text-right font-medium">CU Used</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {charts.completedCallsByExpert.map((expert) => (
-                    <tr key={expert.expertId} className="border-b last:border-0">
-                      <td className="py-3 font-medium">{expert.expertName}</td>
-                      <td className="py-3 text-right font-mono">{expert.completedCalls}</td>
-                      <td className="py-3 text-right font-mono">{expert.cuUsed.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="rounded-md bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
-              No expert completion data for this period.
-            </p>
-          )}
-        </CardContent>
-      </Card>
 
       <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
         <BarChart3 className="h-4 w-4" />
