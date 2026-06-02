@@ -3540,6 +3540,16 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/billable-usage/refresh-rates", authMiddleware, requireRoles("admin", "finance"), async (_req, res) => {
+    try {
+      const result = await storage.refreshMissingBillableUsageRates();
+      res.json(result);
+    } catch (error) {
+      console.error("Failed to refresh billable usage rates:", error);
+      res.status(500).json({ error: "Failed to refresh billable usage rates" });
+    }
+  });
+
   // ==================== OPERATIONS ANALYTICS (READ-ONLY) ====================
   app.get("/api/analytics/operations", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
     try {

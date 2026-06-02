@@ -122,6 +122,12 @@ export interface BillableUsageSyncResult {
   skippedCount: number;
 }
 
+export interface BillableUsageRateRefreshResult {
+  updatedCount: number;
+  skippedCount: number;
+  stillMissingRateCount: number;
+}
+
 export interface OperationsAnalyticsFilters {
   startDate?: Date;
   endDate?: Date;
@@ -334,6 +340,7 @@ export interface IStorage {
   // Billable Usage (Finance)
   getBillableUsage(filters: BillableUsageFilters): Promise<BillableUsageReport>;
   syncBillableUsageFromCompletedCalls(): Promise<BillableUsageSyncResult>;
+  refreshMissingBillableUsageRates(): Promise<BillableUsageRateRefreshResult>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1619,6 +1626,75 @@ export class DatabaseStorage implements IStorage {
     return {
       createdCount: createdRows.length,
       skippedCount: completedRows.length - createdRows.length,
+    };
+  }
+
+  async refreshMissingBillableUsageRates(): Promise<BillableUsageRateRefreshResult> {
+    const missingRateCondition = or(
+      sql`${billableUsage.cuRate} IS NULL`,
+      sql`${billableUsage.cuRate} <= 0`
+    );
+    const protectedMissingRateRows = await db
+      .select({ id: billableUsage.id })
+      .from(billableUsage)
+      .where(
+        and(
+          missingRateCondition,
+          sql`${billableUsage.status} <> 'unbilled'`
+        )
+      );
+
+    const missingRateRows = await db
+      .select({
+        id: billableUsage.id,
+        cuUsed: billableUsage.cuUsed,
+        currentCurrency: billableUsage.currency,
+        projectCuRatePerCU: projects.cuRatePerCU,
+        defaultCuRate: clientOrganizations.defaultCuRate,
+        clientCurrency: clientOrganizations.currency,
+      })
+      .from(billableUsage)
+      .innerJoin(projects, eq(billableUsage.projectId, projects.id))
+      .leftJoin(clientOrganizations, eq(billableUsage.clientOrganizationId, clientOrganizations.id))
+      .where(
+        and(
+          eq(billableUsage.status, "unbilled"),
+          missingRateCondition
+        )
+      );
+
+    const round = (value: number) => Math.round(value * 100) / 100;
+    let updatedCount = 0;
+    let stillMissingRateCount = 0;
+
+    for (const row of missingRateRows) {
+      const projectRate = Number(row.projectCuRatePerCU || 0);
+      const clientRate = Number(row.defaultCuRate || 0);
+      const rate = projectRate > 0 ? projectRate : clientRate > 0 ? clientRate : null;
+
+      if (rate === null) {
+        stillMissingRateCount += 1;
+        continue;
+      }
+
+      const cuUsed = Number(row.cuUsed || 0);
+      const amount = round(cuUsed * rate);
+      await db
+        .update(billableUsage)
+        .set({
+          cuRate: rate.toFixed(2),
+          amount: amount.toFixed(2),
+          currency: row.clientCurrency || row.currentCurrency || "USD",
+          updatedAt: new Date(),
+        })
+        .where(eq(billableUsage.id, row.id));
+      updatedCount += 1;
+    }
+
+    return {
+      updatedCount,
+      skippedCount: protectedMissingRateRows.length,
+      stillMissingRateCount,
     };
   }
 
