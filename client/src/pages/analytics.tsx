@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -105,6 +105,8 @@ const EmptyChart = ({ label }: { label: string }) => (
   <div className="flex h-[300px] items-center justify-center text-muted-foreground">{label}</div>
 );
 
+const LowDataChart = () => <EmptyChart label="Not enough data for a meaningful trend yet." />;
+
 const SkeletonCard = () => (
   <Card>
     <CardHeader>
@@ -156,6 +158,14 @@ export default function Analytics() {
     name: formatStatus(item.status),
     value: item.count,
   }));
+  const selectedPeriodLabel =
+    dateRange.start && dateRange.end
+      ? `${format(dateRange.start, "MMM dd, yyyy")} - ${format(dateRange.end, "MMM dd, yyyy")}`
+      : "All available completed calls";
+  const callsOverTimeHasTrend = charts.callsOverTime.length > 1;
+  const cuByIndustryHasSignal = charts.cuByIndustry.length > 1;
+  const cuByProjectHasSignal = charts.cuByProject.length > 1;
+  const callsByPmHasSignal = charts.completedCallsByPM.length > 1;
 
   if (isLoading) {
     return (
@@ -192,7 +202,7 @@ export default function Analytics() {
       <div>
         <h1 className="text-3xl font-semibold text-foreground">Analytics</h1>
         <p className="text-sm text-muted-foreground">
-          Backend-aggregated operational metrics from completed consultation records.
+          Backend-aggregated operational analytics from completed consultation records for the selected period.
         </p>
       </div>
 
@@ -241,8 +251,18 @@ export default function Analytics() {
               </>
             )}
           </div>
+          <div className="mt-4 rounded-md bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            Selected period: <span className="font-medium text-foreground">{selectedPeriodLabel}</span>
+          </div>
         </CardContent>
       </Card>
+
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Results for selected period</h2>
+        <p className="text-sm text-muted-foreground">
+          Call and CU metrics below include completed consultation records only.
+        </p>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -327,9 +347,10 @@ export default function Analytics() {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Calls Over Time</CardTitle>
+            <CardDescription>Completed calls and CU used by month for the selected period.</CardDescription>
           </CardHeader>
           <CardContent>
-            {charts.callsOverTime.length > 0 ? (
+            {callsOverTimeHasTrend ? (
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={charts.callsOverTime}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -341,6 +362,8 @@ export default function Analytics() {
                   <Line type="monotone" dataKey="cuUsed" name="CU Used" stroke="#10b981" />
                 </LineChart>
               </ResponsiveContainer>
+            ) : charts.callsOverTime.length === 1 ? (
+              <LowDataChart />
             ) : (
               <EmptyChart label="No completed calls for this period" />
             )}
@@ -350,9 +373,10 @@ export default function Analytics() {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">CU by Industry</CardTitle>
+            <CardDescription>Operational delivery concentration by industry.</CardDescription>
           </CardHeader>
           <CardContent>
-            {charts.cuByIndustry.length > 0 ? (
+            {cuByIndustryHasSignal ? (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={charts.cuByIndustry.slice(0, 8)}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -362,6 +386,8 @@ export default function Analytics() {
                   <Bar dataKey="cuUsed" name="CU Used" fill="#3b82f6" />
                 </BarChart>
               </ResponsiveContainer>
+            ) : charts.cuByIndustry.length === 1 ? (
+              <LowDataChart />
             ) : (
               <EmptyChart label="No industry CU data for this period" />
             )}
@@ -371,9 +397,10 @@ export default function Analytics() {
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">CU by Project</CardTitle>
+            <CardDescription>Projects with the highest completed CU usage.</CardDescription>
           </CardHeader>
           <CardContent>
-            {charts.cuByProject.length > 0 ? (
+            {cuByProjectHasSignal ? (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={charts.cuByProject.slice(0, 8)}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -383,6 +410,8 @@ export default function Analytics() {
                   <Bar dataKey="cuUsed" name="CU Used" fill="#8b5cf6" />
                 </BarChart>
               </ResponsiveContainer>
+            ) : charts.cuByProject.length === 1 ? (
+              <LowDataChart />
             ) : (
               <EmptyChart label="No project CU data for this period" />
             )}
@@ -391,33 +420,11 @@ export default function Analytics() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Completed Calls by Expert</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {charts.completedCallsByExpert.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={charts.completedCallsByExpert}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="expertName" angle={-45} textAnchor="end" height={90} />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="completedCalls" name="Completed Calls" fill="#f59e0b" />
-                  <Bar dataKey="cuUsed" name="CU Used" fill="#06b6d4" />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyChart label="No expert completion data for this period" />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
             <CardTitle className="text-lg">Completed Calls by PM</CardTitle>
+            <CardDescription>Operational completion volume by project manager.</CardDescription>
           </CardHeader>
           <CardContent>
-            {charts.completedCallsByPM.length > 0 ? (
+            {callsByPmHasSignal ? (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={charts.completedCallsByPM}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -429,12 +436,49 @@ export default function Analytics() {
                   <Bar dataKey="cuUsed" name="CU Used" fill="#3b82f6" />
                 </BarChart>
               </ResponsiveContainer>
+            ) : charts.completedCallsByPM.length === 1 ? (
+              <LowDataChart />
             ) : (
               <EmptyChart label="No PM completion data for this period" />
             )}
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Top Experts</CardTitle>
+          <CardDescription>Secondary operational view of completed calls and CU by expert.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {charts.completedCallsByExpert.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                    <th className="py-2 font-medium">Expert</th>
+                    <th className="py-2 text-right font-medium">Completed Calls</th>
+                    <th className="py-2 text-right font-medium">CU Used</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {charts.completedCallsByExpert.map((expert) => (
+                    <tr key={expert.expertId} className="border-b last:border-0">
+                      <td className="py-3 font-medium">{expert.expertName}</td>
+                      <td className="py-3 text-right font-mono">{expert.completedCalls}</td>
+                      <td className="py-3 text-right font-mono">{expert.cuUsed.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="rounded-md bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
+              No expert completion data for this period.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
         <BarChart3 className="h-4 w-4" />
