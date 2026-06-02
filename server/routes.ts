@@ -3501,6 +3501,45 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== BILLABLE USAGE (FINANCE REVIEW) ====================
+  app.get("/api/billable-usage", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const parseOptionalId = (value: unknown) => {
+        if (!value) return undefined;
+        const parsed = parseInt(String(value), 10);
+        return Number.isNaN(parsed) ? undefined : parsed;
+      };
+      const parseOptionalDate = (value: unknown, endOfDay = false) => {
+        if (!value) return undefined;
+        const date = new Date(`${String(value)}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
+        return Number.isNaN(date.getTime()) ? undefined : date;
+      };
+
+      const report = await storage.getBillableUsage({
+        startDate: parseOptionalDate(req.query.startDate),
+        endDate: parseOptionalDate(req.query.endDate, true),
+        status: req.query.status ? String(req.query.status) : undefined,
+        clientOrganizationId: parseOptionalId(req.query.clientOrganizationId),
+        projectId: parseOptionalId(req.query.projectId),
+      });
+
+      res.json(report);
+    } catch (error) {
+      console.error("Failed to fetch billable usage:", error);
+      res.status(500).json({ error: "Failed to fetch billable usage" });
+    }
+  });
+
+  app.post("/api/billable-usage/sync", authMiddleware, requireRoles("admin", "finance"), async (_req, res) => {
+    try {
+      const result = await storage.syncBillableUsageFromCompletedCalls();
+      res.status(201).json(result);
+    } catch (error) {
+      console.error("Failed to sync billable usage:", error);
+      res.status(500).json({ error: "Failed to sync billable usage" });
+    }
+  });
+
   // ==================== OPERATIONS ANALYTICS (READ-ONLY) ====================
   app.get("/api/analytics/operations", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
     try {

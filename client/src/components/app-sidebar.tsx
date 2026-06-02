@@ -109,6 +109,12 @@ const financeItems: NavItem[] = [
     icon: BarChart3,
     pageKey: "usage",
   },
+  {
+    title: "Billable Usage",
+    url: "/billable-usage",
+    icon: FileQuestion,
+    pageKey: "billable-usage",
+  },
 ];
 
 const adminItems: NavItem[] = [
