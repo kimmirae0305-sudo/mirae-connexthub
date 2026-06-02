@@ -89,6 +89,12 @@ const operationsItems: NavItem[] = [
     pageKey: "analytics",
   },
   {
+    title: "PM Performance",
+    url: "/pm-performance",
+    icon: Briefcase,
+    pageKey: "pm-performance",
+  },
+  {
     title: "RA Performance",
     url: "/ra-performance",
     icon: Award,

@@ -28,6 +28,7 @@ import QuickInviteDecision from "@/pages/quick-invite-decision";
 import ExpertProfile from "@/pages/expert-profile";
 import Invites from "@/pages/invites";
 import RaPerformance from "@/pages/ra-performance";
+import PmPerformance from "@/pages/pm-performance";
 import ClientShortlist from "@/pages/client-shortlist";
 import ChangePassword from "@/pages/change-password";
 import TermsPage from "@/pages/terms";
@@ -172,6 +173,9 @@ function Router() {
       </Route>
       <Route path="/analytics">
         <MainLayout><Analytics /></MainLayout>
+      </Route>
+      <Route path="/pm-performance">
+        <MainLayout><PmPerformance /></MainLayout>
       </Route>
       <Route path="/employees">
         <MainLayout><Employees /></MainLayout>
