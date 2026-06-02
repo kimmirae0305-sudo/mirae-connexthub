@@ -9,6 +9,7 @@ export type PageKey =
   | "consultations"
   | "usage"
   | "billable-usage"
+  | "contracts"
   | "analytics"
   | "pm-performance"
   | "employees"
@@ -40,6 +41,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "consultations",
     "usage",
     "billable-usage",
+    "contracts",
     "analytics",
     "pm-performance",
     "employees",
@@ -69,6 +71,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "clients",
     "usage",
     "billable-usage",
+    "contracts",
     "analytics",
     "pm-performance",
     "ra-performance",
@@ -84,6 +87,7 @@ export const PAGE_TO_ROUTE: Record<PageKey, string> = {
   consultations: "/consultations",
   usage: "/usage",
   "billable-usage": "/billable-usage",
+  contracts: "/contracts",
   analytics: "/analytics",
   "pm-performance": "/pm-performance",
   employees: "/employees",
@@ -101,6 +105,7 @@ export const ROUTE_TO_PAGE: Record<string, PageKey> = {
   "/consultations": "consultations",
   "/usage": "usage",
   "/billable-usage": "billable-usage",
+  "/contracts": "contracts",
   "/analytics": "analytics",
   "/pm-performance": "pm-performance",
   "/employees": "employees",

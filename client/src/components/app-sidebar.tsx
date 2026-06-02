@@ -115,6 +115,12 @@ const financeItems: NavItem[] = [
     icon: FileQuestion,
     pageKey: "billable-usage",
   },
+  {
+    title: "Contracts",
+    url: "/contracts",
+    icon: Briefcase,
+    pageKey: "contracts",
+  },
 ];
 
 const adminItems: NavItem[] = [
