@@ -18,6 +18,7 @@ import InsightHub from "@/pages/insight-hub";
 import Consultations from "@/pages/consultations";
 import Usage from "@/pages/usage";
 import BillableUsage from "@/pages/billable-usage";
+import Contracts from "@/pages/contracts";
 import Analytics from "@/pages/analytics";
 import Employees from "@/pages/employees";
 import ExpertRegister from "@/pages/expert-register";
@@ -174,6 +175,9 @@ function Router() {
       </Route>
       <Route path="/billable-usage">
         <MainLayout><BillableUsage /></MainLayout>
+      </Route>
+      <Route path="/contracts">
+        <MainLayout><Contracts /></MainLayout>
       </Route>
       <Route path="/analytics">
         <MainLayout><Analytics /></MainLayout>
