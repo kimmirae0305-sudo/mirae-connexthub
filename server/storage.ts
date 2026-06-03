@@ -95,6 +95,8 @@ export interface BillableUsageRow {
   billableUsageClientOrganizationId: number | null;
   projectClientOrganizationId: number | null;
   clientLinkSource: "billable_usage" | "project" | "fallback";
+  activeInvoiceId: number | null;
+  activeInvoiceStatus: string | null;
   clientName: string;
   projectId: number;
   projectName: string;
@@ -1619,6 +1621,8 @@ export class DatabaseStorage implements IStorage {
         billableUsageClientOrganizationId: row.billableUsageClientOrganizationId,
         projectClientOrganizationId: row.projectClientOrganizationId,
         clientLinkSource,
+        activeInvoiceId: null,
+        activeInvoiceStatus: null,
         clientName: row.clientOrganizationName || row.projectClientName || row.projectClientCompany || "-",
         projectId: row.projectId,
         projectName: row.projectName,
@@ -1636,6 +1640,28 @@ export class DatabaseStorage implements IStorage {
         updatedAt: row.updatedAt,
       };
     });
+
+    const billableUsageIds = mappedRows.map((row) => row.id);
+    if (billableUsageIds.length > 0) {
+      const activeInvoiceLinks = await db
+        .select({
+          billableUsageId: invoiceLineItems.billableUsageId,
+          invoiceId: invoices.id,
+          invoiceStatus: invoices.status,
+        })
+        .from(invoiceLineItems)
+        .innerJoin(invoices, eq(invoiceLineItems.invoiceId, invoices.id))
+        .where(and(inArray(invoiceLineItems.billableUsageId, billableUsageIds), sql`${invoices.status} <> 'canceled'`));
+      const activeInvoiceByBillableUsageId = new Map(
+        activeInvoiceLinks.map((link) => [link.billableUsageId, link])
+      );
+      for (const row of mappedRows) {
+        const activeInvoice = activeInvoiceByBillableUsageId.get(row.id);
+        if (!activeInvoice) continue;
+        row.activeInvoiceId = activeInvoice.invoiceId;
+        row.activeInvoiceStatus = activeInvoice.invoiceStatus;
+      }
+    }
 
     const round = (value: number) => Math.round(value * 100) / 100;
     const totalCU = mappedRows.reduce((sum, row) => sum + Number(row.cuUsed || 0), 0);
@@ -1972,11 +1998,16 @@ export class DatabaseStorage implements IStorage {
       }
 
       const existingLineItems = await tx
-        .select({ billableUsageId: invoiceLineItems.billableUsageId })
+        .select({
+          billableUsageId: invoiceLineItems.billableUsageId,
+          invoiceId: invoices.id,
+          invoiceStatus: invoices.status,
+        })
         .from(invoiceLineItems)
-        .where(inArray(invoiceLineItems.billableUsageId, uniqueIds));
+        .innerJoin(invoices, eq(invoiceLineItems.invoiceId, invoices.id))
+        .where(and(inArray(invoiceLineItems.billableUsageId, uniqueIds), sql`${invoices.status} <> 'canceled'`));
       if (existingLineItems.length > 0) {
-        throw new Error("One or more selected billable usage items are already linked to an invoice.");
+        throw new Error("One or more selected billable usage items are already linked to an active invoice.");
       }
 
       const round = (value: number) => Math.round(value * 100) / 100;

@@ -269,7 +269,7 @@ const compatibilityStatements = [
   `CREATE TABLE IF NOT EXISTS invoice_line_items (
     id serial PRIMARY KEY,
     invoice_id integer NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-    billable_usage_id integer NOT NULL UNIQUE REFERENCES billable_usage(id) ON DELETE RESTRICT,
+    billable_usage_id integer NOT NULL REFERENCES billable_usage(id) ON DELETE RESTRICT,
     description text NOT NULL,
     service_date timestamp NOT NULL,
     project_id integer NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -279,6 +279,8 @@ const compatibilityStatements = [
     amount numeric(12,2) NOT NULL,
     created_at timestamp DEFAULT now() NOT NULL
   )`,
+  `ALTER TABLE invoice_line_items DROP CONSTRAINT IF EXISTS invoice_line_items_billable_usage_id_unique`,
+  `DROP INDEX IF EXISTS invoice_line_items_billable_usage_id_unique`,
   `ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_overview text`,
   `ALTER TABLE client_organizations ADD COLUMN IF NOT EXISTS client_type text`,
   `ALTER TABLE client_organizations ADD COLUMN IF NOT EXISTS legal_entity_name text`,

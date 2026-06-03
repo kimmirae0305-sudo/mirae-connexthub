@@ -334,7 +334,7 @@ export const invoices = pgTable("invoices", {
 export const invoiceLineItems = pgTable("invoice_line_items", {
   id: serial("id").primaryKey(),
   invoiceId: integer("invoice_id").notNull().references(() => invoices.id, { onDelete: "cascade" }),
-  billableUsageId: integer("billable_usage_id").notNull().references(() => billableUsage.id, { onDelete: "restrict" }).unique(),
+  billableUsageId: integer("billable_usage_id").notNull().references(() => billableUsage.id, { onDelete: "restrict" }),
   description: text("description").notNull(),
   serviceDate: timestamp("service_date").notNull(),
   projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "restrict" }),
