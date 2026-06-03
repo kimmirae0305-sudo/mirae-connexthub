@@ -177,6 +177,10 @@ export interface CreateInvoiceDraftResult extends InvoiceDetail {
   billableUsageUpdatedCount: number;
 }
 
+export interface CancelInvoiceDraftResult extends InvoiceDetail {
+  billableUsageUpdatedCount: number;
+}
+
 export interface OperationsAnalyticsFilters {
   startDate?: Date;
   endDate?: Date;
@@ -395,6 +399,7 @@ export interface IStorage {
   getInvoices(): Promise<InvoiceListRow[]>;
   getInvoiceById(id: number): Promise<InvoiceDetail | undefined>;
   createInvoiceDraft(billableUsageIds: number[]): Promise<CreateInvoiceDraftResult>;
+  cancelInvoiceDraft(invoiceId: number): Promise<CancelInvoiceDraftResult>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2092,6 +2097,141 @@ export class DatabaseStorage implements IStorage {
         },
         lineItems,
         billableUsageUpdatedCount: updatedRows.length,
+      };
+    });
+  }
+
+  async cancelInvoiceDraft(invoiceId: number): Promise<CancelInvoiceDraftResult> {
+    if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+      throw new Error("Invalid invoice id.");
+    }
+
+    return db.transaction(async (tx) => {
+      const [invoice] = await tx
+        .select({
+          id: invoices.id,
+          status: invoices.status,
+        })
+        .from(invoices)
+        .where(eq(invoices.id, invoiceId));
+
+      if (!invoice) {
+        throw new Error("Invoice not found.");
+      }
+
+      if (invoice.status !== "draft") {
+        throw new Error("Only draft invoices can be canceled.");
+      }
+
+      const linkedLineItems = await tx
+        .select({
+          billableUsageId: invoiceLineItems.billableUsageId,
+        })
+        .from(invoiceLineItems)
+        .where(eq(invoiceLineItems.invoiceId, invoiceId));
+      const linkedBillableUsageIds = linkedLineItems.map((item) => item.billableUsageId);
+
+      let billableUsageUpdatedCount = 0;
+      if (linkedBillableUsageIds.length > 0) {
+        const linkedBillableUsageRows = await tx
+          .select({
+            id: billableUsage.id,
+            status: billableUsage.status,
+          })
+          .from(billableUsage)
+          .where(inArray(billableUsage.id, linkedBillableUsageIds));
+
+        if (linkedBillableUsageRows.length !== linkedBillableUsageIds.length) {
+          throw new Error("One or more linked billable usage items could not be found.");
+        }
+
+        const nonDraftUsage = linkedBillableUsageRows.find((row) => row.status !== "draft");
+        if (nonDraftUsage) {
+          throw new Error("All linked billable usage items must be in draft status before cancellation.");
+        }
+
+        const restoredRows = await tx
+          .update(billableUsage)
+          .set({
+            status: "unbilled",
+            updatedAt: new Date(),
+          })
+          .where(and(inArray(billableUsage.id, linkedBillableUsageIds), eq(billableUsage.status, "draft")))
+          .returning();
+
+        if (restoredRows.length !== linkedBillableUsageIds.length) {
+          throw new Error("Linked billable usage items could not all be restored to unbilled.");
+        }
+        billableUsageUpdatedCount = restoredRows.length;
+      }
+
+      const [updatedInvoice] = await tx
+        .update(invoices)
+        .set({
+          status: "canceled",
+          updatedAt: new Date(),
+        })
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "draft")))
+        .returning();
+
+      if (!updatedInvoice) {
+        throw new Error("Invoice could not be canceled.");
+      }
+
+      const [invoiceRow] = await tx
+        .select({
+          id: invoices.id,
+          draftNumber: invoices.draftNumber,
+          clientOrganizationId: invoices.clientOrganizationId,
+          clientName: clientOrganizations.name,
+          invoiceDate: invoices.invoiceDate,
+          periodStart: invoices.periodStart,
+          periodEnd: invoices.periodEnd,
+          currency: invoices.currency,
+          subtotal: invoices.subtotal,
+          total: invoices.total,
+          status: invoices.status,
+          notes: invoices.notes,
+          createdAt: invoices.createdAt,
+          updatedAt: invoices.updatedAt,
+        })
+        .from(invoices)
+        .innerJoin(clientOrganizations, eq(invoices.clientOrganizationId, clientOrganizations.id))
+        .where(eq(invoices.id, invoiceId));
+
+      if (!invoiceRow) {
+        throw new Error("Invoice was canceled but could not be loaded.");
+      }
+
+      const lineItems = await tx
+        .select({
+          id: invoiceLineItems.id,
+          invoiceId: invoiceLineItems.invoiceId,
+          billableUsageId: invoiceLineItems.billableUsageId,
+          description: invoiceLineItems.description,
+          serviceDate: invoiceLineItems.serviceDate,
+          projectId: invoiceLineItems.projectId,
+          projectName: projects.name,
+          expertId: invoiceLineItems.expertId,
+          expertName: experts.name,
+          cuUsed: invoiceLineItems.cuUsed,
+          cuRate: invoiceLineItems.cuRate,
+          amount: invoiceLineItems.amount,
+          createdAt: invoiceLineItems.createdAt,
+        })
+        .from(invoiceLineItems)
+        .innerJoin(projects, eq(invoiceLineItems.projectId, projects.id))
+        .innerJoin(experts, eq(invoiceLineItems.expertId, experts.id))
+        .where(eq(invoiceLineItems.invoiceId, invoiceId))
+        .orderBy(invoiceLineItems.serviceDate, invoiceLineItems.id);
+
+      return {
+        invoice: {
+          ...invoiceRow,
+          lineItemCount: lineItems.length,
+        },
+        lineItems,
+        billableUsageUpdatedCount,
       };
     });
   }
