@@ -121,6 +121,14 @@ const formatMoney = (value: string | number | null | undefined) => {
   return `USD ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+const readJsonResponse = async <T,>(response: Response, requestUrl: string): Promise<T> => {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error(`Expected JSON from ${requestUrl}, received ${contentType || "unknown content type"}.`);
+  }
+  return response.json() as Promise<T>;
+};
+
 const readFirstValue = (row: BillableUsageRow | InvoiceLineItemRow, fieldNames: string[]) => {
   const record = row as unknown as Record<string, unknown>;
   for (const fieldName of fieldNames) {
@@ -198,11 +206,14 @@ export default function Invoices() {
   } = useQuery<InvoiceDetail>({
     queryKey: ["/api/invoices", selectedInvoiceId],
     queryFn: async () => {
-      const response = await fetch(`/api/invoices/${selectedInvoiceId}`, { credentials: "include" });
-      if (!response.ok) throw new Error("Failed to fetch invoice detail");
-      return response.json();
+      if (!Number.isInteger(selectedInvoiceId)) {
+        throw new Error("Invoice detail requires a valid invoice id.");
+      }
+      const requestUrl = `/api/invoices/${selectedInvoiceId}`;
+      const response = await apiRequest("GET", requestUrl);
+      return readJsonResponse<InvoiceDetail>(response, requestUrl);
     },
-    enabled: selectedInvoiceId !== null,
+    enabled: Number.isInteger(selectedInvoiceId),
   });
 
   const unbilledRows = billableUsageData?.rows || [];
@@ -232,15 +243,24 @@ export default function Invoices() {
       const response = await apiRequest("POST", "/api/invoices/draft", {
         billableUsageIds: selectedBillableUsageIds,
       });
-      return response.json() as Promise<InvoiceDetail>;
+      return readJsonResponse<InvoiceDetail>(response, "/api/invoices/draft");
     },
     onSuccess: (result) => {
+      const createdInvoiceId = Number(result.invoice?.id);
+      if (!Number.isInteger(createdInvoiceId) || createdInvoiceId <= 0) {
+        toast({
+          title: "Invoice draft created",
+          description: "The draft was created, but the response did not include a valid invoice id.",
+          variant: "destructive",
+        });
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
       queryClient.invalidateQueries({ queryKey: [ELIGIBLE_BILLABLE_USAGE_URL] });
-      queryClient.setQueryData(["/api/invoices", result.invoice.id], result);
+      queryClient.setQueryData(["/api/invoices", createdInvoiceId], result);
       setSelectedBillableUsageIds([]);
       setCreateDialogOpen(false);
-      setSelectedInvoiceId(result.invoice.id);
+      setSelectedInvoiceId(createdInvoiceId);
       toast({
         title: "Invoice draft created",
         description: `${result.invoice.draftNumber} is ready for finance review.`,
