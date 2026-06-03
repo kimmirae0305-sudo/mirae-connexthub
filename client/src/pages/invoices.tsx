@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { AlertCircle, FileText, Receipt } from "lucide-react";
+import { AlertCircle, FileText, Receipt, XCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -119,6 +119,20 @@ const formatDate = (value: string | null | undefined) => {
 const formatMoney = (value: string | number | null | undefined) => {
   const amount = Number(value || 0);
   return `USD ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const formatInvoiceStatus = (status: string | null | undefined) => {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "draft") return "Draft";
+  if (normalized === "canceled") return "Canceled";
+  if (normalized === "issued") return "Issued";
+  if (normalized === "void") return "Void";
+  return status || "-";
+};
+
+const invoiceStatusBadgeVariant = (status: string | null | undefined) => {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "canceled" || normalized === "void" ? "outline" : "secondary";
 };
 
 const readJsonResponse = async <T,>(response: Response, requestUrl: string): Promise<T> => {
@@ -275,6 +289,38 @@ export default function Invoices() {
     },
   });
 
+  const cancelDraftMutation = useMutation({
+    mutationFn: async (invoiceId: number) => {
+      const requestUrl = `/api/invoices/${invoiceId}/cancel`;
+      const response = await apiRequest("POST", requestUrl);
+      return readJsonResponse<InvoiceDetail>(response, requestUrl);
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      queryClient.invalidateQueries({ queryKey: [ELIGIBLE_BILLABLE_USAGE_URL] });
+      queryClient.setQueryData(["/api/invoices", result.invoice.id], result);
+      toast({
+        title: "Invoice draft canceled",
+        description: `${result.invoice.draftNumber} was canceled and linked billable usage was returned to unbilled.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to cancel invoice draft",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCancelDraft = (invoice: InvoiceListRow) => {
+    const confirmed = window.confirm(
+      "Cancel this draft invoice? The invoice and line items will remain for audit history, and linked billable usage will return to Unbilled."
+    );
+    if (!confirmed) return;
+    cancelDraftMutation.mutate(invoice.id);
+  };
+
   const toggleBillableUsage = (id: number) => {
     setSelectedBillableUsageIds((current) =>
       current.includes(id) ? current.filter((currentId) => currentId !== id) : [...current, id]
@@ -339,7 +385,9 @@ export default function Invoices() {
                       <TableCell>{formatDate(invoice.periodStart)} - {formatDate(invoice.periodEnd)}</TableCell>
                       <TableCell className="text-right font-mono">{formatMoney(invoice.total)}</TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{invoice.status === "draft" ? "Draft" : invoice.status}</Badge>
+                        <Badge variant={invoiceStatusBadgeVariant(invoice.status)}>
+                          {formatInvoiceStatus(invoice.status)}
+                        </Badge>
                       </TableCell>
                       <TableCell>{formatDate(invoice.createdAt)}</TableCell>
                       <TableCell className="text-right">
@@ -535,6 +583,19 @@ export default function Invoices() {
             />
           ) : (
             <div className="space-y-4">
+              {selectedInvoice.invoice.status === "draft" && (
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    onClick={() => handleCancelDraft(selectedInvoice.invoice)}
+                    disabled={cancelDraftMutation.isPending}
+                    data-testid="button-cancel-invoice-draft"
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />
+                    {cancelDraftMutation.isPending ? "Canceling..." : "Cancel Draft"}
+                  </Button>
+                </div>
+              )}
               <div className="grid gap-4 sm:grid-cols-4">
                 <Card>
                   <CardContent className="p-4">
@@ -545,7 +606,11 @@ export default function Invoices() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-xs uppercase text-muted-foreground">Status</div>
-                    <div className="mt-1 font-medium">Draft</div>
+                    <div className="mt-1">
+                      <Badge variant={invoiceStatusBadgeVariant(selectedInvoice.invoice.status)}>
+                        {formatInvoiceStatus(selectedInvoice.invoice.status)}
+                      </Badge>
+                    </div>
                   </CardContent>
                 </Card>
                 <Card>

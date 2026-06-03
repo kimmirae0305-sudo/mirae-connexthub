@@ -3599,6 +3599,23 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/invoices/:id/cancel", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) {
+        return res.status(400).json({ error: "Invalid invoice id" });
+      }
+
+      const canceledInvoice = await storage.cancelInvoiceDraft(id);
+      res.json(canceledInvoice);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to cancel invoice draft";
+      console.error("Failed to cancel invoice draft:", error);
+      const status = message === "Invoice not found." ? 404 : 400;
+      res.status(status).json({ error: message });
+    }
+  });
+
   // ==================== OPERATIONS ANALYTICS (READ-ONLY) ====================
   app.get("/api/analytics/operations", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
     try {
