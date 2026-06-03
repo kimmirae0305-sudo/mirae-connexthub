@@ -1651,7 +1651,12 @@ export class DatabaseStorage implements IStorage {
         })
         .from(invoiceLineItems)
         .innerJoin(invoices, eq(invoiceLineItems.invoiceId, invoices.id))
-        .where(and(inArray(invoiceLineItems.billableUsageId, billableUsageIds), sql`${invoices.status} <> 'canceled'`));
+        .where(
+          and(
+            inArray(invoiceLineItems.billableUsageId, billableUsageIds),
+            sql`lower(trim(${invoices.status})) <> 'canceled'`
+          )
+        );
       const activeInvoiceByBillableUsageId = new Map(
         activeInvoiceLinks.map((link) => [link.billableUsageId, link])
       );
@@ -2005,7 +2010,12 @@ export class DatabaseStorage implements IStorage {
         })
         .from(invoiceLineItems)
         .innerJoin(invoices, eq(invoiceLineItems.invoiceId, invoices.id))
-        .where(and(inArray(invoiceLineItems.billableUsageId, uniqueIds), sql`${invoices.status} <> 'canceled'`));
+        .where(
+          and(
+            inArray(invoiceLineItems.billableUsageId, uniqueIds),
+            sql`lower(trim(${invoices.status})) <> 'canceled'`
+          )
+        );
       if (existingLineItems.length > 0) {
         throw new Error("One or more selected billable usage items are already linked to an active invoice.");
       }

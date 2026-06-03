@@ -279,7 +279,9 @@ const compatibilityStatements = [
     amount numeric(12,2) NOT NULL,
     created_at timestamp DEFAULT now() NOT NULL
   )`,
+  `ALTER TABLE invoice_line_items DROP CONSTRAINT IF EXISTS invoice_line_items_billable_usage_id_key`,
   `ALTER TABLE invoice_line_items DROP CONSTRAINT IF EXISTS invoice_line_items_billable_usage_id_unique`,
+  `DROP INDEX IF EXISTS invoice_line_items_billable_usage_id_key`,
   `DROP INDEX IF EXISTS invoice_line_items_billable_usage_id_unique`,
   `ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_overview text`,
   `ALTER TABLE client_organizations ADD COLUMN IF NOT EXISTS client_type text`,
