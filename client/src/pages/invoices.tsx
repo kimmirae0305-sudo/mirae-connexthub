@@ -73,6 +73,8 @@ interface BillableUsageRow {
   billableUsageClientOrganizationId?: number | string | null;
   projectClientOrganizationId?: number | string | null;
   clientLinkSource?: string | null;
+  activeInvoiceId?: number | string | null;
+  activeInvoiceStatus?: string | null;
   clientOrganizationID?: number | string | null;
   client_organization_id?: number | string | null;
   clientId?: number | string | null;
@@ -178,10 +180,11 @@ const getAmountUsd = (row: BillableUsageRow) =>
   parseAmount(readFirstValue(row, ["amount", "amountUsd", "amount_usd", "billableAmount", "billable_amount", "billableAmountUsd", "billable_amount_usd", "usdAmount", "usd_amount"]));
 const hasClientOrganization = (row: BillableUsageRow) => getClientOrganizationId(row) > 0;
 const hasValidRate = (row: BillableUsageRow) => getUsdCuRate(row) > 0 && getAmountUsd(row) > 0;
+const hasActiveInvoiceLink = (row: BillableUsageRow) => parseAmount(row.activeInvoiceId) > 0;
 const isUnbilled = (row: BillableUsageRow) => normalizedStatus(row) === "unbilled";
 const isUsd = (row: BillableUsageRow) => normalizedCurrency(row) === "USD";
 const isEligibleForInvoiceDraft = (row: BillableUsageRow) =>
-  isUnbilled(row) && hasClientOrganization(row) && isUsd(row) && hasValidRate(row);
+  isUnbilled(row) && hasClientOrganization(row) && isUsd(row) && hasValidRate(row) && !hasActiveInvoiceLink(row);
 
 const getExclusionReason = (row: BillableUsageRow) => {
   if (!isUnbilled(row)) return "Status is not unbilled";
@@ -191,6 +194,7 @@ const getExclusionReason = (row: BillableUsageRow) => {
   }
   if (!isUsd(row)) return "Invoice currency is not USD";
   if (!hasClientOrganization(row)) return "Client organization link is missing";
+  if (hasActiveInvoiceLink(row)) return "Already linked to an active invoice";
   return "Other eligibility issue";
 };
 
