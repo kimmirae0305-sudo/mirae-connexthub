@@ -190,7 +190,12 @@ export default function Invoices() {
     },
   });
 
-  const { data: selectedInvoice, isLoading: invoiceDetailLoading } = useQuery<InvoiceDetail>({
+  const {
+    data: selectedInvoice,
+    isLoading: invoiceDetailLoading,
+    isError: invoiceDetailError,
+    error: invoiceDetailErrorDetail,
+  } = useQuery<InvoiceDetail>({
     queryKey: ["/api/invoices", selectedInvoiceId],
     queryFn: async () => {
       const response = await fetch(`/api/invoices/${selectedInvoiceId}`, { credentials: "include" });
@@ -232,6 +237,7 @@ export default function Invoices() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
       queryClient.invalidateQueries({ queryKey: [ELIGIBLE_BILLABLE_USAGE_URL] });
+      queryClient.setQueryData(["/api/invoices", result.invoice.id], result);
       setSelectedBillableUsageIds([]);
       setCreateDialogOpen(false);
       setSelectedInvoiceId(result.invoice.id);
@@ -489,8 +495,24 @@ export default function Invoices() {
             </DialogDescription>
           </DialogHeader>
 
-          {invoiceDetailLoading || !selectedInvoice ? (
+          {invoiceDetailLoading && !selectedInvoice ? (
             <DataTableSkeleton columns={7} rows={4} />
+          ) : invoiceDetailError ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Invoice detail could not be loaded</AlertTitle>
+              <AlertDescription>
+                {invoiceDetailErrorDetail instanceof Error
+                  ? invoiceDetailErrorDetail.message
+                  : "Please close this detail view and reopen the invoice draft from the list."}
+              </AlertDescription>
+            </Alert>
+          ) : !selectedInvoice ? (
+            <EmptyState
+              icon={FileText}
+              title="Invoice draft detail is unavailable."
+              description="Close this detail view and reopen the invoice draft from the list."
+            />
           ) : (
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-4">
@@ -522,32 +544,40 @@ export default function Invoices() {
                 </Card>
               </div>
 
-              <div className="overflow-x-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-xs font-semibold uppercase">Service Date</TableHead>
-                      <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
-                      <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
-                      <TableHead className="text-right text-xs font-semibold uppercase">CU Used</TableHead>
-                      <TableHead className="text-right text-xs font-semibold uppercase">USD CU Rate</TableHead>
-                      <TableHead className="text-right text-xs font-semibold uppercase">Amount (USD)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedInvoice.lineItems.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>{formatDate(item.serviceDate)}</TableCell>
-                        <TableCell>{item.projectName}</TableCell>
-                        <TableCell>{item.expertName}</TableCell>
-                        <TableCell className="text-right font-mono">{parseAmount(item.cuUsed).toFixed(2)}</TableCell>
-                        <TableCell className="text-right font-mono">{parseAmount(item.cuRate).toFixed(2)}</TableCell>
-                        <TableCell className="text-right font-mono">{parseAmount(item.amount).toFixed(2)}</TableCell>
+              {selectedInvoice.lineItems.length === 0 ? (
+                <EmptyState
+                  icon={Receipt}
+                  title="No invoice line items found."
+                  description="This draft exists, but no billable usage line items were returned."
+                />
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs font-semibold uppercase">Service Date</TableHead>
+                        <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
+                        <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
+                        <TableHead className="text-right text-xs font-semibold uppercase">CU Used</TableHead>
+                        <TableHead className="text-right text-xs font-semibold uppercase">USD CU Rate</TableHead>
+                        <TableHead className="text-right text-xs font-semibold uppercase">Amount (USD)</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedInvoice.lineItems.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>{formatDate(item.serviceDate)}</TableCell>
+                          <TableCell>{item.projectName}</TableCell>
+                          <TableCell>{item.expertName}</TableCell>
+                          <TableCell className="text-right font-mono">{parseAmount(item.cuUsed).toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono">{parseAmount(item.cuRate).toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono">{parseAmount(item.amount).toFixed(2)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
