@@ -3580,6 +3580,172 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/invoices/:id/pdf", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) {
+        return res.status(400).json({ error: "Invalid invoice id" });
+      }
+
+      const invoiceDetail = await storage.getInvoiceById(id);
+      if (!invoiceDetail) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+
+      const { invoice, lineItems } = invoiceDetail;
+      if (String(invoice.status || "").trim().toLowerCase() !== "issued") {
+        return res.status(400).json({ error: "Only issued invoices can be downloaded as PDF" });
+      }
+
+      const invoiceNumber = invoice.invoiceNumber || invoice.draftNumber || `INV-${invoice.id}`;
+      const safeFileName = `${invoiceNumber.replace(/[^a-zA-Z0-9-_]/g, "_")}.pdf`;
+      const formatDateForPdf = (value: Date | string | null | undefined) => {
+        if (!value) return "-";
+        const date = value instanceof Date ? value : new Date(value);
+        return Number.isNaN(date.getTime())
+          ? "-"
+          : date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "2-digit" });
+      };
+      const formatUsd = (value: string | number | null | undefined) => {
+        const amount = Number(value || 0);
+        return `USD ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      };
+      const formatCu = (value: string | number | null | undefined) => Number(value || 0).toFixed(2);
+      const invoicePeriod =
+        formatDateForPdf(invoice.periodStart) === formatDateForPdf(invoice.periodEnd)
+          ? formatDateForPdf(invoice.periodStart)
+          : `${formatDateForPdf(invoice.periodStart)} - ${formatDateForPdf(invoice.periodEnd)}`;
+
+      const doc = new PDFDocument({
+        size: "A4",
+        margins: { top: 48, bottom: 56, left: 48, right: 48 },
+      });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeFileName}"`);
+      doc.pipe(res);
+
+      const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const rightEdge = doc.page.width - doc.page.margins.right;
+      const ensureSpace = (height: number) => {
+        if (doc.y + height > doc.page.height - doc.page.margins.bottom) {
+          doc.addPage();
+        }
+      };
+
+      doc.font("Helvetica-Bold").fontSize(18).fillColor("#111827").text("Mirae Connext");
+      doc.font("Helvetica").fontSize(10).fillColor("#6b7280").text("Expert Network Service");
+      doc.moveDown(1.2);
+
+      doc.font("Helvetica-Bold").fontSize(24).fillColor("#111827").text("Invoice");
+      doc.font("Helvetica").fontSize(11).fillColor("#374151").text(invoiceNumber);
+      doc.moveDown(1);
+
+      const summaryTop = doc.y;
+      doc.font("Helvetica-Bold").fontSize(10).fillColor("#6b7280").text("BILL TO", doc.page.margins.left, summaryTop);
+      doc.font("Helvetica-Bold").fontSize(12).fillColor("#111827").text(invoice.clientName || "-", doc.page.margins.left, summaryTop + 16, {
+        width: pageWidth / 2 - 18,
+      });
+
+      const labelX = doc.page.margins.left + pageWidth / 2 + 24;
+      const valueX = rightEdge - 160;
+      const summaryRows = [
+        ["Issue date", formatDateForPdf(invoice.issuedAt || invoice.invoiceDate)],
+        ["Invoice period", invoicePeriod],
+        ["Currency", "USD"],
+        ["Total", formatUsd(invoice.total)],
+      ];
+      summaryRows.forEach(([label, value], index) => {
+        const y = summaryTop + index * 18;
+        doc.font("Helvetica-Bold").fontSize(9).fillColor("#6b7280").text(label, labelX, y, { width: 95 });
+        doc.font(index === summaryRows.length - 1 ? "Helvetica-Bold" : "Helvetica").fontSize(10).fillColor("#111827").text(value, valueX, y, {
+          width: 160,
+          align: "right",
+        });
+      });
+
+      doc.y = Math.max(doc.y, summaryTop + 92);
+      doc.moveDown(1.2);
+
+      doc.moveTo(doc.page.margins.left, doc.y).lineTo(rightEdge, doc.y).strokeColor("#e5e7eb").stroke();
+      doc.moveDown(0.8);
+      doc.font("Helvetica-Bold").fontSize(13).fillColor("#111827").text("Line Items");
+      doc.moveDown(0.5);
+
+      const tableLeft = doc.page.margins.left;
+      const columns = [
+        { title: "Service Date", x: tableLeft, width: 72, align: "left" as const },
+        { title: "Project", x: tableLeft + 78, width: 135, align: "left" as const },
+        { title: "Expert", x: tableLeft + 219, width: 84, align: "left" as const },
+        { title: "CU", x: tableLeft + 309, width: 42, align: "right" as const },
+        { title: "USD CU Rate", x: tableLeft + 357, width: 76, align: "right" as const },
+        { title: "Amount USD", x: tableLeft + 439, width: 72, align: "right" as const },
+      ];
+      const renderTableHeader = () => {
+        ensureSpace(48);
+        const headerTop = doc.y;
+        doc.rect(tableLeft, headerTop, pageWidth, 22).fill("#f3f4f6");
+        columns.forEach((column) => {
+          doc
+            .font("Helvetica-Bold")
+            .fontSize(8)
+            .fillColor("#374151")
+            .text(column.title, column.x + 4, headerTop + 7, { width: column.width - 8, align: column.align });
+        });
+        doc.y = headerTop + 28;
+      };
+
+      renderTableHeader();
+      if (lineItems.length === 0) {
+        doc.font("Helvetica-Oblique").fontSize(10).fillColor("#6b7280").text("No line items were found for this issued invoice.");
+      } else {
+        lineItems.forEach((item) => {
+          ensureSpace(42);
+          const rowTop = doc.y;
+          const projectHeight = doc.heightOfString(item.projectName || "-", { width: columns[1].width - 8 });
+          const expertHeight = doc.heightOfString(item.expertName || "-", { width: columns[2].width - 8 });
+          const rowHeight = Math.max(28, projectHeight, expertHeight) + 8;
+
+          doc.rect(tableLeft, rowTop - 2, pageWidth, rowHeight).fill("#ffffff");
+          doc.moveTo(tableLeft, rowTop + rowHeight - 2).lineTo(rightEdge, rowTop + rowHeight - 2).strokeColor("#e5e7eb").stroke();
+          doc.font("Helvetica").fontSize(8.5).fillColor("#111827");
+          doc.text(formatDateForPdf(item.serviceDate), columns[0].x + 4, rowTop + 5, { width: columns[0].width - 8 });
+          doc.text(item.projectName || "-", columns[1].x + 4, rowTop + 5, { width: columns[1].width - 8 });
+          doc.text(item.expertName || "-", columns[2].x + 4, rowTop + 5, { width: columns[2].width - 8 });
+          doc.text(formatCu(item.cuUsed), columns[3].x + 4, rowTop + 5, { width: columns[3].width - 8, align: "right" });
+          doc.text(formatUsd(item.cuRate), columns[4].x + 4, rowTop + 5, { width: columns[4].width - 8, align: "right" });
+          doc.font("Helvetica-Bold").text(formatUsd(item.amount), columns[5].x + 4, rowTop + 5, {
+            width: columns[5].width - 8,
+            align: "right",
+          });
+          doc.y = rowTop + rowHeight + 2;
+        });
+      }
+
+      ensureSpace(72);
+      doc.moveDown(0.8);
+      doc.moveTo(tableLeft + pageWidth - 220, doc.y).lineTo(rightEdge, doc.y).strokeColor("#d1d5db").stroke();
+      doc.moveDown(0.6);
+      doc.font("Helvetica-Bold").fontSize(12).fillColor("#111827").text("Total", tableLeft + pageWidth - 220, doc.y, { width: 80 });
+      doc.text(formatUsd(invoice.total), tableLeft + pageWidth - 120, doc.y - 14, { width: 120, align: "right" });
+
+      doc.font("Helvetica").fontSize(9).fillColor("#6b7280");
+      doc.text(
+        "This invoice is generated from Mirae Connext CRM. Sending and payment tracking are handled separately.",
+        doc.page.margins.left,
+        doc.page.height - doc.page.margins.bottom + 18,
+        { width: pageWidth, align: "center" }
+      );
+
+      doc.end();
+    } catch (error) {
+      console.error("Failed to generate invoice PDF:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to generate invoice PDF" });
+      }
+    }
+  });
+
   app.post("/api/invoices/draft", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
     try {
       const billableUsageIds = Array.isArray(req.body?.billableUsageIds)
