@@ -325,10 +325,15 @@ export const invoices = pgTable("invoices", {
   currency: text("currency").notNull().default("USD"),
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull().default("0"),
-  status: text("status").notNull().default("draft"), // draft, issued, void
+  status: text("status").notNull().default("draft"), // draft, issued, sent, canceled, void
   notes: text("notes"),
   issuedAt: timestamp("issued_at"),
   issuedByUserId: integer("issued_by_user_id").references(() => users.id),
+  sentAt: timestamp("sent_at"),
+  sentByUserId: integer("sent_by_user_id").references(() => users.id),
+  sentMethod: text("sent_method"),
+  sentRecipientEmail: text("sent_recipient_email"),
+  sentNotes: text("sent_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

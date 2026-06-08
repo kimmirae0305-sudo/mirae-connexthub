@@ -3595,8 +3595,9 @@ export async function registerRoutes(
       }
 
       const { invoice, lineItems } = invoiceDetail;
-      if (String(invoice.status || "").trim().toLowerCase() !== "issued") {
-        return res.status(400).json({ error: "Only issued invoices can be downloaded as PDF" });
+      const normalizedInvoiceStatus = String(invoice.status || "").trim().toLowerCase();
+      if (normalizedInvoiceStatus !== "issued" && normalizedInvoiceStatus !== "sent") {
+        return res.status(400).json({ error: "Only issued or sent invoices can be downloaded as PDF" });
       }
 
       const invoiceNumber = invoice.invoiceNumber || invoice.draftNumber || `INV-${invoice.id}`;
@@ -3891,6 +3892,31 @@ export async function registerRoutes(
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to issue invoice";
       console.error("Failed to issue invoice:", error);
+      const status = message === "Invoice not found." ? 404 : 400;
+      res.status(status).json({ error: message });
+    }
+  });
+
+  app.post("/api/invoices/:id/mark-sent", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) {
+        return res.status(400).json({ error: "Invalid invoice id" });
+      }
+
+      const sentInvoice = await storage.markInvoiceSent(
+        id,
+        {
+          sentMethod: req.body?.sentMethod || "manual_email",
+          sentRecipientEmail: req.body?.sentRecipientEmail || null,
+          sentNotes: req.body?.sentNotes || null,
+        },
+        req.user?.id
+      );
+      res.json(sentInvoice);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to mark invoice as sent";
+      console.error("Failed to mark invoice as sent:", error);
       const status = message === "Invoice not found." ? 404 : 400;
       res.status(status).json({ error: message });
     }

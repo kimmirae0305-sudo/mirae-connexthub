@@ -152,6 +152,11 @@ export interface InvoiceListRow {
   notes: string | null;
   issuedAt: Date | null;
   issuedByUserId: number | null;
+  sentAt: Date | null;
+  sentByUserId: number | null;
+  sentMethod: string | null;
+  sentRecipientEmail: string | null;
+  sentNotes: string | null;
   createdAt: Date;
   updatedAt: Date;
   lineItemCount: number;
@@ -189,6 +194,14 @@ export interface CancelInvoiceDraftResult extends InvoiceDetail {
 export interface IssueInvoiceResult extends InvoiceDetail {
   billableUsageUpdatedCount: number;
 }
+
+export interface MarkInvoiceSentInput {
+  sentMethod?: string | null;
+  sentRecipientEmail?: string | null;
+  sentNotes?: string | null;
+}
+
+export interface MarkInvoiceSentResult extends InvoiceDetail {}
 
 export interface OperationsAnalyticsFilters {
   startDate?: Date;
@@ -413,6 +426,11 @@ export interface IStorage {
   ): Promise<CreateInvoiceDraftResult>;
   cancelInvoiceDraft(invoiceId: number): Promise<CancelInvoiceDraftResult>;
   issueInvoice(invoiceId: number, issuedByUserId?: number): Promise<IssueInvoiceResult>;
+  markInvoiceSent(
+    invoiceId: number,
+    input?: MarkInvoiceSentInput,
+    sentByUserId?: number
+  ): Promise<MarkInvoiceSentResult>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1869,6 +1887,11 @@ export class DatabaseStorage implements IStorage {
         notes: invoices.notes,
         issuedAt: invoices.issuedAt,
         issuedByUserId: invoices.issuedByUserId,
+        sentAt: invoices.sentAt,
+        sentByUserId: invoices.sentByUserId,
+        sentMethod: invoices.sentMethod,
+        sentRecipientEmail: invoices.sentRecipientEmail,
+        sentNotes: invoices.sentNotes,
         createdAt: invoices.createdAt,
         updatedAt: invoices.updatedAt,
       })
@@ -1909,6 +1932,11 @@ export class DatabaseStorage implements IStorage {
         notes: invoices.notes,
         issuedAt: invoices.issuedAt,
         issuedByUserId: invoices.issuedByUserId,
+        sentAt: invoices.sentAt,
+        sentByUserId: invoices.sentByUserId,
+        sentMethod: invoices.sentMethod,
+        sentRecipientEmail: invoices.sentRecipientEmail,
+        sentNotes: invoices.sentNotes,
         createdAt: invoices.createdAt,
         updatedAt: invoices.updatedAt,
       })
@@ -2126,6 +2154,11 @@ export class DatabaseStorage implements IStorage {
           notes: invoices.notes,
           issuedAt: invoices.issuedAt,
           issuedByUserId: invoices.issuedByUserId,
+          sentAt: invoices.sentAt,
+          sentByUserId: invoices.sentByUserId,
+          sentMethod: invoices.sentMethod,
+          sentRecipientEmail: invoices.sentRecipientEmail,
+          sentNotes: invoices.sentNotes,
           createdAt: invoices.createdAt,
           updatedAt: invoices.updatedAt,
         })
@@ -2264,6 +2297,11 @@ export class DatabaseStorage implements IStorage {
           notes: invoices.notes,
           issuedAt: invoices.issuedAt,
           issuedByUserId: invoices.issuedByUserId,
+          sentAt: invoices.sentAt,
+          sentByUserId: invoices.sentByUserId,
+          sentMethod: invoices.sentMethod,
+          sentRecipientEmail: invoices.sentRecipientEmail,
+          sentNotes: invoices.sentNotes,
           createdAt: invoices.createdAt,
           updatedAt: invoices.updatedAt,
         })
@@ -2410,6 +2448,11 @@ export class DatabaseStorage implements IStorage {
           notes: invoices.notes,
           issuedAt: invoices.issuedAt,
           issuedByUserId: invoices.issuedByUserId,
+          sentAt: invoices.sentAt,
+          sentByUserId: invoices.sentByUserId,
+          sentMethod: invoices.sentMethod,
+          sentRecipientEmail: invoices.sentRecipientEmail,
+          sentNotes: invoices.sentNotes,
           createdAt: invoices.createdAt,
           updatedAt: invoices.updatedAt,
         })
@@ -2450,6 +2493,120 @@ export class DatabaseStorage implements IStorage {
         },
         lineItems,
         billableUsageUpdatedCount: updatedRows.length,
+      };
+    });
+  }
+
+  async markInvoiceSent(
+    invoiceId: number,
+    input: MarkInvoiceSentInput = {},
+    sentByUserId?: number
+  ): Promise<MarkInvoiceSentResult> {
+    if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+      throw new Error("Invalid invoice id.");
+    }
+
+    return db.transaction(async (tx) => {
+      const [invoice] = await tx
+        .select({
+          id: invoices.id,
+          status: invoices.status,
+        })
+        .from(invoices)
+        .where(eq(invoices.id, invoiceId));
+
+      if (!invoice) {
+        throw new Error("Invoice not found.");
+      }
+
+      if (invoice.status !== "issued") {
+        throw new Error("Only issued invoices can be marked as sent.");
+      }
+
+      const now = new Date();
+      const sentMethod = String(input.sentMethod || "manual_email").trim() || "manual_email";
+      const sentRecipientEmail = input.sentRecipientEmail ? String(input.sentRecipientEmail).trim() : null;
+      const sentNotes = input.sentNotes ? String(input.sentNotes).trim() : null;
+
+      const [updatedInvoice] = await tx
+        .update(invoices)
+        .set({
+          status: "sent",
+          sentAt: now,
+          sentByUserId: sentByUserId || null,
+          sentMethod,
+          sentRecipientEmail,
+          sentNotes,
+          updatedAt: now,
+        })
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "issued")))
+        .returning();
+
+      if (!updatedInvoice) {
+        throw new Error("Invoice could not be marked as sent.");
+      }
+
+      const [invoiceRow] = await tx
+        .select({
+          id: invoices.id,
+          draftNumber: invoices.draftNumber,
+          invoiceNumber: invoices.invoiceNumber,
+          clientOrganizationId: invoices.clientOrganizationId,
+          clientName: clientOrganizations.name,
+          invoiceDate: invoices.invoiceDate,
+          periodStart: invoices.periodStart,
+          periodEnd: invoices.periodEnd,
+          currency: invoices.currency,
+          subtotal: invoices.subtotal,
+          total: invoices.total,
+          status: invoices.status,
+          notes: invoices.notes,
+          issuedAt: invoices.issuedAt,
+          issuedByUserId: invoices.issuedByUserId,
+          sentAt: invoices.sentAt,
+          sentByUserId: invoices.sentByUserId,
+          sentMethod: invoices.sentMethod,
+          sentRecipientEmail: invoices.sentRecipientEmail,
+          sentNotes: invoices.sentNotes,
+          createdAt: invoices.createdAt,
+          updatedAt: invoices.updatedAt,
+        })
+        .from(invoices)
+        .innerJoin(clientOrganizations, eq(invoices.clientOrganizationId, clientOrganizations.id))
+        .where(eq(invoices.id, invoiceId));
+
+      if (!invoiceRow) {
+        throw new Error("Invoice was marked as sent but could not be loaded.");
+      }
+
+      const lineItems = await tx
+        .select({
+          id: invoiceLineItems.id,
+          invoiceId: invoiceLineItems.invoiceId,
+          billableUsageId: invoiceLineItems.billableUsageId,
+          description: invoiceLineItems.description,
+          serviceDate: invoiceLineItems.serviceDate,
+          projectId: invoiceLineItems.projectId,
+          projectName: projects.name,
+          expertId: invoiceLineItems.expertId,
+          expertName: experts.name,
+          cuUsed: invoiceLineItems.cuUsed,
+          cuRate: invoiceLineItems.cuRate,
+          amount: invoiceLineItems.amount,
+          createdAt: invoiceLineItems.createdAt,
+        })
+        .from(invoiceLineItems)
+        .innerJoin(projects, eq(invoiceLineItems.projectId, projects.id))
+        .innerJoin(experts, eq(invoiceLineItems.expertId, experts.id))
+        .where(eq(invoiceLineItems.invoiceId, invoiceId))
+        .orderBy(invoiceLineItems.serviceDate, invoiceLineItems.id);
+
+      return {
+        invoice: {
+          ...invoiceRow,
+          lineItemCount: lineItems.length,
+        },
+        lineItems,
       };
     });
   }
