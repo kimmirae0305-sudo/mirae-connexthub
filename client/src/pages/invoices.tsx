@@ -443,7 +443,7 @@ export default function Invoices() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Invoices</h1>
           <p className="text-sm text-muted-foreground">
-            Create, issue, and review invoices from billable usage. PDF download is available for issued invoices.
+            Create, issue, review, and download client invoices generated from approved billable usage.
           </p>
         </div>
         <Button className="gap-2" onClick={() => setCreateDialogOpen(true)} data-testid="button-create-invoice-draft">
@@ -456,16 +456,16 @@ export default function Invoices() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Invoice review finance layer</AlertTitle>
         <AlertDescription>
-          Invoice drafts are created from reviewed billable usage only. Issued invoices can be downloaded as PDFs. Sending, payment tracking, and call record mutations are not part of this step.
+          Draft invoices can be reviewed, canceled, or issued. Issued invoices can be downloaded as PDFs. Sending, payment tracking, and call record mutations are not part of this step.
         </AlertDescription>
       </Alert>
 
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-1">
-            <CardTitle className="text-base font-medium">Invoice Drafts</CardTitle>
+            <CardTitle className="text-base font-medium">Invoice Records</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Draft and canceled invoice records remain visible for finance review and audit history.
+              Draft, issued, and canceled invoice records remain visible for finance review and audit history.
             </p>
           </div>
         </CardHeader>
@@ -475,8 +475,8 @@ export default function Invoices() {
           ) : !invoices || invoices.length === 0 ? (
             <EmptyState
               icon={FileText}
-              title="No invoice drafts found."
-              description="Create a draft from reviewed billable usage when finance is ready to prepare an invoice."
+              title="No invoices found."
+              description="Create a draft from reviewed billable usage when finance is ready to prepare a client invoice."
             />
           ) : (
             <div className="overflow-x-auto">
@@ -685,7 +685,7 @@ export default function Invoices() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <DialogTitle className="font-mono text-xl">
-                  {selectedInvoice ? getDisplayInvoiceNumber(selectedInvoice.invoice) : "Invoice Draft"}
+                  {selectedInvoice ? getDisplayInvoiceNumber(selectedInvoice.invoice) : "Invoice Detail"}
                 </DialogTitle>
                 {selectedInvoice && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -738,7 +738,7 @@ export default function Invoices() {
               )}
             </div>
             <DialogDescription>
-              Review invoice details and line items. PDF generation is available for issued invoices. Sending and payment tracking are not available yet.
+              Review invoice details and line items. Issued invoices can be downloaded as branded PDFs. Sending and payment tracking are not available yet.
             </DialogDescription>
           </DialogHeader>
 
@@ -758,7 +758,7 @@ export default function Invoices() {
             <EmptyState
               icon={FileText}
               title="Invoice draft detail is unavailable."
-              description="Close this detail view and reopen the invoice draft from the list."
+              description="Close this detail view and reopen the invoice from the list."
             />
           ) : (
             <div className="space-y-4">
