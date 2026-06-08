@@ -48,6 +48,11 @@ interface InvoiceListRow {
   sentMethod: string | null;
   sentRecipientEmail: string | null;
   sentNotes: string | null;
+  paidAt: string | null;
+  paidByUserId: number | null;
+  paymentMethod: string | null;
+  paymentReferenceNumber: string | null;
+  paymentNotes: string | null;
   createdAt: string;
   updatedAt: string;
   lineItemCount: number;
@@ -159,6 +164,7 @@ const formatInvoiceStatus = (status: string | null | undefined) => {
   if (normalized === "canceled") return "Canceled";
   if (normalized === "issued") return "Issued";
   if (normalized === "sent") return "Sent";
+  if (normalized === "paid") return "Paid";
   if (normalized === "void") return "Void";
   return status || "-";
 };
@@ -173,6 +179,7 @@ const invoiceStatusBadgeClassName = (status: string | null | undefined) => {
   if (normalized === "draft") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (normalized === "issued") return "border-sky-200 bg-sky-50 text-sky-700";
   if (normalized === "sent") return "border-violet-200 bg-violet-50 text-violet-700";
+  if (normalized === "paid") return "border-green-200 bg-green-50 text-green-700";
   if (normalized === "canceled") return "border-slate-300 bg-slate-50 text-slate-600";
   return "";
 };
@@ -180,12 +187,22 @@ const invoiceStatusBadgeClassName = (status: string | null | undefined) => {
 const isDraftInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "draft";
 const isIssuedInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "issued";
 const isSentInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "sent";
+const isPaidInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "paid";
 
 const getDisplayInvoiceNumber = (invoice: InvoiceListRow) => invoice.invoiceNumber || invoice.draftNumber;
 const getInvoicePdfFileName = (invoice: InvoiceListRow) => `${getDisplayInvoiceNumber(invoice).replace(/[^a-zA-Z0-9-_]/g, "_")}.pdf`;
 const formatSentMethod = (method: string | null | undefined) => {
   const normalized = String(method || "manual_email").trim().toLowerCase();
   if (normalized === "manual_email") return "Manual Email";
+  return normalized
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
+const formatPaymentMethod = (method: string | null | undefined) => {
+  const normalized = String(method || "").trim().toLowerCase();
+  if (!normalized) return "-";
   return normalized
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -264,6 +281,10 @@ export default function Invoices() {
   const [sentMethod, setSentMethod] = useState("manual_email");
   const [sentRecipientEmail, setSentRecipientEmail] = useState("");
   const [sentNotes, setSentNotes] = useState("");
+  const [markPaidInvoice, setMarkPaidInvoice] = useState<InvoiceListRow | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
 
   const { data: invoices, isLoading: invoicesLoading } = useQuery<InvoiceListRow[]>({
     queryKey: ["/api/invoices"],
@@ -494,6 +515,38 @@ export default function Invoices() {
     },
   });
 
+  const markPaidMutation = useMutation({
+    mutationFn: async () => {
+      if (!markPaidInvoice) throw new Error("Invoice is required.");
+      const requestUrl = `/api/invoices/${markPaidInvoice.id}/mark-paid`;
+      const response = await apiRequest("POST", requestUrl, {
+        paymentMethod: paymentMethod.trim() || undefined,
+        paymentReferenceNumber: paymentReferenceNumber.trim() || undefined,
+        paymentNotes: paymentNotes.trim() || undefined,
+      });
+      return readJsonResponse<InvoiceDetail>(response, requestUrl);
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      queryClient.setQueryData(["/api/invoices", result.invoice.id], result);
+      setMarkPaidInvoice(null);
+      setPaymentMethod("");
+      setPaymentReferenceNumber("");
+      setPaymentNotes("");
+      toast({
+        title: "Invoice marked as paid",
+        description: `${getDisplayInvoiceNumber(result.invoice)} was recorded as fully paid.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to mark invoice as paid",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleIssueInvoice = (invoice: InvoiceListRow) => {
     const confirmed = window.confirm(
       "Issue this invoice? This will finalize the draft invoice and lock its billable usage as invoiced. PDF download will become available after issuing; sending and payment tracking are not included in this step."
@@ -521,6 +574,13 @@ export default function Invoices() {
     setSentNotes(invoice.sentNotes || "");
   };
 
+  const handleOpenMarkPaid = (invoice: InvoiceListRow) => {
+    setMarkPaidInvoice(invoice);
+    setPaymentMethod(invoice.paymentMethod || "");
+    setPaymentReferenceNumber(invoice.paymentReferenceNumber || "");
+    setPaymentNotes(invoice.paymentNotes || "");
+  };
+
   const toggleBillableUsage = (id: number) => {
     setSelectedBillableUsageIds((current) =>
       current.includes(id) ? current.filter((currentId) => currentId !== id) : [...current, id]
@@ -533,7 +593,7 @@ export default function Invoices() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Invoices</h1>
           <p className="text-sm text-muted-foreground">
-            Create, issue, review, and download client invoices generated from approved billable usage.
+            Create, issue, review, and track manual sending and payment confirmation for client invoices generated from approved billable usage.
           </p>
         </div>
         <Button className="gap-2" onClick={() => setCreateDialogOpen(true)} data-testid="button-create-invoice-draft">
@@ -546,7 +606,7 @@ export default function Invoices() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Invoice review finance layer</AlertTitle>
         <AlertDescription>
-          Draft invoices can be reviewed, canceled, or issued. Issued invoices can be downloaded as PDFs. Sending, payment tracking, and call record mutations are not part of this step.
+          Draft invoices can be reviewed, canceled, or issued. Issued and sent invoices can be downloaded as PDFs. Manual sent and paid tracking records offline actions without sending email, contacting banks, or mutating call records.
         </AlertDescription>
       </Alert>
 
@@ -561,7 +621,7 @@ export default function Invoices() {
         </CardHeader>
         <CardContent>
           {invoicesLoading ? (
-            <DataTableSkeleton columns={8} rows={5} />
+            <DataTableSkeleton columns={9} rows={5} />
           ) : !invoices || invoices.length === 0 ? (
             <EmptyState
               icon={FileText}
@@ -580,6 +640,7 @@ export default function Invoices() {
                     <TableHead className="text-center text-xs font-semibold uppercase">Status</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Created At</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Sent At</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Paid At</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -607,6 +668,7 @@ export default function Invoices() {
                       </TableCell>
                       <TableCell>{formatDateTime(invoice.createdAt)}</TableCell>
                       <TableCell>{formatDateTime(invoice.sentAt)}</TableCell>
+                      <TableCell>{formatDateTime(invoice.paidAt)}</TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="outline"
@@ -839,7 +901,8 @@ export default function Invoices() {
               {selectedInvoice &&
                 (isDraftInvoice(selectedInvoice.invoice.status) ||
                   isIssuedInvoice(selectedInvoice.invoice.status) ||
-                  isSentInvoice(selectedInvoice.invoice.status)) && (
+                  isSentInvoice(selectedInvoice.invoice.status) ||
+                  isPaidInvoice(selectedInvoice.invoice.status)) && (
                 <div className="flex flex-wrap gap-2">
                   {isDraftInvoice(selectedInvoice.invoice.status) && (
                     <>
@@ -873,7 +936,20 @@ export default function Invoices() {
                       Mark as Sent
                     </Button>
                   )}
-                  {(isIssuedInvoice(selectedInvoice.invoice.status) || isSentInvoice(selectedInvoice.invoice.status)) && (
+                  {isSentInvoice(selectedInvoice.invoice.status) && (
+                    <Button
+                      variant="outline"
+                      onClick={() => handleOpenMarkPaid(selectedInvoice.invoice)}
+                      disabled={markPaidMutation.isPending}
+                      data-testid="button-mark-invoice-paid"
+                    >
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Mark as Paid
+                    </Button>
+                  )}
+                  {(isIssuedInvoice(selectedInvoice.invoice.status) ||
+                    isSentInvoice(selectedInvoice.invoice.status) ||
+                    isPaidInvoice(selectedInvoice.invoice.status)) && (
                     <Button
                       onClick={() => handleDownloadPdf(selectedInvoice.invoice)}
                       disabled={downloadPdfMutation.isPending}
@@ -887,7 +963,7 @@ export default function Invoices() {
               )}
             </div>
             <DialogDescription>
-              Review invoice details and line items. Issued invoices can be downloaded as branded PDFs. Sending and payment tracking are not available yet.
+              Review invoice details and line items. Issued, sent, and paid invoices can be downloaded as branded PDFs. Sending and payment confirmation are recorded manually outside automated integrations.
             </DialogDescription>
           </DialogHeader>
 
@@ -957,10 +1033,18 @@ export default function Invoices() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-xs uppercase text-muted-foreground">
-                      {selectedInvoice.invoice.sentAt ? "Sent At" : selectedInvoice.invoice.issuedAt ? "Issued At" : "Created At"}
+                      {selectedInvoice.invoice.paidAt
+                        ? "Paid At"
+                        : selectedInvoice.invoice.sentAt
+                        ? "Sent At"
+                        : selectedInvoice.invoice.issuedAt
+                        ? "Issued At"
+                        : "Created At"}
                     </div>
                     <div className="mt-1 font-medium">
-                      {selectedInvoice.invoice.sentAt
+                      {selectedInvoice.invoice.paidAt
+                        ? formatDateTime(selectedInvoice.invoice.paidAt)
+                        : selectedInvoice.invoice.sentAt
                         ? formatDateTime(selectedInvoice.invoice.sentAt)
                         : selectedInvoice.invoice.issuedAt
                         ? formatDateTime(selectedInvoice.invoice.issuedAt)
@@ -987,6 +1071,28 @@ export default function Invoices() {
                     <div>
                       <div className="text-xs uppercase text-muted-foreground">Sent Notes</div>
                       <div className="mt-1 font-medium">{selectedInvoice.invoice.sentNotes || "-"}</div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {selectedInvoice.invoice.paidAt && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Manual Payment Confirmation</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid gap-3 text-sm sm:grid-cols-3">
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground">Payment Method</div>
+                      <div className="mt-1 font-medium">{formatPaymentMethod(selectedInvoice.invoice.paymentMethod)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground">Reference Number</div>
+                      <div className="mt-1 font-medium">{selectedInvoice.invoice.paymentReferenceNumber || "-"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground">Payment Notes</div>
+                      <div className="mt-1 font-medium">{selectedInvoice.invoice.paymentNotes || "-"}</div>
                     </div>
                   </CardContent>
                 </Card>
@@ -1113,6 +1219,93 @@ export default function Invoices() {
               data-testid="button-submit-mark-invoice-sent"
             >
               {markSentMutation.isPending ? "Recording..." : "Mark as Sent"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!markPaidInvoice}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMarkPaidInvoice(null);
+            setPaymentMethod("");
+            setPaymentReferenceNumber("");
+            setPaymentNotes("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Mark Invoice as Paid</DialogTitle>
+            <DialogDescription>
+              Record that full payment was confirmed manually. This does not contact a bank or support partial payments.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Manual payment confirmation only</AlertTitle>
+              <AlertDescription>
+                Mark as Paid records that Mirae Connext confirmed this invoice was paid in full outside the CRM. It does not trigger bank integration, email, receipts, or partial payment tracking.
+              </AlertDescription>
+            </Alert>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="invoice-payment-method">
+                Payment Method
+              </label>
+              <input
+                id="invoice-payment-method"
+                value={paymentMethod}
+                onChange={(event) => setPaymentMethod(event.target.value)}
+                placeholder="Wire transfer"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="input-invoice-payment-method"
+              />
+              <p className="text-xs text-muted-foreground">Optional. Use this to record how payment was confirmed.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="invoice-payment-reference">
+                Reference Number
+              </label>
+              <input
+                id="invoice-payment-reference"
+                value={paymentReferenceNumber}
+                onChange={(event) => setPaymentReferenceNumber(event.target.value)}
+                placeholder="Bank reference or remittance id"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="input-invoice-payment-reference-number"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="invoice-payment-notes">
+                Notes
+              </label>
+              <textarea
+                id="invoice-payment-notes"
+                value={paymentNotes}
+                onChange={(event) => setPaymentNotes(event.target.value)}
+                placeholder="Optional note about the manual payment confirmation."
+                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="textarea-invoice-payment-notes"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMarkPaidInvoice(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => markPaidMutation.mutate()}
+              disabled={markPaidMutation.isPending}
+              data-testid="button-submit-mark-invoice-paid"
+            >
+              {markPaidMutation.isPending ? "Recording..." : "Mark as Paid"}
             </Button>
           </DialogFooter>
         </DialogContent>
