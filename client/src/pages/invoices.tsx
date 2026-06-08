@@ -43,6 +43,11 @@ interface InvoiceListRow {
   notes: string | null;
   issuedAt: string | null;
   issuedByUserId: number | null;
+  sentAt: string | null;
+  sentByUserId: number | null;
+  sentMethod: string | null;
+  sentRecipientEmail: string | null;
+  sentNotes: string | null;
   createdAt: string;
   updatedAt: string;
   lineItemCount: number;
@@ -153,6 +158,7 @@ const formatInvoiceStatus = (status: string | null | undefined) => {
   if (normalized === "draft") return "Draft";
   if (normalized === "canceled") return "Canceled";
   if (normalized === "issued") return "Issued";
+  if (normalized === "sent") return "Sent";
   if (normalized === "void") return "Void";
   return status || "-";
 };
@@ -166,15 +172,25 @@ const invoiceStatusBadgeClassName = (status: string | null | undefined) => {
   const normalized = String(status || "").trim().toLowerCase();
   if (normalized === "draft") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (normalized === "issued") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (normalized === "sent") return "border-violet-200 bg-violet-50 text-violet-700";
   if (normalized === "canceled") return "border-slate-300 bg-slate-50 text-slate-600";
   return "";
 };
 
 const isDraftInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "draft";
 const isIssuedInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "issued";
+const isSentInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "sent";
 
 const getDisplayInvoiceNumber = (invoice: InvoiceListRow) => invoice.invoiceNumber || invoice.draftNumber;
 const getInvoicePdfFileName = (invoice: InvoiceListRow) => `${getDisplayInvoiceNumber(invoice).replace(/[^a-zA-Z0-9-_]/g, "_")}.pdf`;
+const formatSentMethod = (method: string | null | undefined) => {
+  const normalized = String(method || "manual_email").trim().toLowerCase();
+  if (normalized === "manual_email") return "Manual Email";
+  return normalized
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
 
 const readJsonResponse = async <T,>(response: Response, requestUrl: string): Promise<T> => {
   const contentType = response.headers.get("content-type") || "";
@@ -244,6 +260,10 @@ export default function Invoices() {
   const [selectedBillableUsageIds, setSelectedBillableUsageIds] = useState<number[]>([]);
   const [billingPeriodStart, setBillingPeriodStart] = useState("");
   const [billingPeriodEnd, setBillingPeriodEnd] = useState("");
+  const [markSentInvoice, setMarkSentInvoice] = useState<InvoiceListRow | null>(null);
+  const [sentMethod, setSentMethod] = useState("manual_email");
+  const [sentRecipientEmail, setSentRecipientEmail] = useState("");
+  const [sentNotes, setSentNotes] = useState("");
 
   const { data: invoices, isLoading: invoicesLoading } = useQuery<InvoiceListRow[]>({
     queryKey: ["/api/invoices"],
@@ -442,6 +462,38 @@ export default function Invoices() {
     },
   });
 
+  const markSentMutation = useMutation({
+    mutationFn: async () => {
+      if (!markSentInvoice) throw new Error("Invoice is required.");
+      const requestUrl = `/api/invoices/${markSentInvoice.id}/mark-sent`;
+      const response = await apiRequest("POST", requestUrl, {
+        sentMethod,
+        sentRecipientEmail: sentRecipientEmail.trim() || undefined,
+        sentNotes: sentNotes.trim() || undefined,
+      });
+      return readJsonResponse<InvoiceDetail>(response, requestUrl);
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      queryClient.setQueryData(["/api/invoices", result.invoice.id], result);
+      setMarkSentInvoice(null);
+      setSentMethod("manual_email");
+      setSentRecipientEmail("");
+      setSentNotes("");
+      toast({
+        title: "Invoice marked as sent",
+        description: `${getDisplayInvoiceNumber(result.invoice)} was recorded as manually sent.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to mark invoice as sent",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleIssueInvoice = (invoice: InvoiceListRow) => {
     const confirmed = window.confirm(
       "Issue this invoice? This will finalize the draft invoice and lock its billable usage as invoiced. PDF download will become available after issuing; sending and payment tracking are not included in this step."
@@ -460,6 +512,13 @@ export default function Invoices() {
 
   const handleDownloadPdf = (invoice: InvoiceListRow) => {
     downloadPdfMutation.mutate(invoice);
+  };
+
+  const handleOpenMarkSent = (invoice: InvoiceListRow) => {
+    setMarkSentInvoice(invoice);
+    setSentMethod(invoice.sentMethod || "manual_email");
+    setSentRecipientEmail(invoice.sentRecipientEmail || "");
+    setSentNotes(invoice.sentNotes || "");
   };
 
   const toggleBillableUsage = (id: number) => {
@@ -502,7 +561,7 @@ export default function Invoices() {
         </CardHeader>
         <CardContent>
           {invoicesLoading ? (
-            <DataTableSkeleton columns={7} rows={5} />
+            <DataTableSkeleton columns={8} rows={5} />
           ) : !invoices || invoices.length === 0 ? (
             <EmptyState
               icon={FileText}
@@ -520,6 +579,7 @@ export default function Invoices() {
                     <TableHead className="text-right text-xs font-semibold uppercase">Total (USD)</TableHead>
                     <TableHead className="text-center text-xs font-semibold uppercase">Status</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Created At</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Sent At</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -546,6 +606,7 @@ export default function Invoices() {
                         </Badge>
                       </TableCell>
                       <TableCell>{formatDateTime(invoice.createdAt)}</TableCell>
+                      <TableCell>{formatDateTime(invoice.sentAt)}</TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="outline"
@@ -775,7 +836,10 @@ export default function Invoices() {
                   </div>
                 )}
               </div>
-              {selectedInvoice && (isDraftInvoice(selectedInvoice.invoice.status) || isIssuedInvoice(selectedInvoice.invoice.status)) && (
+              {selectedInvoice &&
+                (isDraftInvoice(selectedInvoice.invoice.status) ||
+                  isIssuedInvoice(selectedInvoice.invoice.status) ||
+                  isSentInvoice(selectedInvoice.invoice.status)) && (
                 <div className="flex flex-wrap gap-2">
                   {isDraftInvoice(selectedInvoice.invoice.status) && (
                     <>
@@ -799,6 +863,17 @@ export default function Invoices() {
                     </>
                   )}
                   {isIssuedInvoice(selectedInvoice.invoice.status) && (
+                    <Button
+                      variant="outline"
+                      onClick={() => handleOpenMarkSent(selectedInvoice.invoice)}
+                      disabled={markSentMutation.isPending}
+                      data-testid="button-mark-invoice-sent"
+                    >
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Mark as Sent
+                    </Button>
+                  )}
+                  {(isIssuedInvoice(selectedInvoice.invoice.status) || isSentInvoice(selectedInvoice.invoice.status)) && (
                     <Button
                       onClick={() => handleDownloadPdf(selectedInvoice.invoice)}
                       disabled={downloadPdfMutation.isPending}
@@ -882,16 +957,40 @@ export default function Invoices() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-xs uppercase text-muted-foreground">
-                      {selectedInvoice.invoice.issuedAt ? "Issued At" : "Created At"}
+                      {selectedInvoice.invoice.sentAt ? "Sent At" : selectedInvoice.invoice.issuedAt ? "Issued At" : "Created At"}
                     </div>
                     <div className="mt-1 font-medium">
-                      {selectedInvoice.invoice.issuedAt
+                      {selectedInvoice.invoice.sentAt
+                        ? formatDateTime(selectedInvoice.invoice.sentAt)
+                        : selectedInvoice.invoice.issuedAt
                         ? formatDateTime(selectedInvoice.invoice.issuedAt)
                         : formatDateTime(selectedInvoice.invoice.createdAt)}
                     </div>
                   </CardContent>
                 </Card>
               </div>
+
+              {selectedInvoice.invoice.sentAt && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Manual Sending Record</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid gap-3 text-sm sm:grid-cols-3">
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground">Sent Method</div>
+                      <div className="mt-1 font-medium">{formatSentMethod(selectedInvoice.invoice.sentMethod)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground">Recipient Email</div>
+                      <div className="mt-1 font-medium">{selectedInvoice.invoice.sentRecipientEmail || "-"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground">Sent Notes</div>
+                      <div className="mt-1 font-medium">{selectedInvoice.invoice.sentNotes || "-"}</div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {selectedInvoice.lineItems.length === 0 ? (
                 <EmptyState
@@ -937,6 +1036,85 @@ export default function Invoices() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!markSentInvoice} onOpenChange={(open) => !open && setMarkSentInvoice(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Mark Invoice as Sent</DialogTitle>
+            <DialogDescription>
+              Record that this issued invoice was sent manually. This does not send an email from the CRM.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Manual sending only</AlertTitle>
+              <AlertDescription>
+                Email sending is not automated yet. Mark as Sent records that this invoice was sent manually outside the CRM.
+              </AlertDescription>
+            </Alert>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="invoice-sent-method">
+                Sent Method
+              </label>
+              <select
+                id="invoice-sent-method"
+                value={sentMethod}
+                onChange={(event) => setSentMethod(event.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="select-invoice-sent-method"
+              >
+                <option value="manual_email">Manual Email</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="invoice-sent-recipient">
+                Recipient Email
+              </label>
+              <input
+                id="invoice-sent-recipient"
+                type="email"
+                value={sentRecipientEmail}
+                onChange={(event) => setSentRecipientEmail(event.target.value)}
+                placeholder="client@example.com"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="input-invoice-sent-recipient"
+              />
+              <p className="text-xs text-muted-foreground">Optional. Use this to record where the invoice was sent.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="invoice-sent-notes">
+                Sent Notes
+              </label>
+              <textarea
+                id="invoice-sent-notes"
+                value={sentNotes}
+                onChange={(event) => setSentNotes(event.target.value)}
+                placeholder="Optional note about the manual sending step."
+                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="textarea-invoice-sent-notes"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMarkSentInvoice(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => markSentMutation.mutate()}
+              disabled={markSentMutation.isPending}
+              data-testid="button-submit-mark-invoice-sent"
+            >
+              {markSentMutation.isPending ? "Recording..." : "Mark as Sent"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
