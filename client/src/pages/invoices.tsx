@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { AlertCircle, CheckCircle2, Download, FileText, Receipt, XCircle } from "lucide-react";
@@ -121,6 +121,12 @@ const formatDate = (value: string | null | undefined) => {
   return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM dd, yyyy");
 };
 
+const formatDateInput = (value: string | null | undefined) => {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : format(date, "yyyy-MM-dd");
+};
+
 const formatDateTime = (value: string | null | undefined) => {
   if (!value) return "-";
   const date = new Date(value);
@@ -236,6 +242,8 @@ export default function Invoices() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
   const [selectedBillableUsageIds, setSelectedBillableUsageIds] = useState<number[]>([]);
+  const [billingPeriodStart, setBillingPeriodStart] = useState("");
+  const [billingPeriodEnd, setBillingPeriodEnd] = useState("");
 
   const { data: invoices, isLoading: invoicesLoading } = useQuery<InvoiceListRow[]>({
     queryKey: ["/api/invoices"],
@@ -288,11 +296,32 @@ export default function Invoices() {
   const hasMixedClients = selectedClientIds.length > 1;
   const selectedTotal = selectedRows.reduce((sum, row) => sum + getAmountUsd(row), 0);
   const selectedCu = selectedRows.reduce((sum, row) => sum + parseAmount(row.cuUsed), 0);
+  const billingPeriodInvalid =
+    Boolean(billingPeriodStart && billingPeriodEnd) &&
+    new Date(`${billingPeriodStart}T00:00:00`) > new Date(`${billingPeriodEnd}T00:00:00`);
+
+  useEffect(() => {
+    if (selectedRows.length === 0) {
+      setBillingPeriodStart("");
+      setBillingPeriodEnd("");
+      return;
+    }
+
+    const selectedDates = selectedRows
+      .map((row) => row.callDate)
+      .filter((date) => formatDateInput(date))
+      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+    setBillingPeriodStart(formatDateInput(selectedDates[0]));
+    setBillingPeriodEnd(formatDateInput(selectedDates[selectedDates.length - 1]));
+  }, [selectedRows]);
 
   const createDraftMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/invoices/draft", {
         billableUsageIds: selectedBillableUsageIds,
+        periodStart: billingPeriodStart || undefined,
+        periodEnd: billingPeriodEnd || undefined,
       });
       return readJsonResponse<InvoiceDetail>(response, "/api/invoices/draft");
     },
@@ -310,6 +339,8 @@ export default function Invoices() {
       queryClient.invalidateQueries({ queryKey: [ELIGIBLE_BILLABLE_USAGE_URL] });
       queryClient.setQueryData(["/api/invoices", createdInvoiceId], result);
       setSelectedBillableUsageIds([]);
+      setBillingPeriodStart("");
+      setBillingPeriodEnd("");
       setCreateDialogOpen(false);
       setSelectedInvoiceId(createdInvoiceId);
       toast({
@@ -485,7 +516,7 @@ export default function Invoices() {
                   <TableRow>
                     <TableHead className="min-w-[220px] text-xs font-semibold uppercase">Invoice Number</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase">Period</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Billing Period</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Total (USD)</TableHead>
                     <TableHead className="text-center text-xs font-semibold uppercase">Status</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Created At</TableHead>
@@ -539,7 +570,7 @@ export default function Invoices() {
           <DialogHeader>
             <DialogTitle>Create Invoice Draft</DialogTitle>
             <DialogDescription>
-              Select eligible unbilled billable usage rows. All selected rows must belong to one client and have a valid USD CU rate.
+              Select eligible unbilled billable usage rows and confirm the billing period for this invoice.
             </DialogDescription>
           </DialogHeader>
 
@@ -608,6 +639,49 @@ export default function Invoices() {
             </Card>
           </div>
 
+          <div className="grid gap-4 rounded-md border bg-muted/20 p-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="billing-period-start">
+                Billing Period Start
+              </label>
+              <input
+                id="billing-period-start"
+                type="date"
+                value={billingPeriodStart}
+                onChange={(event) => setBillingPeriodStart(event.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="input-invoice-billing-period-start"
+              />
+              <p className="text-xs text-muted-foreground">
+                Defaults to the earliest selected service date.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="billing-period-end">
+                Billing Period End
+              </label>
+              <input
+                id="billing-period-end"
+                type="date"
+                value={billingPeriodEnd}
+                onChange={(event) => setBillingPeriodEnd(event.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                data-testid="input-invoice-billing-period-end"
+              />
+              <p className="text-xs text-muted-foreground">
+                Defaults to the latest selected service date.
+              </p>
+            </div>
+          </div>
+
+          {billingPeriodInvalid && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Billing Period is invalid</AlertTitle>
+              <AlertDescription>Billing Period Start must be on or before Billing Period End.</AlertDescription>
+            </Alert>
+          )}
+
           {hasMixedClients && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -630,7 +704,7 @@ export default function Invoices() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10"></TableHead>
-                    <TableHead className="text-xs font-semibold uppercase">Call Date</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Service Date</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
@@ -670,7 +744,7 @@ export default function Invoices() {
             </Button>
             <Button
               onClick={() => createDraftMutation.mutate()}
-              disabled={createDraftMutation.isPending || selectedRows.length === 0 || hasMixedClients}
+              disabled={createDraftMutation.isPending || selectedRows.length === 0 || hasMixedClients || billingPeriodInvalid}
               data-testid="button-submit-invoice-draft"
             >
               {createDraftMutation.isPending ? "Creating..." : "Create Draft"}
@@ -795,7 +869,7 @@ export default function Invoices() {
                 </Card>
                 <Card>
                   <CardContent className="p-4">
-                    <div className="text-xs uppercase text-muted-foreground">Period</div>
+                    <div className="text-xs uppercase text-muted-foreground">Billing Period</div>
                     <div className="mt-1 font-medium">{formatInvoicePeriod(selectedInvoice.invoice.periodStart, selectedInvoice.invoice.periodEnd)}</div>
                   </CardContent>
                 </Card>
