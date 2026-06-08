@@ -1,6 +1,8 @@
 import type { Express, Router } from "express";
 import { createServer, type Server } from "http";
 import { Router as ExpressRouter } from "express";
+import fs from "fs";
+import path from "path";
 import { storage } from "./storage";
 import { db } from "./db";
 import {
@@ -3627,28 +3629,77 @@ export async function registerRoutes(
 
       const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
       const rightEdge = doc.page.width - doc.page.margins.right;
+      const pageBottom = doc.page.height - doc.page.margins.bottom;
+      const brandBurgundy = "#7A1F2B";
+      const brandInk = "#111827";
+      const brandMuted = "#6b7280";
+      const brandLine = "#e5e7eb";
+      const brandPanel = "#faf7f5";
       const ensureSpace = (height: number) => {
-        if (doc.y + height > doc.page.height - doc.page.margins.bottom) {
+        if (doc.y + height > pageBottom) {
           doc.addPage();
         }
       };
 
-      doc.font("Helvetica-Bold").fontSize(18).fillColor("#111827").text("Mirae Connext");
-      doc.font("Helvetica").fontSize(10).fillColor("#6b7280").text("Expert Network Service");
-      doc.moveDown(1.2);
+      const logoPath = path.resolve(process.cwd(), "attached_assets", "Logo_1764382033313.png");
+      const headerTop = doc.page.margins.top;
+      doc.rect(0, 0, doc.page.width, 132).fill(brandPanel);
+      doc.rect(0, 0, 8, doc.page.height).fill(brandBurgundy);
 
-      doc.font("Helvetica-Bold").fontSize(24).fillColor("#111827").text("Invoice");
-      doc.font("Helvetica").fontSize(11).fillColor("#374151").text(invoiceNumber);
-      doc.moveDown(1);
+      const logoY = headerTop + 2;
+      if (fs.existsSync(logoPath)) {
+        try {
+          doc.image(logoPath, doc.page.margins.left, logoY, { width: 102 });
+        } catch {
+          doc.font("Helvetica-Bold").fontSize(18).fillColor(brandBurgundy).text("Mirae Connext", doc.page.margins.left, logoY);
+          doc.font("Helvetica").fontSize(9).fillColor(brandMuted).text("Expert Network Service");
+        }
+      } else {
+        doc.font("Helvetica-Bold").fontSize(18).fillColor(brandBurgundy).text("Mirae Connext", doc.page.margins.left, logoY);
+        doc.font("Helvetica").fontSize(9).fillColor(brandMuted).text("Expert Network Service");
+      }
+
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(28)
+        .fillColor(brandInk)
+        .text("Invoice", doc.page.margins.left, headerTop + 48, { width: 180 });
+      doc
+        .font("Helvetica")
+        .fontSize(10)
+        .fillColor(brandMuted)
+        .text("Issued by Mirae Connext", doc.page.margins.left, headerTop + 83, { width: 220 });
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(11)
+        .fillColor(brandBurgundy)
+        .text(invoiceNumber, rightEdge - 230, headerTop + 18, { width: 230, align: "right" });
+      doc
+        .font("Helvetica")
+        .fontSize(9)
+        .fillColor(brandMuted)
+        .text("Official invoice number", rightEdge - 230, headerTop + 36, { width: 230, align: "right" });
+
+      doc.y = 162;
 
       const summaryTop = doc.y;
-      doc.font("Helvetica-Bold").fontSize(10).fillColor("#6b7280").text("BILL TO", doc.page.margins.left, summaryTop);
-      doc.font("Helvetica-Bold").fontSize(12).fillColor("#111827").text(invoice.clientName || "-", doc.page.margins.left, summaryTop + 16, {
-        width: pageWidth / 2 - 18,
-      });
+      doc.roundedRect(doc.page.margins.left, summaryTop, pageWidth, 112, 6).fill("#ffffff");
+      doc.roundedRect(doc.page.margins.left, summaryTop, pageWidth, 112, 6).strokeColor(brandLine).lineWidth(1).stroke();
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(9)
+        .fillColor(brandMuted)
+        .text("BILL TO", doc.page.margins.left + 18, summaryTop + 18);
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(14)
+        .fillColor(brandInk)
+        .text(invoice.clientName || "-", doc.page.margins.left + 18, summaryTop + 36, {
+          width: pageWidth / 2 - 36,
+        });
 
-      const labelX = doc.page.margins.left + pageWidth / 2 + 24;
-      const valueX = rightEdge - 160;
+      const labelX = doc.page.margins.left + pageWidth / 2 + 28;
+      const valueX = rightEdge - 178;
       const summaryRows = [
         ["Issue date", formatDateForPdf(invoice.issuedAt || invoice.invoiceDate)],
         ["Invoice period", invoicePeriod],
@@ -3656,64 +3707,68 @@ export async function registerRoutes(
         ["Total", formatUsd(invoice.total)],
       ];
       summaryRows.forEach(([label, value], index) => {
-        const y = summaryTop + index * 18;
-        doc.font("Helvetica-Bold").fontSize(9).fillColor("#6b7280").text(label, labelX, y, { width: 95 });
-        doc.font(index === summaryRows.length - 1 ? "Helvetica-Bold" : "Helvetica").fontSize(10).fillColor("#111827").text(value, valueX, y, {
-          width: 160,
+        const y = summaryTop + 18 + index * 20;
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(brandMuted).text(label.toUpperCase(), labelX, y, { width: 105 });
+        doc
+          .font(index === summaryRows.length - 1 ? "Helvetica-Bold" : "Helvetica")
+          .fontSize(index === summaryRows.length - 1 ? 12 : 10)
+          .fillColor(index === summaryRows.length - 1 ? brandBurgundy : brandInk)
+          .text(value, valueX, y - (index === summaryRows.length - 1 ? 2 : 0), {
+          width: 178,
           align: "right",
         });
       });
 
-      doc.y = Math.max(doc.y, summaryTop + 92);
-      doc.moveDown(1.2);
+      doc.y = summaryTop + 138;
 
-      doc.moveTo(doc.page.margins.left, doc.y).lineTo(rightEdge, doc.y).strokeColor("#e5e7eb").stroke();
+      doc.font("Helvetica-Bold").fontSize(13).fillColor(brandInk).text("Line Items");
+      doc.font("Helvetica").fontSize(9).fillColor(brandMuted).text("Completed consultation services billed in USD.");
       doc.moveDown(0.8);
-      doc.font("Helvetica-Bold").fontSize(13).fillColor("#111827").text("Line Items");
-      doc.moveDown(0.5);
 
       const tableLeft = doc.page.margins.left;
       const columns = [
-        { title: "Service Date", x: tableLeft, width: 72, align: "left" as const },
-        { title: "Project", x: tableLeft + 78, width: 135, align: "left" as const },
-        { title: "Expert", x: tableLeft + 219, width: 84, align: "left" as const },
-        { title: "CU", x: tableLeft + 309, width: 42, align: "right" as const },
-        { title: "USD CU Rate", x: tableLeft + 357, width: 76, align: "right" as const },
-        { title: "Amount USD", x: tableLeft + 439, width: 72, align: "right" as const },
+        { title: "Service Date", x: tableLeft, width: 70, align: "left" as const },
+        { title: "Project", x: tableLeft + 76, width: 138, align: "left" as const },
+        { title: "Expert", x: tableLeft + 220, width: 80, align: "left" as const },
+        { title: "CU", x: tableLeft + 306, width: 34, align: "right" as const },
+        { title: "USD CU Rate", x: tableLeft + 346, width: 74, align: "right" as const },
+        { title: "Amount USD", x: tableLeft + 426, width: 72, align: "right" as const },
       ];
       const renderTableHeader = () => {
         ensureSpace(48);
         const headerTop = doc.y;
-        doc.rect(tableLeft, headerTop, pageWidth, 22).fill("#f3f4f6");
+        doc.roundedRect(tableLeft, headerTop, pageWidth, 24, 4).fill(brandBurgundy);
         columns.forEach((column) => {
           doc
             .font("Helvetica-Bold")
             .fontSize(8)
-            .fillColor("#374151")
+            .fillColor("#ffffff")
             .text(column.title, column.x + 4, headerTop + 7, { width: column.width - 8, align: column.align });
         });
-        doc.y = headerTop + 28;
+        doc.y = headerTop + 32;
       };
 
       renderTableHeader();
       if (lineItems.length === 0) {
-        doc.font("Helvetica-Oblique").fontSize(10).fillColor("#6b7280").text("No line items were found for this issued invoice.");
+        doc.font("Helvetica-Oblique").fontSize(10).fillColor(brandMuted).text("No line items were found for this issued invoice.");
       } else {
-        lineItems.forEach((item) => {
+        lineItems.forEach((item, index) => {
           ensureSpace(42);
           const rowTop = doc.y;
           const projectHeight = doc.heightOfString(item.projectName || "-", { width: columns[1].width - 8 });
           const expertHeight = doc.heightOfString(item.expertName || "-", { width: columns[2].width - 8 });
-          const rowHeight = Math.max(28, projectHeight, expertHeight) + 8;
+          const rowHeight = Math.max(34, projectHeight, expertHeight) + 10;
 
-          doc.rect(tableLeft, rowTop - 2, pageWidth, rowHeight).fill("#ffffff");
-          doc.moveTo(tableLeft, rowTop + rowHeight - 2).lineTo(rightEdge, rowTop + rowHeight - 2).strokeColor("#e5e7eb").stroke();
-          doc.font("Helvetica").fontSize(8.5).fillColor("#111827");
-          doc.text(formatDateForPdf(item.serviceDate), columns[0].x + 4, rowTop + 5, { width: columns[0].width - 8 });
-          doc.text(item.projectName || "-", columns[1].x + 4, rowTop + 5, { width: columns[1].width - 8 });
-          doc.text(item.expertName || "-", columns[2].x + 4, rowTop + 5, { width: columns[2].width - 8 });
-          doc.text(formatCu(item.cuUsed), columns[3].x + 4, rowTop + 5, { width: columns[3].width - 8, align: "right" });
-          doc.text(formatUsd(item.cuRate), columns[4].x + 4, rowTop + 5, { width: columns[4].width - 8, align: "right" });
+          if (index % 2 === 1) {
+            doc.rect(tableLeft, rowTop - 2, pageWidth, rowHeight).fill("#fbfbfb");
+          }
+          doc.moveTo(tableLeft, rowTop + rowHeight - 2).lineTo(rightEdge, rowTop + rowHeight - 2).strokeColor(brandLine).stroke();
+          doc.font("Helvetica").fontSize(8.5).fillColor(brandInk);
+          doc.text(formatDateForPdf(item.serviceDate), columns[0].x + 4, rowTop + 7, { width: columns[0].width - 8 });
+          doc.font("Helvetica-Bold").text(item.projectName || "-", columns[1].x + 4, rowTop + 7, { width: columns[1].width - 8 });
+          doc.font("Helvetica").text(item.expertName || "-", columns[2].x + 4, rowTop + 7, { width: columns[2].width - 8 });
+          doc.text(formatCu(item.cuUsed), columns[3].x + 4, rowTop + 7, { width: columns[3].width - 8, align: "right" });
+          doc.text(formatUsd(item.cuRate), columns[4].x + 4, rowTop + 7, { width: columns[4].width - 8, align: "right" });
           doc.font("Helvetica-Bold").text(formatUsd(item.amount), columns[5].x + 4, rowTop + 5, {
             width: columns[5].width - 8,
             align: "right",
@@ -3722,18 +3777,28 @@ export async function registerRoutes(
         });
       }
 
-      ensureSpace(72);
-      doc.moveDown(0.8);
-      doc.moveTo(tableLeft + pageWidth - 220, doc.y).lineTo(rightEdge, doc.y).strokeColor("#d1d5db").stroke();
-      doc.moveDown(0.6);
-      doc.font("Helvetica-Bold").fontSize(12).fillColor("#111827").text("Total", tableLeft + pageWidth - 220, doc.y, { width: 80 });
-      doc.text(formatUsd(invoice.total), tableLeft + pageWidth - 120, doc.y - 14, { width: 120, align: "right" });
+      ensureSpace(84);
+      doc.moveDown(0.9);
+      const totalBoxWidth = 230;
+      const totalBoxX = rightEdge - totalBoxWidth;
+      const totalBoxY = doc.y;
+      doc.roundedRect(totalBoxX, totalBoxY, totalBoxWidth, 58, 6).fill(brandPanel);
+      doc.roundedRect(totalBoxX, totalBoxY, totalBoxWidth, 58, 6).strokeColor("#eadeda").stroke();
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(brandMuted).text("TOTAL DUE", totalBoxX + 18, totalBoxY + 14, { width: 82 });
+      doc.font("Helvetica-Bold").fontSize(16).fillColor(brandBurgundy).text(formatUsd(invoice.total), totalBoxX + 96, totalBoxY + 14, {
+        width: totalBoxWidth - 114,
+        align: "right",
+      });
+      doc.font("Helvetica").fontSize(8.5).fillColor(brandMuted).text("All amounts are denominated in USD.", totalBoxX + 18, totalBoxY + 38, {
+        width: totalBoxWidth - 36,
+      });
 
-      doc.font("Helvetica").fontSize(9).fillColor("#6b7280");
+      doc.font("Helvetica").fontSize(8.5).fillColor(brandMuted);
+      doc.moveTo(doc.page.margins.left, pageBottom + 3).lineTo(rightEdge, pageBottom + 3).strokeColor(brandLine).stroke();
       doc.text(
-        "This invoice is generated from Mirae Connext CRM. Sending and payment tracking are handled separately.",
+        "Generated from Mirae Connext CRM. Sending and payment tracking are handled separately.",
         doc.page.margins.left,
-        doc.page.height - doc.page.margins.bottom + 18,
+        pageBottom + 14,
         { width: pageWidth, align: "center" }
       );
 
