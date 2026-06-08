@@ -139,6 +139,7 @@ export interface BillableUsageRateRefreshResult {
 export interface InvoiceListRow {
   id: number;
   draftNumber: string;
+  invoiceNumber: string | null;
   clientOrganizationId: number;
   clientName: string;
   invoiceDate: Date;
@@ -149,6 +150,8 @@ export interface InvoiceListRow {
   total: string;
   status: string;
   notes: string | null;
+  issuedAt: Date | null;
+  issuedByUserId: number | null;
   createdAt: Date;
   updatedAt: Date;
   lineItemCount: number;
@@ -180,6 +183,10 @@ export interface CreateInvoiceDraftResult extends InvoiceDetail {
 }
 
 export interface CancelInvoiceDraftResult extends InvoiceDetail {
+  billableUsageUpdatedCount: number;
+}
+
+export interface IssueInvoiceResult extends InvoiceDetail {
   billableUsageUpdatedCount: number;
 }
 
@@ -402,6 +409,7 @@ export interface IStorage {
   getInvoiceById(id: number): Promise<InvoiceDetail | undefined>;
   createInvoiceDraft(billableUsageIds: number[]): Promise<CreateInvoiceDraftResult>;
   cancelInvoiceDraft(invoiceId: number): Promise<CancelInvoiceDraftResult>;
+  issueInvoice(invoiceId: number, issuedByUserId?: number): Promise<IssueInvoiceResult>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1845,6 +1853,7 @@ export class DatabaseStorage implements IStorage {
       .select({
         id: invoices.id,
         draftNumber: invoices.draftNumber,
+        invoiceNumber: invoices.invoiceNumber,
         clientOrganizationId: invoices.clientOrganizationId,
         clientName: clientOrganizations.name,
         invoiceDate: invoices.invoiceDate,
@@ -1855,6 +1864,8 @@ export class DatabaseStorage implements IStorage {
         total: invoices.total,
         status: invoices.status,
         notes: invoices.notes,
+        issuedAt: invoices.issuedAt,
+        issuedByUserId: invoices.issuedByUserId,
         createdAt: invoices.createdAt,
         updatedAt: invoices.updatedAt,
       })
@@ -1882,6 +1893,7 @@ export class DatabaseStorage implements IStorage {
       .select({
         id: invoices.id,
         draftNumber: invoices.draftNumber,
+        invoiceNumber: invoices.invoiceNumber,
         clientOrganizationId: invoices.clientOrganizationId,
         clientName: clientOrganizations.name,
         invoiceDate: invoices.invoiceDate,
@@ -1892,6 +1904,8 @@ export class DatabaseStorage implements IStorage {
         total: invoices.total,
         status: invoices.status,
         notes: invoices.notes,
+        issuedAt: invoices.issuedAt,
+        issuedByUserId: invoices.issuedByUserId,
         createdAt: invoices.createdAt,
         updatedAt: invoices.updatedAt,
       })
@@ -2088,6 +2102,7 @@ export class DatabaseStorage implements IStorage {
         .select({
           id: invoices.id,
           draftNumber: invoices.draftNumber,
+          invoiceNumber: invoices.invoiceNumber,
           clientOrganizationId: invoices.clientOrganizationId,
           clientName: clientOrganizations.name,
           invoiceDate: invoices.invoiceDate,
@@ -2098,6 +2113,8 @@ export class DatabaseStorage implements IStorage {
           total: invoices.total,
           status: invoices.status,
           notes: invoices.notes,
+          issuedAt: invoices.issuedAt,
+          issuedByUserId: invoices.issuedByUserId,
           createdAt: invoices.createdAt,
           updatedAt: invoices.updatedAt,
         })
@@ -2223,6 +2240,7 @@ export class DatabaseStorage implements IStorage {
         .select({
           id: invoices.id,
           draftNumber: invoices.draftNumber,
+          invoiceNumber: invoices.invoiceNumber,
           clientOrganizationId: invoices.clientOrganizationId,
           clientName: clientOrganizations.name,
           invoiceDate: invoices.invoiceDate,
@@ -2233,6 +2251,8 @@ export class DatabaseStorage implements IStorage {
           total: invoices.total,
           status: invoices.status,
           notes: invoices.notes,
+          issuedAt: invoices.issuedAt,
+          issuedByUserId: invoices.issuedByUserId,
           createdAt: invoices.createdAt,
           updatedAt: invoices.updatedAt,
         })
@@ -2273,6 +2293,152 @@ export class DatabaseStorage implements IStorage {
         },
         lineItems,
         billableUsageUpdatedCount,
+      };
+    });
+  }
+
+  async issueInvoice(invoiceId: number, issuedByUserId?: number): Promise<IssueInvoiceResult> {
+    if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+      throw new Error("Invalid invoice id.");
+    }
+
+    return db.transaction(async (tx) => {
+      const [invoice] = await tx
+        .select({
+          id: invoices.id,
+          status: invoices.status,
+          invoiceNumber: invoices.invoiceNumber,
+        })
+        .from(invoices)
+        .where(eq(invoices.id, invoiceId));
+
+      if (!invoice) {
+        throw new Error("Invoice not found.");
+      }
+
+      if (invoice.status !== "draft") {
+        throw new Error("Only draft invoices can be issued.");
+      }
+
+      const linkedLineItems = await tx
+        .select({
+          billableUsageId: invoiceLineItems.billableUsageId,
+        })
+        .from(invoiceLineItems)
+        .where(eq(invoiceLineItems.invoiceId, invoiceId));
+      const linkedBillableUsageIds = linkedLineItems.map((item) => item.billableUsageId);
+
+      if (linkedBillableUsageIds.length === 0) {
+        throw new Error("Invoice must have line items before it can be issued.");
+      }
+
+      const linkedBillableUsageRows = await tx
+        .select({
+          id: billableUsage.id,
+          status: billableUsage.status,
+        })
+        .from(billableUsage)
+        .where(inArray(billableUsage.id, linkedBillableUsageIds));
+
+      if (linkedBillableUsageRows.length !== linkedBillableUsageIds.length) {
+        throw new Error("One or more linked billable usage items could not be found.");
+      }
+
+      const nonDraftUsage = linkedBillableUsageRows.find((row) => row.status !== "draft");
+      if (nonDraftUsage) {
+        throw new Error("All linked billable usage items must be in draft status before issuing.");
+      }
+
+      const now = new Date();
+      const dateStamp = now.toISOString().slice(0, 10).replace(/-/g, "");
+      const invoiceNumber = invoice.invoiceNumber || `INV-${dateStamp}-${invoice.id}`;
+
+      const [updatedInvoice] = await tx
+        .update(invoices)
+        .set({
+          invoiceNumber,
+          status: "issued",
+          issuedAt: now,
+          issuedByUserId: issuedByUserId || null,
+          updatedAt: now,
+        })
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.status, "draft")))
+        .returning();
+
+      if (!updatedInvoice) {
+        throw new Error("Invoice could not be issued.");
+      }
+
+      const updatedRows = await tx
+        .update(billableUsage)
+        .set({
+          status: "invoiced",
+          updatedAt: now,
+        })
+        .where(and(inArray(billableUsage.id, linkedBillableUsageIds), eq(billableUsage.status, "draft")))
+        .returning();
+
+      if (updatedRows.length !== linkedBillableUsageIds.length) {
+        throw new Error("Linked billable usage items could not all be locked as invoiced.");
+      }
+
+      const [invoiceRow] = await tx
+        .select({
+          id: invoices.id,
+          draftNumber: invoices.draftNumber,
+          invoiceNumber: invoices.invoiceNumber,
+          clientOrganizationId: invoices.clientOrganizationId,
+          clientName: clientOrganizations.name,
+          invoiceDate: invoices.invoiceDate,
+          periodStart: invoices.periodStart,
+          periodEnd: invoices.periodEnd,
+          currency: invoices.currency,
+          subtotal: invoices.subtotal,
+          total: invoices.total,
+          status: invoices.status,
+          notes: invoices.notes,
+          issuedAt: invoices.issuedAt,
+          issuedByUserId: invoices.issuedByUserId,
+          createdAt: invoices.createdAt,
+          updatedAt: invoices.updatedAt,
+        })
+        .from(invoices)
+        .innerJoin(clientOrganizations, eq(invoices.clientOrganizationId, clientOrganizations.id))
+        .where(eq(invoices.id, invoiceId));
+
+      if (!invoiceRow) {
+        throw new Error("Invoice was issued but could not be loaded.");
+      }
+
+      const lineItems = await tx
+        .select({
+          id: invoiceLineItems.id,
+          invoiceId: invoiceLineItems.invoiceId,
+          billableUsageId: invoiceLineItems.billableUsageId,
+          description: invoiceLineItems.description,
+          serviceDate: invoiceLineItems.serviceDate,
+          projectId: invoiceLineItems.projectId,
+          projectName: projects.name,
+          expertId: invoiceLineItems.expertId,
+          expertName: experts.name,
+          cuUsed: invoiceLineItems.cuUsed,
+          cuRate: invoiceLineItems.cuRate,
+          amount: invoiceLineItems.amount,
+          createdAt: invoiceLineItems.createdAt,
+        })
+        .from(invoiceLineItems)
+        .innerJoin(projects, eq(invoiceLineItems.projectId, projects.id))
+        .innerJoin(experts, eq(invoiceLineItems.expertId, experts.id))
+        .where(eq(invoiceLineItems.invoiceId, invoiceId))
+        .orderBy(invoiceLineItems.serviceDate, invoiceLineItems.id);
+
+      return {
+        invoice: {
+          ...invoiceRow,
+          lineItemCount: lineItems.length,
+        },
+        lineItems,
+        billableUsageUpdatedCount: updatedRows.length,
       };
     });
   }

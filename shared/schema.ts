@@ -317,6 +317,7 @@ export const billableUsage = pgTable("billable_usage", {
 export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
   draftNumber: text("draft_number").notNull().unique(),
+  invoiceNumber: text("invoice_number").unique(),
   clientOrganizationId: integer("client_organization_id").notNull().references(() => clientOrganizations.id, { onDelete: "restrict" }),
   invoiceDate: timestamp("invoice_date").notNull(),
   periodStart: timestamp("period_start"),
@@ -326,6 +327,8 @@ export const invoices = pgTable("invoices", {
   total: decimal("total", { precision: 12, scale: 2 }).notNull().default("0"),
   status: text("status").notNull().default("draft"), // draft, issued, void
   notes: text("notes"),
+  issuedAt: timestamp("issued_at"),
+  issuedByUserId: integer("issued_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

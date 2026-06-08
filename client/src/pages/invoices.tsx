@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { AlertCircle, FileText, Receipt, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, FileText, Receipt, XCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 interface InvoiceListRow {
   id: number;
   draftNumber: string;
+  invoiceNumber: string | null;
   clientOrganizationId: number;
   clientName: string;
   invoiceDate: string;
@@ -40,6 +41,8 @@ interface InvoiceListRow {
   total: string;
   status: string;
   notes: string | null;
+  issuedAt: string | null;
+  issuedByUserId: number | null;
   createdAt: string;
   updatedAt: string;
   lineItemCount: number;
@@ -156,11 +159,14 @@ const invoiceStatusBadgeVariant = (status: string | null | undefined) => {
 const invoiceStatusBadgeClassName = (status: string | null | undefined) => {
   const normalized = String(status || "").trim().toLowerCase();
   if (normalized === "draft") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (normalized === "issued") return "border-sky-200 bg-sky-50 text-sky-700";
   if (normalized === "canceled") return "border-slate-300 bg-slate-50 text-slate-600";
   return "";
 };
 
 const isDraftInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "draft";
+
+const getDisplayInvoiceNumber = (invoice: InvoiceListRow) => invoice.invoiceNumber || invoice.draftNumber;
 
 const readJsonResponse = async <T,>(response: Response, requestUrl: string): Promise<T> => {
   const contentType = response.headers.get("content-type") || "";
@@ -342,6 +348,38 @@ export default function Invoices() {
     },
   });
 
+  const issueInvoiceMutation = useMutation({
+    mutationFn: async (invoiceId: number) => {
+      const requestUrl = `/api/invoices/${invoiceId}/issue`;
+      const response = await apiRequest("POST", requestUrl);
+      return readJsonResponse<InvoiceDetail>(response, requestUrl);
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      queryClient.invalidateQueries({ queryKey: [ELIGIBLE_BILLABLE_USAGE_URL] });
+      queryClient.setQueryData(["/api/invoices", result.invoice.id], result);
+      toast({
+        title: "Invoice issued",
+        description: `${getDisplayInvoiceNumber(result.invoice)} is now issued and locked for billing review.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to issue invoice",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleIssueInvoice = (invoice: InvoiceListRow) => {
+    const confirmed = window.confirm(
+      "Issue this invoice? This will finalize the draft invoice and lock its billable usage as invoiced. PDF generation, sending, and payment tracking are not included in this step."
+    );
+    if (!confirmed) return;
+    issueInvoiceMutation.mutate(invoice.id);
+  };
+
   const handleCancelDraft = (invoice: InvoiceListRow) => {
     const confirmed = window.confirm(
       "Cancel this draft invoice? The invoice and line items will remain for audit history, and linked billable usage will return to Unbilled."
@@ -402,7 +440,7 @@ export default function Invoices() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="min-w-[220px] text-xs font-semibold uppercase">Draft Number</TableHead>
+                    <TableHead className="min-w-[220px] text-xs font-semibold uppercase">Invoice Number</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Period</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Total (USD)</TableHead>
@@ -415,8 +453,12 @@ export default function Invoices() {
                   {invoices.map((invoice) => (
                     <TableRow key={invoice.id} data-testid={`row-invoice-${invoice.id}`}>
                       <TableCell>
-                        <div className="font-mono text-sm font-medium">{invoice.draftNumber}</div>
-                        <div className="text-xs text-muted-foreground">{invoice.lineItemCount} line item{invoice.lineItemCount === 1 ? "" : "s"}</div>
+                        <div className="font-mono text-sm font-medium">{getDisplayInvoiceNumber(invoice)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {invoice.invoiceNumber
+                            ? `Draft ${invoice.draftNumber}`
+                            : `${invoice.lineItemCount} line item${invoice.lineItemCount === 1 ? "" : "s"}`}
+                        </div>
                       </TableCell>
                       <TableCell className="font-medium">{invoice.clientName}</TableCell>
                       <TableCell>{formatInvoicePeriod(invoice.periodStart, invoice.periodEnd)}</TableCell>
@@ -600,7 +642,7 @@ export default function Invoices() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <DialogTitle className="font-mono text-xl">
-                  {selectedInvoice?.invoice.draftNumber || "Invoice Draft"}
+                  {selectedInvoice ? getDisplayInvoiceNumber(selectedInvoice.invoice) : "Invoice Draft"}
                 </DialogTitle>
                 {selectedInvoice && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -617,15 +659,25 @@ export default function Invoices() {
                 )}
               </div>
               {selectedInvoice && isDraftInvoice(selectedInvoice.invoice.status) && (
-                <Button
-                  variant="outline"
-                  onClick={() => handleCancelDraft(selectedInvoice.invoice)}
-                  disabled={cancelDraftMutation.isPending}
-                  data-testid="button-cancel-invoice-draft"
-                >
-                  <XCircle className="mr-2 h-4 w-4" />
-                  {cancelDraftMutation.isPending ? "Canceling..." : "Cancel Draft"}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => handleCancelDraft(selectedInvoice.invoice)}
+                    disabled={cancelDraftMutation.isPending || issueInvoiceMutation.isPending}
+                    data-testid="button-cancel-invoice-draft"
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />
+                    {cancelDraftMutation.isPending ? "Canceling..." : "Cancel Draft"}
+                  </Button>
+                  <Button
+                    onClick={() => handleIssueInvoice(selectedInvoice.invoice)}
+                    disabled={cancelDraftMutation.isPending || issueInvoiceMutation.isPending}
+                    data-testid="button-issue-invoice"
+                  >
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    {issueInvoiceMutation.isPending ? "Issuing..." : "Issue Invoice"}
+                  </Button>
+                </div>
               )}
             </div>
             <DialogDescription>
@@ -657,7 +709,12 @@ export default function Invoices() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-xs uppercase text-muted-foreground">Invoice Number</div>
-                    <div className="mt-1 break-all font-mono text-sm font-semibold">{selectedInvoice.invoice.draftNumber}</div>
+                    <div className="mt-1 break-all font-mono text-sm font-semibold">
+                      {getDisplayInvoiceNumber(selectedInvoice.invoice)}
+                    </div>
+                    {selectedInvoice.invoice.invoiceNumber && (
+                      <div className="mt-1 text-xs text-muted-foreground">Draft {selectedInvoice.invoice.draftNumber}</div>
+                    )}
                   </CardContent>
                 </Card>
                 <Card>
@@ -693,8 +750,14 @@ export default function Invoices() {
                 </Card>
                 <Card>
                   <CardContent className="p-4">
-                    <div className="text-xs uppercase text-muted-foreground">Created At</div>
-                    <div className="mt-1 font-medium">{formatDateTime(selectedInvoice.invoice.createdAt)}</div>
+                    <div className="text-xs uppercase text-muted-foreground">
+                      {selectedInvoice.invoice.issuedAt ? "Issued At" : "Created At"}
+                    </div>
+                    <div className="mt-1 font-medium">
+                      {selectedInvoice.invoice.issuedAt
+                        ? formatDateTime(selectedInvoice.invoice.issuedAt)
+                        : formatDateTime(selectedInvoice.invoice.createdAt)}
+                    </div>
                   </CardContent>
                 </Card>
               </div>

@@ -254,6 +254,7 @@ const compatibilityStatements = [
   `CREATE TABLE IF NOT EXISTS invoices (
     id serial PRIMARY KEY,
     draft_number text NOT NULL UNIQUE,
+    invoice_number text UNIQUE,
     client_organization_id integer NOT NULL REFERENCES client_organizations(id) ON DELETE RESTRICT,
     invoice_date timestamp NOT NULL,
     period_start timestamp,
@@ -263,6 +264,8 @@ const compatibilityStatements = [
     total numeric(12,2) NOT NULL DEFAULT 0,
     status text NOT NULL DEFAULT 'draft',
     notes text,
+    issued_at timestamp,
+    issued_by_user_id integer REFERENCES users(id),
     created_at timestamp DEFAULT now() NOT NULL,
     updated_at timestamp DEFAULT now() NOT NULL
   )`,
@@ -283,6 +286,10 @@ const compatibilityStatements = [
   `ALTER TABLE invoice_line_items DROP CONSTRAINT IF EXISTS invoice_line_items_billable_usage_id_unique`,
   `DROP INDEX IF EXISTS invoice_line_items_billable_usage_id_key`,
   `DROP INDEX IF EXISTS invoice_line_items_billable_usage_id_unique`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_number text`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_at timestamp`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issued_by_user_id integer REFERENCES users(id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS invoices_invoice_number_unique ON invoices(invoice_number) WHERE invoice_number IS NOT NULL`,
   `ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_overview text`,
   `ALTER TABLE client_organizations ADD COLUMN IF NOT EXISTS client_type text`,
   `ALTER TABLE client_organizations ADD COLUMN IF NOT EXISTS legal_entity_name text`,
