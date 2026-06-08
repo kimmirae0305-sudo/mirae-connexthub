@@ -407,7 +407,10 @@ export interface IStorage {
   // Invoices (Finance draft layer)
   getInvoices(): Promise<InvoiceListRow[]>;
   getInvoiceById(id: number): Promise<InvoiceDetail | undefined>;
-  createInvoiceDraft(billableUsageIds: number[]): Promise<CreateInvoiceDraftResult>;
+  createInvoiceDraft(
+    billableUsageIds: number[],
+    billingPeriod?: { periodStart?: Date | null; periodEnd?: Date | null }
+  ): Promise<CreateInvoiceDraftResult>;
   cancelInvoiceDraft(invoiceId: number): Promise<CancelInvoiceDraftResult>;
   issueInvoice(invoiceId: number, issuedByUserId?: number): Promise<IssueInvoiceResult>;
 }
@@ -1946,7 +1949,10 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async createInvoiceDraft(billableUsageIds: number[]): Promise<CreateInvoiceDraftResult> {
+  async createInvoiceDraft(
+    billableUsageIds: number[],
+    billingPeriod?: { periodStart?: Date | null; periodEnd?: Date | null }
+  ): Promise<CreateInvoiceDraftResult> {
     const uniqueIds = Array.from(new Set(billableUsageIds.filter((id) => Number.isInteger(id) && id > 0)));
     if (uniqueIds.length === 0) {
       throw new Error("At least one billable usage item is required.");
@@ -2036,14 +2042,19 @@ export class DatabaseStorage implements IStorage {
 
       const round = (value: number) => Math.round(value * 100) / 100;
       const total = round(resolvedSelectedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
-      const periodStart = resolvedSelectedRows.reduce<Date | null>(
+      const fallbackPeriodStart = resolvedSelectedRows.reduce<Date | null>(
         (earliest, row) => (!earliest || row.callDate < earliest ? row.callDate : earliest),
         null
       );
-      const periodEnd = resolvedSelectedRows.reduce<Date | null>(
+      const fallbackPeriodEnd = resolvedSelectedRows.reduce<Date | null>(
         (latest, row) => (!latest || row.callDate > latest ? row.callDate : latest),
         null
       );
+      const periodStart = billingPeriod?.periodStart ?? fallbackPeriodStart;
+      const periodEnd = billingPeriod?.periodEnd ?? fallbackPeriodEnd;
+      if (periodStart && periodEnd && periodStart > periodEnd) {
+        throw new Error("Billing Period Start must be on or before Billing Period End.");
+      }
       const now = new Date();
       const dateStamp = now.toISOString().slice(0, 10).replace(/-/g, "");
       const draftNumber = `DRAFT-${dateStamp}-${now.getTime()}`;

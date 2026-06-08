@@ -3621,6 +3621,7 @@ export async function registerRoutes(
       const doc = new PDFDocument({
         size: "A4",
         margins: { top: 48, bottom: 56, left: 48, right: 48 },
+        bufferPages: true,
       });
 
       res.setHeader("Content-Type", "application/pdf");
@@ -3629,27 +3630,28 @@ export async function registerRoutes(
 
       const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
       const rightEdge = doc.page.width - doc.page.margins.right;
-      const pageBottom = doc.page.height - doc.page.margins.bottom;
+      const footerTop = doc.page.height - 52;
+      const contentBottom = footerTop - 24;
       const brandBurgundy = "#7A1F2B";
       const brandInk = "#111827";
       const brandMuted = "#6b7280";
       const brandLine = "#e5e7eb";
       const brandPanel = "#faf7f5";
       const ensureSpace = (height: number) => {
-        if (doc.y + height > pageBottom) {
+        if (doc.y + height > contentBottom) {
           doc.addPage();
         }
       };
 
       const logoPath = path.resolve(process.cwd(), "attached_assets", "Logo_1764382033313.png");
       const headerTop = doc.page.margins.top;
-      doc.rect(0, 0, doc.page.width, 132).fill(brandPanel);
-      doc.rect(0, 0, 8, doc.page.height).fill(brandBurgundy);
+      doc.rect(0, 0, doc.page.width, 116).fill(brandPanel);
+      doc.rect(0, 0, 7, doc.page.height).fill(brandBurgundy);
 
-      const logoY = headerTop + 2;
+      const logoY = headerTop;
       if (fs.existsSync(logoPath)) {
         try {
-          doc.image(logoPath, doc.page.margins.left, logoY, { width: 102 });
+          doc.image(logoPath, doc.page.margins.left, logoY, { width: 82 });
         } catch {
           doc.font("Helvetica-Bold").fontSize(18).fillColor(brandBurgundy).text("Mirae Connext", doc.page.margins.left, logoY);
           doc.font("Helvetica").fontSize(9).fillColor(brandMuted).text("Expert Network Service");
@@ -3661,65 +3663,69 @@ export async function registerRoutes(
 
       doc
         .font("Helvetica-Bold")
-        .fontSize(28)
+        .fontSize(26)
         .fillColor(brandInk)
-        .text("Invoice", doc.page.margins.left, headerTop + 48, { width: 180 });
-      doc
-        .font("Helvetica")
-        .fontSize(10)
-        .fillColor(brandMuted)
-        .text("Issued by Mirae Connext", doc.page.margins.left, headerTop + 83, { width: 220 });
+        .text("Invoice", rightEdge - 210, headerTop - 2, { width: 210, align: "right" });
       doc
         .font("Helvetica-Bold")
-        .fontSize(11)
+        .fontSize(12)
         .fillColor(brandBurgundy)
-        .text(invoiceNumber, rightEdge - 230, headerTop + 18, { width: 230, align: "right" });
+        .text(invoiceNumber, rightEdge - 250, headerTop + 31, { width: 250, align: "right" });
       doc
         .font("Helvetica")
         .fontSize(9)
         .fillColor(brandMuted)
-        .text("Official invoice number", rightEdge - 230, headerTop + 36, { width: 230, align: "right" });
+        .text(`Issue Date: ${formatDateForPdf(invoice.issuedAt || invoice.invoiceDate)}`, rightEdge - 250, headerTop + 49, { width: 250, align: "right" });
+      doc
+        .font("Helvetica")
+        .fontSize(9)
+        .fillColor(brandMuted)
+        .text("Currency: USD", rightEdge - 250, headerTop + 64, { width: 250, align: "right" });
 
-      doc.y = 162;
+      doc.y = 142;
 
-      const summaryTop = doc.y;
-      doc.roundedRect(doc.page.margins.left, summaryTop, pageWidth, 112, 6).fill("#ffffff");
-      doc.roundedRect(doc.page.margins.left, summaryTop, pageWidth, 112, 6).strokeColor(brandLine).lineWidth(1).stroke();
+      const panelTop = doc.y;
+      const panelGap = 16;
+      const panelWidth = (pageWidth - panelGap) / 2;
+      const panelHeight = 122;
+      doc.roundedRect(doc.page.margins.left, panelTop, panelWidth, panelHeight, 6).fill("#ffffff");
+      doc.roundedRect(doc.page.margins.left, panelTop, panelWidth, panelHeight, 6).strokeColor(brandLine).lineWidth(1).stroke();
       doc
         .font("Helvetica-Bold")
         .fontSize(9)
         .fillColor(brandMuted)
-        .text("BILL TO", doc.page.margins.left + 18, summaryTop + 18);
+        .text("BILL TO", doc.page.margins.left + 18, panelTop + 18);
       doc
         .font("Helvetica-Bold")
         .fontSize(14)
         .fillColor(brandInk)
-        .text(invoice.clientName || "-", doc.page.margins.left + 18, summaryTop + 36, {
-          width: pageWidth / 2 - 36,
+        .text(invoice.clientName || "-", doc.page.margins.left + 18, panelTop + 40, {
+          width: panelWidth - 36,
         });
 
-      const labelX = doc.page.margins.left + pageWidth / 2 + 28;
-      const valueX = rightEdge - 178;
+      const summaryX = doc.page.margins.left + panelWidth + panelGap;
+      doc.roundedRect(summaryX, panelTop, panelWidth, panelHeight, 6).fill("#ffffff");
+      doc.roundedRect(summaryX, panelTop, panelWidth, panelHeight, 6).strokeColor(brandLine).lineWidth(1).stroke();
       const summaryRows = [
-        ["Issue date", formatDateForPdf(invoice.issuedAt || invoice.invoiceDate)],
-        ["Invoice period", invoicePeriod],
+        ["Billing Period", invoicePeriod],
+        ["Issue Date", formatDateForPdf(invoice.issuedAt || invoice.invoiceDate)],
         ["Currency", "USD"],
         ["Total", formatUsd(invoice.total)],
       ];
       summaryRows.forEach(([label, value], index) => {
-        const y = summaryTop + 18 + index * 20;
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(brandMuted).text(label.toUpperCase(), labelX, y, { width: 105 });
+        const y = panelTop + 18 + index * 22;
+        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(brandMuted).text(label.toUpperCase(), summaryX + 18, y, { width: 108 });
         doc
           .font(index === summaryRows.length - 1 ? "Helvetica-Bold" : "Helvetica")
-          .fontSize(index === summaryRows.length - 1 ? 12 : 10)
+          .fontSize(index === summaryRows.length - 1 ? 13 : 10)
           .fillColor(index === summaryRows.length - 1 ? brandBurgundy : brandInk)
-          .text(value, valueX, y - (index === summaryRows.length - 1 ? 2 : 0), {
-          width: 178,
+          .text(value, summaryX + 126, y - (index === summaryRows.length - 1 ? 3 : 0), {
+          width: panelWidth - 144,
           align: "right",
         });
       });
 
-      doc.y = summaryTop + 138;
+      doc.y = panelTop + panelHeight + 26;
 
       doc.font("Helvetica-Bold").fontSize(13).fillColor(brandInk).text("Line Items");
       doc.font("Helvetica").fontSize(9).fillColor(brandMuted).text("Completed consultation services billed in USD.");
@@ -3727,17 +3733,17 @@ export async function registerRoutes(
 
       const tableLeft = doc.page.margins.left;
       const columns = [
-        { title: "Service Date", x: tableLeft, width: 70, align: "left" as const },
-        { title: "Project", x: tableLeft + 76, width: 138, align: "left" as const },
-        { title: "Expert", x: tableLeft + 220, width: 80, align: "left" as const },
-        { title: "CU", x: tableLeft + 306, width: 34, align: "right" as const },
-        { title: "USD CU Rate", x: tableLeft + 346, width: 74, align: "right" as const },
-        { title: "Amount USD", x: tableLeft + 426, width: 72, align: "right" as const },
+        { title: "Service Date", x: tableLeft, width: 72, align: "left" as const },
+        { title: "Project", x: tableLeft + 78, width: 150, align: "left" as const },
+        { title: "Expert", x: tableLeft + 234, width: 82, align: "left" as const },
+        { title: "CU", x: tableLeft + 322, width: 38, align: "right" as const },
+        { title: "USD CU Rate", x: tableLeft + 366, width: 74, align: "right" as const },
+        { title: "Amount", x: tableLeft + 446, width: 66, align: "right" as const },
       ];
       const renderTableHeader = () => {
         ensureSpace(48);
         const headerTop = doc.y;
-        doc.roundedRect(tableLeft, headerTop, pageWidth, 24, 4).fill(brandBurgundy);
+        doc.rect(tableLeft, headerTop, pageWidth, 24).fill(brandBurgundy);
         columns.forEach((column) => {
           doc
             .font("Helvetica-Bold")
@@ -3753,11 +3759,14 @@ export async function registerRoutes(
         doc.font("Helvetica-Oblique").fontSize(10).fillColor(brandMuted).text("No line items were found for this issued invoice.");
       } else {
         lineItems.forEach((item, index) => {
-          ensureSpace(42);
-          const rowTop = doc.y;
           const projectHeight = doc.heightOfString(item.projectName || "-", { width: columns[1].width - 8 });
           const expertHeight = doc.heightOfString(item.expertName || "-", { width: columns[2].width - 8 });
           const rowHeight = Math.max(34, projectHeight, expertHeight) + 10;
+          if (doc.y + rowHeight > contentBottom) {
+            doc.addPage();
+            renderTableHeader();
+          }
+          const rowTop = doc.y;
 
           if (index % 2 === 1) {
             doc.rect(tableLeft, rowTop - 2, pageWidth, rowHeight).fill("#fbfbfb");
@@ -3777,7 +3786,7 @@ export async function registerRoutes(
         });
       }
 
-      ensureSpace(84);
+      ensureSpace(76);
       doc.moveDown(0.9);
       const totalBoxWidth = 230;
       const totalBoxX = rightEdge - totalBoxWidth;
@@ -3793,14 +3802,18 @@ export async function registerRoutes(
         width: totalBoxWidth - 36,
       });
 
-      doc.font("Helvetica").fontSize(8.5).fillColor(brandMuted);
-      doc.moveTo(doc.page.margins.left, pageBottom + 3).lineTo(rightEdge, pageBottom + 3).strokeColor(brandLine).stroke();
-      doc.text(
-        "Generated from Mirae Connext CRM. Sending and payment tracking are handled separately.",
-        doc.page.margins.left,
-        pageBottom + 14,
-        { width: pageWidth, align: "center" }
-      );
+      const pageRange = doc.bufferedPageRange();
+      for (let pageIndex = pageRange.start; pageIndex < pageRange.start + pageRange.count; pageIndex += 1) {
+        doc.switchToPage(pageIndex);
+        doc.font("Helvetica").fontSize(8).fillColor(brandMuted);
+        doc.moveTo(doc.page.margins.left, footerTop - 8).lineTo(rightEdge, footerTop - 8).strokeColor(brandLine).stroke();
+        doc.text(
+          "Thank you for working with Mirae Connext. This invoice reflects completed consultation services provided through Mirae Connext.",
+          doc.page.margins.left,
+          footerTop,
+          { width: pageWidth, align: "center", lineBreak: false }
+        );
+      }
 
       doc.end();
     } catch (error) {
@@ -3821,7 +3834,26 @@ export async function registerRoutes(
         return res.status(400).json({ error: "At least one billable usage id is required" });
       }
 
-      const invoiceDraft = await storage.createInvoiceDraft(billableUsageIds);
+      const parseOptionalBillingDate = (value: unknown) => {
+        if (!value) return null;
+        const rawValue = String(value);
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(rawValue)
+          ? new Date(`${rawValue}T00:00:00.000`)
+          : new Date(rawValue);
+        return Number.isNaN(date.getTime()) ? undefined : date;
+      };
+      const periodStart = parseOptionalBillingDate(req.body?.periodStart);
+      const periodEnd = parseOptionalBillingDate(req.body?.periodEnd);
+
+      if (periodStart === undefined || periodEnd === undefined) {
+        return res.status(400).json({ error: "Billing Period dates must be valid dates" });
+      }
+
+      if (periodStart && periodEnd && periodStart > periodEnd) {
+        return res.status(400).json({ error: "Billing Period Start must be on or before Billing Period End" });
+      }
+
+      const invoiceDraft = await storage.createInvoiceDraft(billableUsageIds, { periodStart, periodEnd });
       res.status(201).json(invoiceDraft);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create invoice draft";
