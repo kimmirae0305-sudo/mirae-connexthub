@@ -313,7 +313,7 @@ export const billableUsage = pgTable("billable_usage", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// Invoices table (Finance draft layer; issuing/payment handled later)
+// Invoices table (Finance invoice lifecycle)
 export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
   draftNumber: text("draft_number").notNull().unique(),
@@ -325,7 +325,7 @@ export const invoices = pgTable("invoices", {
   currency: text("currency").notNull().default("USD"),
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
   total: decimal("total", { precision: 12, scale: 2 }).notNull().default("0"),
-  status: text("status").notNull().default("draft"), // draft, issued, sent, canceled, void
+  status: text("status").notNull().default("draft"), // draft, issued, sent, paid, canceled, void
   notes: text("notes"),
   issuedAt: timestamp("issued_at"),
   issuedByUserId: integer("issued_by_user_id").references(() => users.id),
@@ -334,6 +334,11 @@ export const invoices = pgTable("invoices", {
   sentMethod: text("sent_method"),
   sentRecipientEmail: text("sent_recipient_email"),
   sentNotes: text("sent_notes"),
+  paidAt: timestamp("paid_at"),
+  paidByUserId: integer("paid_by_user_id").references(() => users.id),
+  paymentMethod: text("payment_method"),
+  paymentReferenceNumber: text("payment_reference_number"),
+  paymentNotes: text("payment_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
