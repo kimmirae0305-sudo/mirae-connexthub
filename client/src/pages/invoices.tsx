@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { AlertCircle, CheckCircle2, FileText, Receipt, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, FileText, Receipt, XCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -165,8 +165,10 @@ const invoiceStatusBadgeClassName = (status: string | null | undefined) => {
 };
 
 const isDraftInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "draft";
+const isIssuedInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "issued";
 
 const getDisplayInvoiceNumber = (invoice: InvoiceListRow) => invoice.invoiceNumber || invoice.draftNumber;
+const getInvoicePdfFileName = (invoice: InvoiceListRow) => `${getDisplayInvoiceNumber(invoice).replace(/[^a-zA-Z0-9-_]/g, "_")}.pdf`;
 
 const readJsonResponse = async <T,>(response: Response, requestUrl: string): Promise<T> => {
   const contentType = response.headers.get("content-type") || "";
@@ -372,9 +374,46 @@ export default function Invoices() {
     },
   });
 
+  const downloadPdfMutation = useMutation({
+    mutationFn: async (invoice: InvoiceListRow) => {
+      const requestUrl = `/api/invoices/${invoice.id}/pdf`;
+      const response = await apiRequest("GET", requestUrl);
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().includes("application/pdf")) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Expected PDF from ${requestUrl}, received ${contentType || "unknown content type"}.`);
+      }
+      return {
+        blob: await response.blob(),
+        fileName: getInvoicePdfFileName(invoice),
+      };
+    },
+    onSuccess: ({ blob, fileName }) => {
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      toast({
+        title: "Invoice PDF downloaded",
+        description: `${fileName} has been downloaded.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to download invoice PDF",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleIssueInvoice = (invoice: InvoiceListRow) => {
     const confirmed = window.confirm(
-      "Issue this invoice? This will finalize the draft invoice and lock its billable usage as invoiced. PDF generation, sending, and payment tracking are not included in this step."
+      "Issue this invoice? This will finalize the draft invoice and lock its billable usage as invoiced. PDF download will become available after issuing; sending and payment tracking are not included in this step."
     );
     if (!confirmed) return;
     issueInvoiceMutation.mutate(invoice.id);
@@ -386,6 +425,10 @@ export default function Invoices() {
     );
     if (!confirmed) return;
     cancelDraftMutation.mutate(invoice.id);
+  };
+
+  const handleDownloadPdf = (invoice: InvoiceListRow) => {
+    downloadPdfMutation.mutate(invoice);
   };
 
   const toggleBillableUsage = (id: number) => {
@@ -400,7 +443,7 @@ export default function Invoices() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Invoices</h1>
           <p className="text-sm text-muted-foreground">
-            Create and review draft invoices from billable usage. This page does not issue invoices, send PDFs, or track payments yet.
+            Create, issue, and review invoices from billable usage. PDF download is available for issued invoices.
           </p>
         </div>
         <Button className="gap-2" onClick={() => setCreateDialogOpen(true)} data-testid="button-create-invoice-draft">
@@ -411,9 +454,9 @@ export default function Invoices() {
 
       <Alert>
         <AlertCircle className="h-4 w-4" />
-        <AlertTitle>Draft-only finance layer</AlertTitle>
+        <AlertTitle>Invoice review finance layer</AlertTitle>
         <AlertDescription>
-          Invoice drafts are created from reviewed billable usage only. This does not issue invoices, send emails, create PDFs, record payments, or mutate call records.
+          Invoice drafts are created from reviewed billable usage only. Issued invoices can be downloaded as PDFs. Sending, payment tracking, and call record mutations are not part of this step.
         </AlertDescription>
       </Alert>
 
@@ -658,30 +701,44 @@ export default function Invoices() {
                   </div>
                 )}
               </div>
-              {selectedInvoice && isDraftInvoice(selectedInvoice.invoice.status) && (
+              {selectedInvoice && (isDraftInvoice(selectedInvoice.invoice.status) || isIssuedInvoice(selectedInvoice.invoice.status)) && (
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => handleCancelDraft(selectedInvoice.invoice)}
-                    disabled={cancelDraftMutation.isPending || issueInvoiceMutation.isPending}
-                    data-testid="button-cancel-invoice-draft"
-                  >
-                    <XCircle className="mr-2 h-4 w-4" />
-                    {cancelDraftMutation.isPending ? "Canceling..." : "Cancel Draft"}
-                  </Button>
-                  <Button
-                    onClick={() => handleIssueInvoice(selectedInvoice.invoice)}
-                    disabled={cancelDraftMutation.isPending || issueInvoiceMutation.isPending}
-                    data-testid="button-issue-invoice"
-                  >
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    {issueInvoiceMutation.isPending ? "Issuing..." : "Issue Invoice"}
-                  </Button>
+                  {isDraftInvoice(selectedInvoice.invoice.status) && (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={() => handleCancelDraft(selectedInvoice.invoice)}
+                        disabled={cancelDraftMutation.isPending || issueInvoiceMutation.isPending}
+                        data-testid="button-cancel-invoice-draft"
+                      >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        {cancelDraftMutation.isPending ? "Canceling..." : "Cancel Draft"}
+                      </Button>
+                      <Button
+                        onClick={() => handleIssueInvoice(selectedInvoice.invoice)}
+                        disabled={cancelDraftMutation.isPending || issueInvoiceMutation.isPending}
+                        data-testid="button-issue-invoice"
+                      >
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        {issueInvoiceMutation.isPending ? "Issuing..." : "Issue Invoice"}
+                      </Button>
+                    </>
+                  )}
+                  {isIssuedInvoice(selectedInvoice.invoice.status) && (
+                    <Button
+                      onClick={() => handleDownloadPdf(selectedInvoice.invoice)}
+                      disabled={downloadPdfMutation.isPending}
+                      data-testid="button-download-invoice-pdf"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      {downloadPdfMutation.isPending ? "Downloading..." : "Download PDF"}
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
             <DialogDescription>
-              Review invoice draft details and line items. Issuing, sending, PDF generation, and payment tracking are not available in this step.
+              Review invoice details and line items. PDF generation is available for issued invoices. Sending and payment tracking are not available yet.
             </DialogDescription>
           </DialogHeader>
 
