@@ -118,10 +118,26 @@ const formatDate = (value: string | null | undefined) => {
   return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM dd, yyyy");
 };
 
+const formatDateTime = (value: string | null | undefined) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM dd, yyyy h:mm a");
+};
+
+const formatInvoicePeriod = (start: string | null | undefined, end: string | null | undefined) => {
+  const formattedStart = formatDate(start);
+  const formattedEnd = formatDate(end);
+  if (formattedStart === "-" && formattedEnd === "-") return "-";
+  if (formattedStart === formattedEnd) return formattedStart;
+  return `${formattedStart} - ${formattedEnd}`;
+};
+
 const formatMoney = (value: string | number | null | undefined) => {
   const amount = Number(value || 0);
   return `USD ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
+
+const formatCu = (value: string | number | null | undefined) => parseAmount(value).toFixed(2);
 
 const formatInvoiceStatus = (status: string | null | undefined) => {
   const normalized = String(status || "").trim().toLowerCase();
@@ -136,6 +152,15 @@ const invoiceStatusBadgeVariant = (status: string | null | undefined) => {
   const normalized = String(status || "").trim().toLowerCase();
   return normalized === "canceled" || normalized === "void" ? "outline" : "secondary";
 };
+
+const invoiceStatusBadgeClassName = (status: string | null | undefined) => {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "draft") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (normalized === "canceled") return "border-slate-300 bg-slate-50 text-slate-600";
+  return "";
+};
+
+const isDraftInvoice = (status: string | null | undefined) => String(status || "").trim().toLowerCase() === "draft";
 
 const readJsonResponse = async <T,>(response: Response, requestUrl: string): Promise<T> => {
   const contentType = response.headers.get("content-type") || "";
@@ -337,7 +362,7 @@ export default function Invoices() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Invoices</h1>
           <p className="text-sm text-muted-foreground">
-            Create and review draft invoices from billable usage. Issuing and payment tracking will be added later.
+            Create and review draft invoices from billable usage. This page does not issue invoices, send PDFs, or track payments yet.
           </p>
         </div>
         <Button className="gap-2" onClick={() => setCreateDialogOpen(true)} data-testid="button-create-invoice-draft">
@@ -356,7 +381,12 @@ export default function Invoices() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base font-medium">Invoice Drafts</CardTitle>
+          <div className="flex flex-col gap-1">
+            <CardTitle className="text-base font-medium">Invoice Drafts</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Draft and canceled invoice records remain visible for finance review and audit history.
+            </p>
+          </div>
         </CardHeader>
         <CardContent>
           {invoicesLoading ? (
@@ -364,19 +394,19 @@ export default function Invoices() {
           ) : !invoices || invoices.length === 0 ? (
             <EmptyState
               icon={FileText}
-              title="No invoice drafts yet."
-              description="Create a draft from reviewed billable usage when items are ready for invoicing."
+              title="No invoice drafts found."
+              description="Create a draft from reviewed billable usage when finance is ready to prepare an invoice."
             />
           ) : (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-xs font-semibold uppercase">Draft Number</TableHead>
+                    <TableHead className="min-w-[220px] text-xs font-semibold uppercase">Draft Number</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Client</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Period</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Total (USD)</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
+                    <TableHead className="text-center text-xs font-semibold uppercase">Status</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Created At</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
                   </TableRow>
@@ -384,16 +414,22 @@ export default function Invoices() {
                 <TableBody>
                   {invoices.map((invoice) => (
                     <TableRow key={invoice.id} data-testid={`row-invoice-${invoice.id}`}>
-                      <TableCell className="font-mono text-sm">{invoice.draftNumber}</TableCell>
-                      <TableCell>{invoice.clientName}</TableCell>
-                      <TableCell>{formatDate(invoice.periodStart)} - {formatDate(invoice.periodEnd)}</TableCell>
-                      <TableCell className="text-right font-mono">{formatMoney(invoice.total)}</TableCell>
                       <TableCell>
-                        <Badge variant={invoiceStatusBadgeVariant(invoice.status)}>
+                        <div className="font-mono text-sm font-medium">{invoice.draftNumber}</div>
+                        <div className="text-xs text-muted-foreground">{invoice.lineItemCount} line item{invoice.lineItemCount === 1 ? "" : "s"}</div>
+                      </TableCell>
+                      <TableCell className="font-medium">{invoice.clientName}</TableCell>
+                      <TableCell>{formatInvoicePeriod(invoice.periodStart, invoice.periodEnd)}</TableCell>
+                      <TableCell className="text-right font-mono font-medium">{formatMoney(invoice.total)}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge
+                          variant={invoiceStatusBadgeVariant(invoice.status)}
+                          className={invoiceStatusBadgeClassName(invoice.status)}
+                        >
                           {formatInvoiceStatus(invoice.status)}
                         </Badge>
                       </TableCell>
-                      <TableCell>{formatDate(invoice.createdAt)}</TableCell>
+                      <TableCell>{formatDateTime(invoice.createdAt)}</TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="outline"
@@ -533,9 +569,9 @@ export default function Invoices() {
                       <TableCell>{row.clientName}</TableCell>
                       <TableCell>{row.projectName}</TableCell>
                       <TableCell>{row.expertName}</TableCell>
-                      <TableCell className="text-right font-mono">{parseAmount(row.cuUsed).toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono">{getUsdCuRate(row).toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono">{getAmountUsd(row).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatCu(row.cuUsed)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatMoney(getUsdCuRate(row))}</TableCell>
+                      <TableCell className="text-right font-mono">{formatMoney(getAmountUsd(row))}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -561,9 +597,39 @@ export default function Invoices() {
       <Dialog open={selectedInvoiceId !== null} onOpenChange={(open) => !open && setSelectedInvoiceId(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
-            <DialogTitle>{selectedInvoice?.invoice.draftNumber || "Invoice Draft"}</DialogTitle>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <DialogTitle className="font-mono text-xl">
+                  {selectedInvoice?.invoice.draftNumber || "Invoice Draft"}
+                </DialogTitle>
+                {selectedInvoice && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={invoiceStatusBadgeVariant(selectedInvoice.invoice.status)}
+                      className={invoiceStatusBadgeClassName(selectedInvoice.invoice.status)}
+                    >
+                      {formatInvoiceStatus(selectedInvoice.invoice.status)}
+                    </Badge>
+                    <span className="text-sm text-muted-foreground">
+                      Created {formatDateTime(selectedInvoice.invoice.createdAt)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {selectedInvoice && isDraftInvoice(selectedInvoice.invoice.status) && (
+                <Button
+                  variant="outline"
+                  onClick={() => handleCancelDraft(selectedInvoice.invoice)}
+                  disabled={cancelDraftMutation.isPending}
+                  data-testid="button-cancel-invoice-draft"
+                >
+                  <XCircle className="mr-2 h-4 w-4" />
+                  {cancelDraftMutation.isPending ? "Canceling..." : "Cancel Draft"}
+                </Button>
+              )}
+            </div>
             <DialogDescription>
-              Draft invoice detail. Issuing, sending, PDF generation, and payment tracking are not available in this step.
+              Review invoice draft details and line items. Issuing, sending, PDF generation, and payment tracking are not available in this step.
             </DialogDescription>
           </DialogHeader>
 
@@ -587,20 +653,13 @@ export default function Invoices() {
             />
           ) : (
             <div className="space-y-4">
-              {selectedInvoice.invoice.status === "draft" && (
-                <div className="flex justify-end">
-                  <Button
-                    variant="outline"
-                    onClick={() => handleCancelDraft(selectedInvoice.invoice)}
-                    disabled={cancelDraftMutation.isPending}
-                    data-testid="button-cancel-invoice-draft"
-                  >
-                    <XCircle className="mr-2 h-4 w-4" />
-                    {cancelDraftMutation.isPending ? "Canceling..." : "Cancel Draft"}
-                  </Button>
-                </div>
-              )}
-              <div className="grid gap-4 sm:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-xs uppercase text-muted-foreground">Invoice Number</div>
+                    <div className="mt-1 break-all font-mono text-sm font-semibold">{selectedInvoice.invoice.draftNumber}</div>
+                  </CardContent>
+                </Card>
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-xs uppercase text-muted-foreground">Client</div>
@@ -611,7 +670,10 @@ export default function Invoices() {
                   <CardContent className="p-4">
                     <div className="text-xs uppercase text-muted-foreground">Status</div>
                     <div className="mt-1">
-                      <Badge variant={invoiceStatusBadgeVariant(selectedInvoice.invoice.status)}>
+                      <Badge
+                        variant={invoiceStatusBadgeVariant(selectedInvoice.invoice.status)}
+                        className={invoiceStatusBadgeClassName(selectedInvoice.invoice.status)}
+                      >
                         {formatInvoiceStatus(selectedInvoice.invoice.status)}
                       </Badge>
                     </div>
@@ -620,15 +682,19 @@ export default function Invoices() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-xs uppercase text-muted-foreground">Period</div>
-                    <div className="mt-1 font-medium">
-                      {formatDate(selectedInvoice.invoice.periodStart)} - {formatDate(selectedInvoice.invoice.periodEnd)}
-                    </div>
+                    <div className="mt-1 font-medium">{formatInvoicePeriod(selectedInvoice.invoice.periodStart, selectedInvoice.invoice.periodEnd)}</div>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-xs uppercase text-muted-foreground">Total</div>
                     <div className="mt-1 font-medium">{formatMoney(selectedInvoice.invoice.total)}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-xs uppercase text-muted-foreground">Created At</div>
+                    <div className="mt-1 font-medium">{formatDateTime(selectedInvoice.invoice.createdAt)}</div>
                   </CardContent>
                 </Card>
               </div>
@@ -640,31 +706,39 @@ export default function Invoices() {
                   description="This draft exists, but no billable usage line items were returned."
                 />
               ) : (
-                <div className="overflow-x-auto rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-xs font-semibold uppercase">Service Date</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
-                        <TableHead className="text-right text-xs font-semibold uppercase">CU Used</TableHead>
-                        <TableHead className="text-right text-xs font-semibold uppercase">USD CU Rate</TableHead>
-                        <TableHead className="text-right text-xs font-semibold uppercase">Amount (USD)</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {selectedInvoice.lineItems.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell>{formatDate(item.serviceDate)}</TableCell>
-                          <TableCell>{item.projectName}</TableCell>
-                          <TableCell>{item.expertName}</TableCell>
-                          <TableCell className="text-right font-mono">{parseAmount(item.cuUsed).toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-mono">{parseAmount(item.cuRate).toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-mono">{parseAmount(item.amount).toFixed(2)}</TableCell>
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">Line Items</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedInvoice.lineItems.length} billable usage item{selectedInvoice.lineItems.length === 1 ? "" : "s"} preserved with this invoice record.
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs font-semibold uppercase">Service Date</TableHead>
+                          <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
+                          <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
+                          <TableHead className="text-right text-xs font-semibold uppercase">CU Used</TableHead>
+                          <TableHead className="text-right text-xs font-semibold uppercase">USD CU Rate</TableHead>
+                          <TableHead className="text-right text-xs font-semibold uppercase">Amount (USD)</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedInvoice.lineItems.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell>{formatDate(item.serviceDate)}</TableCell>
+                            <TableCell className="font-medium">{item.projectName}</TableCell>
+                            <TableCell>{item.expertName}</TableCell>
+                            <TableCell className="text-right font-mono">{formatCu(item.cuUsed)}</TableCell>
+                            <TableCell className="text-right font-mono">{formatMoney(item.cuRate)}</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{formatMoney(item.amount)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
               )}
             </div>
@@ -705,8 +779,8 @@ function ExcludedBillableUsageTable({
               <TableCell>{row.expertName || "-"}</TableCell>
               <TableCell>{row.status || "-"}</TableCell>
               <TableCell>{normalizedCurrency(row)}</TableCell>
-              <TableCell className="text-right font-mono">{getUsdCuRate(row).toFixed(2)}</TableCell>
-              <TableCell className="text-right font-mono">{getAmountUsd(row).toFixed(2)}</TableCell>
+              <TableCell className="text-right font-mono">{formatMoney(getUsdCuRate(row))}</TableCell>
+              <TableCell className="text-right font-mono">{formatMoney(getAmountUsd(row))}</TableCell>
               <TableCell>{getReason(row)}</TableCell>
             </TableRow>
           ))}
