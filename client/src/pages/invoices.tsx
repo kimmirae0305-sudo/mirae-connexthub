@@ -549,7 +549,7 @@ export default function Invoices() {
 
   const handleIssueInvoice = (invoice: InvoiceListRow) => {
     const confirmed = window.confirm(
-      "Issue this invoice? This will finalize the draft invoice and lock its billable usage as invoiced. PDF download will become available after issuing; sending and payment tracking are not included in this step."
+      "Issue this invoice? This will finalize the draft invoice and lock its billable usage as invoiced. PDF download will become available after issuing. Manual sent and paid tracking remain separate finance steps."
     );
     if (!confirmed) return;
     issueInvoiceMutation.mutate(invoice.id);
@@ -606,7 +606,7 @@ export default function Invoices() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Invoice review finance layer</AlertTitle>
         <AlertDescription>
-          Draft invoices can be reviewed, canceled, or issued. Issued and sent invoices can be downloaded as PDFs. Manual sent and paid tracking records offline actions without sending email, contacting banks, or mutating call records.
+          Draft invoices can be reviewed, canceled, or issued. Issued, sent, and paid invoices can be downloaded as PDFs. Manual sent and paid tracking records offline actions without sending email, contacting banks, or mutating call records.
         </AlertDescription>
       </Alert>
 
@@ -615,13 +615,13 @@ export default function Invoices() {
           <div className="flex flex-col gap-1">
             <CardTitle className="text-base font-medium">Invoice Records</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Draft, issued, and canceled invoice records remain visible for finance review and audit history.
+              Draft, canceled, issued, sent, and paid invoice records remain visible for finance review and audit history.
             </p>
           </div>
         </CardHeader>
         <CardContent>
           {invoicesLoading ? (
-            <DataTableSkeleton columns={9} rows={5} />
+            <DataTableSkeleton columns={10} rows={5} />
           ) : !invoices || invoices.length === 0 ? (
             <EmptyState
               icon={FileText}
@@ -639,6 +639,7 @@ export default function Invoices() {
                     <TableHead className="text-right text-xs font-semibold uppercase">Total (USD)</TableHead>
                     <TableHead className="text-center text-xs font-semibold uppercase">Status</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Created At</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Issued At</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Sent At</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Paid At</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
@@ -667,6 +668,7 @@ export default function Invoices() {
                         </Badge>
                       </TableCell>
                       <TableCell>{formatDateTime(invoice.createdAt)}</TableCell>
+                      <TableCell>{formatDateTime(invoice.issuedAt)}</TableCell>
                       <TableCell>{formatDateTime(invoice.sentAt)}</TableCell>
                       <TableCell>{formatDateTime(invoice.paidAt)}</TableCell>
                       <TableCell className="text-right">
@@ -982,7 +984,7 @@ export default function Invoices() {
           ) : !selectedInvoice ? (
             <EmptyState
               icon={FileText}
-              title="Invoice draft detail is unavailable."
+              title="Invoice detail is unavailable."
               description="Close this detail view and reopen the invoice from the list."
             />
           ) : (
@@ -990,7 +992,9 @@ export default function Invoices() {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <Card>
                   <CardContent className="p-4">
-                    <div className="text-xs uppercase text-muted-foreground">Invoice Number</div>
+                    <div className="text-xs uppercase text-muted-foreground">
+                      {selectedInvoice.invoice.invoiceNumber ? "Invoice Number" : "Draft Number"}
+                    </div>
                     <div className="mt-1 break-all font-mono text-sm font-semibold">
                       {getDisplayInvoiceNumber(selectedInvoice.invoice)}
                     </div>
@@ -1102,7 +1106,7 @@ export default function Invoices() {
                 <EmptyState
                   icon={Receipt}
                   title="No invoice line items found."
-                  description="This draft exists, but no billable usage line items were returned."
+                  description="This invoice exists, but no billable usage line items were returned."
                 />
               ) : (
                 <div className="space-y-3">
