@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Briefcase,
+  Building2,
   Calendar,
   DollarSign,
   FileText,
@@ -17,6 +18,7 @@ import {
   Save,
   Trash2,
   User,
+  AlertTriangle,
   X,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -37,12 +39,71 @@ import type { CallRecord, Expert, ProjectExpert } from "@shared/schema";
 
 interface WorkExperience {
   company?: string;
+  rawCompanyName?: string;
+  companyId?: number | null;
+  companyLinkStatus?: "pending_review" | "suggested" | "linked" | "unclear" | "ignored";
+  reviewedBy?: number | null;
+  reviewedAt?: string | null;
   jobTitle?: string;
   fromMonth?: number;
   fromYear?: number;
   toMonth?: number;
   toYear?: number;
   isCurrent?: boolean;
+}
+
+interface Company {
+  id: number;
+  name: string;
+  legalName?: string | null;
+  officialWebsite?: string | null;
+  country: string;
+  companyType: string;
+  industry?: string | null;
+  city?: string | null;
+  status: string;
+}
+
+interface CompanySuggestion {
+  company: Company;
+  matchReason: "exact_name" | "alias" | "fuzzy_name" | "website_domain";
+  score: number;
+}
+
+interface CompanyReviewItem {
+  index: number;
+  rawCompanyName: string;
+  companyId: number | null;
+  companyLinkStatus: string;
+  reviewedBy: number | null;
+  reviewedAt: string | null;
+  suggestions: CompanySuggestion[];
+}
+
+interface ExpertCompanyReview {
+  expertId: number;
+  items: CompanyReviewItem[];
+  linkedCompanies: Array<{
+    index: number;
+    rawCompanyName: string;
+    company: Company;
+  }>;
+}
+
+interface NewCompanyForm {
+  workHistoryIndex: number | null;
+  name: string;
+  country: string;
+  companyType: string;
+  legalName: string;
+  officialWebsite: string;
+  linkedinUrl: string;
+  industry: string;
+  city: string;
+  description: string;
+  ownershipNotes: string;
+  notes: string;
+  status: string;
 }
 
 interface ExpertEditForm {
@@ -87,6 +148,32 @@ const monthOptions = [
   { value: 11, label: "Nov" },
   { value: 12, label: "Dec" },
 ];
+
+const companyTypeOptions = [
+  { value: "private_company", label: "Private Company" },
+  { value: "publicly_listed_company", label: "Publicly Listed Company" },
+  { value: "state_owned_enterprise", label: "State-Owned Enterprise" },
+  { value: "government_agency", label: "Government Agency" },
+  { value: "nonprofit_ngo", label: "Nonprofit / NGO" },
+  { value: "academic_research_institution", label: "Academic / Research Institution" },
+  { value: "other", label: "Other" },
+];
+
+const emptyNewCompanyForm = (): NewCompanyForm => ({
+  workHistoryIndex: null,
+  name: "",
+  country: "",
+  companyType: "private_company",
+  legalName: "",
+  officialWebsite: "",
+  linkedinUrl: "",
+  industry: "",
+  city: "",
+  description: "",
+  ownershipNotes: "",
+  notes: "",
+  status: "unverified",
+});
 
 function formatDate(value?: string | Date | null) {
   if (!value) return "-";
@@ -174,6 +261,7 @@ export default function ExpertDetail() {
   const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<ExpertEditForm | null>(null);
+  const [newCompanyForm, setNewCompanyForm] = useState<NewCompanyForm>(emptyNewCompanyForm());
 
   const {
     data: expert,
@@ -207,6 +295,15 @@ export default function ExpertDetail() {
     enabled: isValidExpertId,
   });
 
+  const { data: companyReview } = useQuery<ExpertCompanyReview>({
+    queryKey: ["/api/experts", expertId, "company-review"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/experts/${expertId}/company-review`);
+      return response.json();
+    },
+    enabled: isValidExpertId,
+  });
+
   useEffect(() => {
     if (expert && !isEditing) {
       setFormData(expertToForm(expert));
@@ -228,6 +325,82 @@ export default function ExpertDetail() {
       toast({
         title: "Failed to update expert",
         description: error instanceof Error ? error.message : "Please review the expert details and try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const refreshCompanyReview = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/experts", expertId] });
+    queryClient.invalidateQueries({ queryKey: ["/api/experts", expertId, "company-review"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/experts"] });
+  };
+
+  const linkCompanyMutation = useMutation({
+    mutationFn: async ({ index, companyId }: { index: number; companyId: number }) => {
+      const response = await apiRequest("POST", `/api/experts/${expertId}/work-history/${index}/link-company`, { companyId });
+      return response.json();
+    },
+    onSuccess: () => {
+      refreshCompanyReview();
+      toast({ title: "Company linked", description: "The work history company was linked successfully." });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to link company",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const createAndLinkCompanyMutation = useMutation({
+    mutationFn: async (payload: NewCompanyForm) => {
+      if (payload.workHistoryIndex === null) throw new Error("Work history item is required.");
+      const response = await apiRequest("POST", `/api/experts/${expertId}/work-history/${payload.workHistoryIndex}/create-company`, {
+        name: payload.name.trim(),
+        country: payload.country.trim(),
+        companyType: payload.companyType,
+        legalName: payload.legalName.trim() || undefined,
+        officialWebsite: payload.officialWebsite.trim() || undefined,
+        linkedinUrl: payload.linkedinUrl.trim() || undefined,
+        industry: payload.industry.trim() || undefined,
+        city: payload.city.trim() || undefined,
+        description: payload.description.trim() || undefined,
+        ownershipNotes: payload.ownershipNotes.trim() || undefined,
+        notes: payload.notes.trim() || undefined,
+        status: payload.status,
+        alias: payload.name.trim(),
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      setNewCompanyForm(emptyNewCompanyForm());
+      refreshCompanyReview();
+      toast({ title: "Company created", description: "The company was created and linked to the expert work history." });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to create company",
+        description: error instanceof Error ? error.message : "Please review the company details and try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateCompanyReviewStatusMutation = useMutation({
+    mutationFn: async ({ index, status }: { index: number; status: "unclear" | "ignored" }) => {
+      const response = await apiRequest("POST", `/api/experts/${expertId}/work-history/${index}/company-status`, { status });
+      return response.json();
+    },
+    onSuccess: () => {
+      refreshCompanyReview();
+      toast({ title: "Company review updated", description: "The review status was saved." });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to update company review",
+        description: error instanceof Error ? error.message : "Please try again.",
         variant: "destructive",
       });
     },
@@ -289,10 +462,39 @@ export default function ExpertDetail() {
     setFormData((current) => {
       if (!current) return current;
       const workHistory = [...current.workHistory];
-      workHistory[index] = { ...workHistory[index], [field]: value };
+      workHistory[index] =
+        field === "company"
+          ? {
+              ...workHistory[index],
+              company: String(value || ""),
+              rawCompanyName: String(value || ""),
+              companyId: null,
+              companyLinkStatus: String(value || "").trim() ? "pending_review" : "ignored",
+              reviewedBy: null,
+              reviewedAt: null,
+            }
+          : { ...workHistory[index], [field]: value };
       return { ...current, workHistory };
     });
   };
+
+  const updateNewCompanyForm = <K extends keyof NewCompanyForm>(field: K, value: NewCompanyForm[K]) => {
+    setNewCompanyForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const startCreateCompany = (item: CompanyReviewItem) => {
+    setNewCompanyForm({
+      ...emptyNewCompanyForm(),
+      workHistoryIndex: item.index,
+      name: item.rawCompanyName,
+    });
+  };
+
+  const restrictedCompanyByWorkHistoryIndex = new Map(
+    (companyReview?.linkedCompanies || [])
+      .filter(({ company }) => company.status === "restricted" || company.status === "dnc")
+      .map(({ index, company }) => [index, company])
+  );
 
   const handleSave = () => {
     if (!formData) return;
@@ -924,7 +1126,18 @@ export default function ExpertDetail() {
                   <TableBody>
                     {workHistory.map((experience, index) => (
                       <TableRow key={`${experience.company}-${experience.jobTitle}-${index}`}>
-                        <TableCell className="font-medium">{experience.company || "-"}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span>{experience.company || experience.rawCompanyName || "-"}</span>
+                            {experience.companyId && <Badge variant="outline">Linked</Badge>}
+                            {restrictedCompanyByWorkHistoryIndex.has(index) && (
+                              <Badge variant="destructive" className="gap-1">
+                                <AlertTriangle className="h-3 w-3" />
+                                {restrictedCompanyByWorkHistoryIndex.get(index)?.status === "dnc" ? "DNC" : "Restricted"}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell>{experience.jobTitle || "-"}</TableCell>
                         <TableCell>{formatWorkPeriod(experience)}</TableCell>
                       </TableRow>
@@ -936,6 +1149,184 @@ export default function ExpertDetail() {
                   icon={Briefcase}
                   title="No work history"
                   description="Work history has not been added for this expert yet."
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Company Review</CardTitle>
+              <CardDescription>
+                Review raw work history company names after onboarding. Experts only enter company names as text.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {(companyReview?.items || []).length > 0 ? (
+                companyReview!.items.map((item) => (
+                  <div key={`${item.index}-${item.rawCompanyName}`} className="rounded-md border p-4">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Building2 className="h-4 w-4 text-muted-foreground" />
+                          <p className="font-medium">{item.rawCompanyName}</p>
+                          <Badge variant="outline" className="capitalize">
+                            {item.companyLinkStatus.replace(/_/g, " ")}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Work history row {item.index + 1}. Link this raw company name to a reviewed Company record.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => updateCompanyReviewStatusMutation.mutate({ index: item.index, status: "unclear" })}
+                          disabled={updateCompanyReviewStatusMutation.isPending}
+                          data-testid={`button-company-unclear-${item.index}`}
+                        >
+                          Mark Unclear
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => updateCompanyReviewStatusMutation.mutate({ index: item.index, status: "ignored" })}
+                          disabled={updateCompanyReviewStatusMutation.isPending}
+                          data-testid={`button-company-ignore-${item.index}`}
+                        >
+                          Ignore
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Suggested Matches</p>
+                      {item.suggestions.length > 0 ? (
+                        <div className="grid gap-2">
+                          {item.suggestions.map((suggestion) => (
+                            <div key={suggestion.company.id} className="flex flex-col gap-2 rounded-md bg-muted/40 p-3 md:flex-row md:items-center md:justify-between">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-medium">{suggestion.company.name}</p>
+                                  <Badge variant="secondary">{suggestion.matchReason.replace(/_/g, " ")}</Badge>
+                                  {(suggestion.company.status === "restricted" || suggestion.company.status === "dnc") && (
+                                    <Badge variant="destructive">
+                                      {suggestion.company.status === "dnc" ? "DNC" : "Restricted"}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-sm text-muted-foreground">
+                                  {[suggestion.company.country, suggestion.company.companyType, suggestion.company.officialWebsite]
+                                    .filter(Boolean)
+                                    .join(" • ")}
+                                </p>
+                              </div>
+                              <Button
+                                size="sm"
+                                onClick={() => linkCompanyMutation.mutate({ index: item.index, companyId: suggestion.company.id })}
+                                disabled={linkCompanyMutation.isPending}
+                                data-testid={`button-link-company-${item.index}-${suggestion.company.id}`}
+                              >
+                                Link
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No existing company suggestions were found.</p>
+                      )}
+                    </div>
+
+                    {newCompanyForm.workHistoryIndex === item.index ? (
+                      <div className="mt-4 rounded-md border bg-background p-4">
+                        <div className="mb-3 flex items-center justify-between">
+                          <p className="font-medium">Create Company and Link</p>
+                          <Button variant="ghost" size="sm" onClick={() => setNewCompanyForm(emptyNewCompanyForm())}>
+                            Cancel
+                          </Button>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Company Name</label>
+                            <Input value={newCompanyForm.name} onChange={(event) => updateNewCompanyForm("name", event.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Country</label>
+                            <Input value={newCompanyForm.country} onChange={(event) => updateNewCompanyForm("country", event.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Company Type</label>
+                            <Select value={newCompanyForm.companyType} onValueChange={(value) => updateNewCompanyForm("companyType", value)}>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {companyTypeOptions.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Official Website</label>
+                            <Input value={newCompanyForm.officialWebsite} onChange={(event) => updateNewCompanyForm("officialWebsite", event.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Legal Name</label>
+                            <Input value={newCompanyForm.legalName} onChange={(event) => updateNewCompanyForm("legalName", event.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">LinkedIn URL</label>
+                            <Input value={newCompanyForm.linkedinUrl} onChange={(event) => updateNewCompanyForm("linkedinUrl", event.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Industry</label>
+                            <Input value={newCompanyForm.industry} onChange={(event) => updateNewCompanyForm("industry", event.target.value)} />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">City</label>
+                            <Input value={newCompanyForm.city} onChange={(event) => updateNewCompanyForm("city", event.target.value)} />
+                          </div>
+                          <div className="space-y-2 md:col-span-2">
+                            <label className="text-sm font-medium">Notes</label>
+                            <Textarea value={newCompanyForm.notes} onChange={(event) => updateNewCompanyForm("notes", event.target.value)} />
+                          </div>
+                        </div>
+                        <Button
+                          className="mt-4"
+                          onClick={() => createAndLinkCompanyMutation.mutate(newCompanyForm)}
+                          disabled={
+                            createAndLinkCompanyMutation.isPending ||
+                            !newCompanyForm.name.trim() ||
+                            !newCompanyForm.country.trim() ||
+                            !newCompanyForm.companyType
+                          }
+                          data-testid={`button-create-link-company-${item.index}`}
+                        >
+                          Create and Link
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        className="mt-4"
+                        onClick={() => startCreateCompany(item)}
+                        data-testid={`button-start-create-company-${item.index}`}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Create New Company
+                      </Button>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <EmptyState
+                  icon={Building2}
+                  title="No company links pending review"
+                  description="All work history company names are linked, ignored, or not yet available for review."
                 />
               )}
             </CardContent>

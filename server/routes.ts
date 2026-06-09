@@ -14,6 +14,7 @@ import {
   insertUserSchema,
   insertClientOrganizationSchema,
   insertClientPocSchema,
+  insertCompanySchema,
   insertCallRecordSchema,
   insertInsightSchema,
   insertExpertInvitationLinkSchema,
@@ -1826,6 +1827,110 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete expert" });
+    }
+  });
+
+  app.get("/api/companies", authMiddleware, async (req, res) => {
+    try {
+      const companies = await storage.getCompanies(req.query.search as string | undefined);
+      res.json(companies);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch companies" });
+    }
+  });
+
+  app.post("/api/companies", authMiddleware, requireRoles("admin", "ra"), async (req, res) => {
+    try {
+      const result = insertCompanySchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      if (String(result.data.status || "").toLowerCase() === "verified" && !String(result.data.officialWebsite || "").trim()) {
+        return res.status(400).json({ error: "Official website is required for verified companies" });
+      }
+      const company = await storage.createCompany(result.data);
+      res.status(201).json(company);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create company";
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.get("/api/experts/:id/company-review", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const review = await storage.getExpertCompanyReview(id);
+      if (!review) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+      res.json(review);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch company review" });
+    }
+  });
+
+  app.post("/api/experts/:id/work-history/:index/link-company", authMiddleware, requireRoles("admin", "ra"), async (req: AuthRequest, res) => {
+    try {
+      const expertId = parseInt(req.params.id);
+      const workHistoryIndex = parseInt(req.params.index);
+      const companyId = Number(req.body?.companyId);
+      if (!Number.isInteger(companyId) || companyId <= 0) {
+        return res.status(400).json({ error: "Company id is required" });
+      }
+      const expert = await storage.linkExpertWorkHistoryCompany(expertId, workHistoryIndex, companyId, req.user!.id);
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+      res.json(expert);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to link company";
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.post("/api/experts/:id/work-history/:index/create-company", authMiddleware, requireRoles("admin", "ra"), async (req: AuthRequest, res) => {
+    try {
+      const expertId = parseInt(req.params.id);
+      const workHistoryIndex = parseInt(req.params.index);
+      const result = insertCompanySchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      if (String(result.data.status || "").toLowerCase() === "verified" && !String(result.data.officialWebsite || "").trim()) {
+        return res.status(400).json({ error: "Official website is required for verified companies" });
+      }
+      const linked = await storage.createCompanyAndLinkExpertWorkHistory(
+        expertId,
+        workHistoryIndex,
+        { ...result.data, alias: String(req.body?.alias || "").trim() || undefined },
+        req.user!.id
+      );
+      if (!linked) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+      res.status(201).json(linked);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create and link company";
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.post("/api/experts/:id/work-history/:index/company-status", authMiddleware, requireRoles("admin", "ra"), async (req: AuthRequest, res) => {
+    try {
+      const expertId = parseInt(req.params.id);
+      const workHistoryIndex = parseInt(req.params.index);
+      const status = String(req.body?.status || "");
+      if (status !== "unclear" && status !== "ignored") {
+        return res.status(400).json({ error: "Status must be unclear or ignored" });
+      }
+      const expert = await storage.updateExpertWorkHistoryCompanyStatus(expertId, workHistoryIndex, status, req.user!.id);
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+      res.json(expert);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to update company review status";
+      res.status(400).json({ error: message });
     }
   });
 

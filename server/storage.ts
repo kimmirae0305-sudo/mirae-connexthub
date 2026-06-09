@@ -11,6 +11,8 @@ import {
   users,
   clients,
   clientOrganizations,
+  companies,
+  companyAliases,
   clientPocs,
   callRecords,
   insights,
@@ -33,6 +35,8 @@ import {
   type InsertClient,
   type ClientOrganization,
   type InsertClientOrganization,
+  type Company,
+  type InsertCompany,
   type ClientPoc,
   type InsertClientPoc,
   type CallRecord,
@@ -354,6 +358,38 @@ export interface PmPerformanceReport {
   rows: PmPerformanceRow[];
 }
 
+export type CompanyLinkStatus = "pending_review" | "suggested" | "linked" | "unclear" | "ignored";
+
+export interface CompanySuggestion {
+  company: Company;
+  matchReason: "exact_name" | "alias" | "fuzzy_name" | "website_domain";
+  score: number;
+}
+
+export interface ExpertWorkHistoryCompanyReviewItem {
+  index: number;
+  rawCompanyName: string;
+  companyId: number | null;
+  companyLinkStatus: CompanyLinkStatus;
+  reviewedBy: number | null;
+  reviewedAt: string | null;
+  suggestions: CompanySuggestion[];
+}
+
+export interface ExpertCompanyReview {
+  expertId: number;
+  items: ExpertWorkHistoryCompanyReviewItem[];
+  linkedCompanies: Array<{
+    index: number;
+    rawCompanyName: string;
+    company: Company;
+  }>;
+}
+
+export interface CreateAndLinkCompanyInput extends InsertCompany {
+  alias?: string;
+}
+
 export interface IStorage {
   // Users (Employees)
   getUsers(): Promise<User[]>;
@@ -377,6 +413,25 @@ export interface IStorage {
   createClientOrganization(org: InsertClientOrganization): Promise<ClientOrganization>;
   updateClientOrganization(id: number, org: Partial<InsertClientOrganization>): Promise<ClientOrganization | undefined>;
   deleteClientOrganization(id: number): Promise<boolean>;
+
+  // Companies (expert work history review)
+  getCompanies(query?: string): Promise<Company[]>;
+  getCompany(id: number): Promise<Company | undefined>;
+  createCompany(company: InsertCompany): Promise<Company>;
+  getExpertCompanyReview(expertId: number): Promise<ExpertCompanyReview | undefined>;
+  linkExpertWorkHistoryCompany(expertId: number, workHistoryIndex: number, companyId: number, reviewedBy: number): Promise<Expert | undefined>;
+  createCompanyAndLinkExpertWorkHistory(
+    expertId: number,
+    workHistoryIndex: number,
+    company: CreateAndLinkCompanyInput,
+    reviewedBy: number
+  ): Promise<{ expert: Expert; company: Company } | undefined>;
+  updateExpertWorkHistoryCompanyStatus(
+    expertId: number,
+    workHistoryIndex: number,
+    status: Extract<CompanyLinkStatus, "unclear" | "ignored">,
+    reviewedBy: number
+  ): Promise<Expert | undefined>;
 
   // Client POCs
   getClientPocs(): Promise<ClientPoc[]>;
@@ -533,6 +588,61 @@ export interface IStorage {
   deleteExpenseReceipt(id: number): Promise<ExpenseRow | undefined>;
 }
 
+const COMPANY_LINK_STATUSES = new Set<CompanyLinkStatus>([
+  "pending_review",
+  "suggested",
+  "linked",
+  "unclear",
+  "ignored",
+]);
+
+function normalizeCompanyName(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/\b(incorporated|inc|ltd|limited|llc|corp|corporation|company|co|sa|s\.a\.|s\/a|plc)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractDomain(value: unknown) {
+  const rawValue = String(value || "").trim().toLowerCase();
+  if (!rawValue) return "";
+  try {
+    const withProtocol = rawValue.startsWith("http://") || rawValue.startsWith("https://") ? rawValue : `https://${rawValue}`;
+    return new URL(withProtocol).hostname.replace(/^www\./, "");
+  } catch {
+    return rawValue.replace(/^www\./, "").split("/")[0];
+  }
+}
+
+function normalizeExpertWorkHistory(workHistory: unknown) {
+  if (!Array.isArray(workHistory)) return workHistory as any;
+  return workHistory.map((item: any) => {
+    const rawCompanyName = String(item?.rawCompanyName || item?.company || "").trim();
+    const companyId = Number(item?.companyId);
+    const linkStatus = COMPANY_LINK_STATUSES.has(item?.companyLinkStatus)
+      ? item.companyLinkStatus
+      : companyId > 0
+        ? "linked"
+        : rawCompanyName
+          ? "pending_review"
+          : "ignored";
+
+    return {
+      ...item,
+      company: String(item?.company || rawCompanyName || "").trim(),
+      rawCompanyName,
+      companyId: companyId > 0 ? companyId : null,
+      companyLinkStatus: linkStatus,
+      reviewedBy: Number(item?.reviewedBy) > 0 ? Number(item.reviewedBy) : null,
+      reviewedAt: item?.reviewedAt || null,
+    };
+  });
+}
+
 export class DatabaseStorage implements IStorage {
   // Users
   async getUsers(): Promise<User[]> {
@@ -642,6 +752,200 @@ export class DatabaseStorage implements IStorage {
   async deleteClientOrganization(id: number): Promise<boolean> {
     const result = await db.delete(clientOrganizations).where(eq(clientOrganizations.id, id)).returning();
     return result.length > 0;
+  }
+
+  // Companies (expert work history review)
+  async getCompanies(query?: string): Promise<Company[]> {
+    if (query?.trim()) {
+      const normalizedQuery = normalizeCompanyName(query);
+      const pattern = `%${query.trim()}%`;
+      const normalizedPattern = `%${normalizedQuery}%`;
+      return db
+        .select()
+        .from(companies)
+        .where(
+          or(
+            ilike(companies.name, pattern),
+            ilike(companies.legalName, pattern),
+            ilike(companies.officialWebsite, pattern),
+            ilike(companies.normalizedName, normalizedPattern)
+          )
+        )
+        .orderBy(companies.name);
+    }
+    return db.select().from(companies).orderBy(companies.name);
+  }
+
+  async getCompany(id: number): Promise<Company | undefined> {
+    const [company] = await db.select().from(companies).where(eq(companies.id, id));
+    return company || undefined;
+  }
+
+  async createCompany(company: InsertCompany): Promise<Company> {
+    if (String(company.status || "").toLowerCase() === "verified" && !String(company.officialWebsite || "").trim()) {
+      throw new Error("Official website is required for verified companies.");
+    }
+
+    const [createdCompany] = await db
+      .insert(companies)
+      .values({
+        ...company,
+        normalizedName: normalizeCompanyName(company.name),
+        officialWebsite: company.officialWebsite?.trim() || null,
+        linkedinUrl: company.linkedinUrl?.trim() || null,
+        legalName: company.legalName?.trim() || null,
+        industry: company.industry?.trim() || null,
+        city: company.city?.trim() || null,
+        description: company.description?.trim() || null,
+        ownershipNotes: company.ownershipNotes?.trim() || null,
+        notes: company.notes?.trim() || null,
+      })
+      .returning();
+
+    return createdCompany;
+  }
+
+  private async getCompanySuggestions(rawCompanyName: string): Promise<CompanySuggestion[]> {
+    const normalizedName = normalizeCompanyName(rawCompanyName);
+    if (!normalizedName) return [];
+
+    const allCompanies = await db.select().from(companies).orderBy(companies.name);
+    const allAliases = await db.select().from(companyAliases);
+    const aliasesByCompanyId = new Map<number, typeof allAliases>();
+    for (const alias of allAliases) {
+      aliasesByCompanyId.set(alias.companyId, [...(aliasesByCompanyId.get(alias.companyId) || []), alias]);
+    }
+
+    const rawDomain = extractDomain(rawCompanyName);
+    const suggestions: CompanySuggestion[] = [];
+    for (const company of allCompanies) {
+      const companyDomain = extractDomain(company.officialWebsite);
+      const aliasMatch = (aliasesByCompanyId.get(company.id) || []).some((alias) => alias.normalizedAlias === normalizedName);
+      let matchReason: CompanySuggestion["matchReason"] | null = null;
+      let score = 0;
+
+      if (company.normalizedName === normalizedName) {
+        matchReason = "exact_name";
+        score = 100;
+      } else if (aliasMatch) {
+        matchReason = "alias";
+        score = 95;
+      } else if (rawDomain && companyDomain && rawDomain === companyDomain) {
+        matchReason = "website_domain";
+        score = 92;
+      } else if (
+        company.normalizedName.includes(normalizedName) ||
+        normalizedName.includes(company.normalizedName)
+      ) {
+        matchReason = "fuzzy_name";
+        score = 75;
+      }
+
+      if (matchReason) {
+        suggestions.push({ company, matchReason, score });
+      }
+    }
+
+    return suggestions.sort((a, b) => b.score - a.score).slice(0, 5);
+  }
+
+  async getExpertCompanyReview(expertId: number): Promise<ExpertCompanyReview | undefined> {
+    const expert = await this.getExpert(expertId);
+    if (!expert) return undefined;
+    const workHistory = normalizeExpertWorkHistory(expert.workHistory) as any[];
+    const items: ExpertWorkHistoryCompanyReviewItem[] = [];
+    const linkedCompanies: ExpertCompanyReview["linkedCompanies"] = [];
+
+    for (const [index, item] of workHistory.entries()) {
+      const rawCompanyName = String(item.rawCompanyName || item.company || "").trim();
+      if (!rawCompanyName) continue;
+      if (item.companyId) {
+        const company = await this.getCompany(Number(item.companyId));
+        if (company) linkedCompanies.push({ index, rawCompanyName, company });
+        continue;
+      }
+      const status = COMPANY_LINK_STATUSES.has(item.companyLinkStatus) ? item.companyLinkStatus : "pending_review";
+      if (status === "ignored") continue;
+      items.push({
+        index,
+        rawCompanyName,
+        companyId: item.companyId || null,
+        companyLinkStatus: status,
+        reviewedBy: item.reviewedBy || null,
+        reviewedAt: item.reviewedAt || null,
+        suggestions: await this.getCompanySuggestions(rawCompanyName),
+      });
+    }
+
+    return { expertId, items, linkedCompanies };
+  }
+
+  private async updateExpertWorkHistoryItem(
+    expertId: number,
+    workHistoryIndex: number,
+    updater: (item: any) => any
+  ): Promise<Expert | undefined> {
+    const expert = await this.getExpert(expertId);
+    if (!expert) return undefined;
+    const workHistory = normalizeExpertWorkHistory(expert.workHistory) as any[];
+    if (!Number.isInteger(workHistoryIndex) || workHistoryIndex < 0 || workHistoryIndex >= workHistory.length) {
+      throw new Error("Work history item not found.");
+    }
+
+    workHistory[workHistoryIndex] = updater(workHistory[workHistoryIndex]);
+    return this.updateExpert(expertId, { workHistory } as Partial<InsertExpert>);
+  }
+
+  async linkExpertWorkHistoryCompany(
+    expertId: number,
+    workHistoryIndex: number,
+    companyId: number,
+    reviewedBy: number
+  ): Promise<Expert | undefined> {
+    const company = await this.getCompany(companyId);
+    if (!company) throw new Error("Company not found.");
+    return this.updateExpertWorkHistoryItem(expertId, workHistoryIndex, (item) => ({
+      ...item,
+      company: item.company || item.rawCompanyName || company.name,
+      rawCompanyName: item.rawCompanyName || item.company || company.name,
+      companyId: company.id,
+      companyLinkStatus: "linked",
+      reviewedBy,
+      reviewedAt: new Date().toISOString(),
+    }));
+  }
+
+  async createCompanyAndLinkExpertWorkHistory(
+    expertId: number,
+    workHistoryIndex: number,
+    company: CreateAndLinkCompanyInput,
+    reviewedBy: number
+  ): Promise<{ expert: Expert; company: Company } | undefined> {
+    const createdCompany = await this.createCompany(company);
+    if (company.alias?.trim()) {
+      await db.insert(companyAliases).values({
+        companyId: createdCompany.id,
+        alias: company.alias.trim(),
+        normalizedAlias: normalizeCompanyName(company.alias),
+      });
+    }
+    const expert = await this.linkExpertWorkHistoryCompany(expertId, workHistoryIndex, createdCompany.id, reviewedBy);
+    return expert ? { expert, company: createdCompany } : undefined;
+  }
+
+  async updateExpertWorkHistoryCompanyStatus(
+    expertId: number,
+    workHistoryIndex: number,
+    status: Extract<CompanyLinkStatus, "unclear" | "ignored">,
+    reviewedBy: number
+  ): Promise<Expert | undefined> {
+    return this.updateExpertWorkHistoryItem(expertId, workHistoryIndex, (item) => ({
+      ...item,
+      companyId: null,
+      companyLinkStatus: status,
+      reviewedBy,
+      reviewedAt: new Date().toISOString(),
+    }));
   }
 
   // Client POCs
@@ -1053,14 +1357,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createExpert(expert: InsertExpert): Promise<Expert> {
-    const [newExpert] = await db.insert(experts).values(expert).returning();
+    const [newExpert] = await db
+      .insert(experts)
+      .values({
+        ...expert,
+        workHistory: normalizeExpertWorkHistory(expert.workHistory),
+      })
+      .returning();
     return newExpert;
   }
 
   async updateExpert(id: number, expert: Partial<InsertExpert>): Promise<Expert | undefined> {
     const [updated] = await db
       .update(experts)
-      .set(expert)
+      .set({
+        ...expert,
+        ...(expert.workHistory !== undefined ? { workHistory: normalizeExpertWorkHistory(expert.workHistory) } : {}),
+      })
       .where(eq(experts.id, id))
       .returning();
     return updated || undefined;
