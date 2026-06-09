@@ -1,16 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Search, Users, Briefcase, DollarSign, X } from "lucide-react";
+import { Link } from "wouter";
+import { Plus, Pencil, Trash2, Search, Users, DollarSign, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -44,7 +44,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -56,6 +55,14 @@ import { format } from "date-fns";
 interface ExpertWithRecruiter extends Expert {
   recruiterName: string | null;
   recruiterEmail: string | null;
+}
+
+interface PaginatedExpertsResponse {
+  data: ExpertWithRecruiter[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 }
 
 interface WorkExperience {
@@ -164,15 +171,57 @@ export default function Experts() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>(["available", "busy", "inactive"]);
   const [rateRange, setRateRange] = useState<[number, number]>([0, 2000]);
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingExpert, setEditingExpert] = useState<Expert | null>(null);
   const [deletingExpert, setDeletingExpert] = useState<Expert | null>(null);
-  const [viewingExpert, setViewingExpert] = useState<ExpertWithRecruiter | null>(null);
   const [workHistory, setWorkHistory] = useState<WorkExperience[]>([]);
 
-  const { data: experts, isLoading } = useQuery<ExpertWithRecruiter[]>({
-    queryKey: ["/api/experts-with-recruiter"],
+  const expertsQueryUrl = (() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+      hourlyRateMin: String(rateRange[0]),
+      hourlyRateMax: String(rateRange[1]),
+    });
+    if (searchQuery.trim()) params.set("search", searchQuery.trim());
+    if (statusFilter.length > 0 && statusFilter.length < statuses.length) {
+      params.set("availabilityStatus", statusFilter.join(","));
+    } else if (statusFilter.length === statuses.length) {
+      params.set("availabilityStatus", statusFilter.join(","));
+    }
+    return `/api/experts-with-recruiter?${params.toString()}`;
+  })();
+
+  const { data: expertsResponse, isLoading } = useQuery<PaginatedExpertsResponse>({
+    queryKey: ["/api/experts-with-recruiter", page, pageSize, searchQuery, statusFilter, rateRange],
+    queryFn: async () => {
+      const res = await apiRequest("GET", expertsQueryUrl);
+      return res.json();
+    },
   });
+
+  const experts = expertsResponse?.data || [];
+  const totalPages = expertsResponse?.totalPages || 1;
+  const totalCount = expertsResponse?.totalCount || 0;
+  const paginationPages = Array.from(
+    new Set(
+      [
+        1,
+        page - 2,
+        page - 1,
+        page,
+        page + 1,
+        page + 2,
+        totalPages,
+      ].filter((pageNumber) => pageNumber >= 1 && pageNumber <= totalPages)
+    )
+  ).sort((a, b) => a - b);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, statusFilter, rateRange]);
 
   const form = useForm<ExpertFormData>({
     resolver: zodResolver(expertFormSchema),
@@ -212,20 +261,10 @@ export default function Experts() {
       return (await res.json()) as Expert;
     },
     onSuccess: (updatedExpert) => {
-      let mergedExpert: ExpertWithRecruiter | null = null;
-      queryClient.setQueryData<ExpertWithRecruiter[]>(["/api/experts-with-recruiter"], (currentExperts) =>
-        currentExperts?.map((expert) => {
-          if (expert.id !== updatedExpert.id) {
-            return expert;
-          }
-          mergedExpert = { ...expert, ...updatedExpert };
-          return mergedExpert;
-        })
-      );
       queryClient.invalidateQueries({ queryKey: ["/api/experts-with-recruiter"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/experts", updatedExpert.id] });
       setIsDialogOpen(false);
       setEditingExpert(null);
-      setViewingExpert(mergedExpert || ({ ...updatedExpert, recruiterName: null, recruiterEmail: null } as ExpertWithRecruiter));
       form.reset();
       toast({ title: "Expert updated successfully" });
     },
@@ -246,23 +285,6 @@ export default function Experts() {
     },
   });
 
-  const filteredExperts = experts?.filter((expert) => {
-    // Search filter
-    const searchMatch =
-      expert.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      expert.expertise.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      expert.industry.toLowerCase().includes(searchQuery.toLowerCase());
-
-    // Status filter
-    const statusMatch = statusFilter.includes(expert.status);
-
-    // Rate range filter
-    const rate = Number(expert.hourlyRate);
-    const rateMatch = rate >= rateRange[0] && rate <= rateRange[1];
-
-    return searchMatch && statusMatch && rateMatch;
-  });
-
   const hasActiveFilters =
     statusFilter.length < statuses.length ||
     rateRange[0] > 0 ||
@@ -276,7 +298,6 @@ export default function Experts() {
   };
 
   const handleOpenDialog = (expert?: Expert) => {
-    setViewingExpert(null);
     if (expert) {
       setEditingExpert(expert);
       const expertWorkHistory = Array.isArray(expert.workHistory)
@@ -306,12 +327,6 @@ export default function Experts() {
     setIsDialogOpen(true);
   };
 
-  const handleViewExpert = (expert: ExpertWithRecruiter) => {
-    setIsDialogOpen(false);
-    setEditingExpert(null);
-    setViewingExpert(expert);
-  };
-
   const onSubmit = (data: ExpertFormData) => {
     const expertData: InsertExpert = {
       ...data,
@@ -328,15 +343,6 @@ export default function Experts() {
     } else {
       createMutation.mutate(expertData);
     }
-  };
-
-  const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
   };
 
   return (
@@ -427,23 +433,16 @@ export default function Experts() {
       </div>
 
       {isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i}>
-              <CardContent className="p-6">
-                <div className="flex items-start gap-4">
-                  <Skeleton className="h-12 w-12 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-3 w-32" />
-                    <Skeleton className="h-3 w-20" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : filteredExperts?.length === 0 ? (
+        <Card>
+          <CardContent className="p-6">
+            <div className="space-y-3">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div key={index} className="h-10 animate-pulse rounded-md bg-muted" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : experts.length === 0 ? (
         <EmptyState
           icon={Users}
           title="No experts found"
@@ -461,79 +460,130 @@ export default function Experts() {
           }
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredExperts?.map((expert) => (
-            <Card
-              key={expert.id}
-              className="cursor-pointer transition-colors hover-elevate"
-              onClick={() => handleViewExpert(expert)}
-              data-testid={`card-expert-${expert.id}`}
-            >
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-4">
-                    <Avatar className="h-12 w-12 border border-border">
-                      <AvatarFallback className="bg-primary/10 text-primary">
-                        {getInitials(expert.name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 space-y-1">
-                      <h3 className="font-medium text-foreground">{expert.name}</h3>
-                      <p className="text-sm text-muted-foreground">{expert.expertise}</p>
-                      <div className="flex items-center gap-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex flex-col gap-1">
+              <CardTitle className="text-base font-medium">Expert Database</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Showing {experts.length} of {totalCount} expert{totalCount === 1 ? "" : "s"}.
+              </p>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[220px] text-xs font-semibold uppercase">Expert Name</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Expertise / Industry</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase">Hourly Rate</TableHead>
+                    <TableHead className="text-center text-xs font-semibold uppercase">Availability Status</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Recruiter</TableHead>
+                    <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {experts.map((expert) => (
+                    <TableRow key={expert.id} data-testid={`row-expert-${expert.id}`}>
+                      <TableCell>
+                        <Link
+                          href={`/experts/${expert.id}`}
+                          className="font-medium text-primary hover:underline"
+                          data-testid={`link-expert-detail-${expert.id}`}
+                        >
+                          {expert.name}
+                        </Link>
+                        <div className="text-xs text-muted-foreground">{expert.jobTitle || expert.company || expert.email}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium">{expert.expertise}</div>
+                        <div className="text-xs text-muted-foreground">{expert.industry}</div>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        <span className="inline-flex items-center justify-end gap-1">
+                          <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+                          {Number(expert.hourlyRate).toFixed(0)}/hr
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
                         <StatusBadge status={expert.status} type="expert" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-1">
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">{expert.recruiterName || "-"}</div>
+                        {expert.sourcedAt && (
+                          <div className="text-xs text-muted-foreground">{format(new Date(expert.sourcedAt), "MMM d, yyyy")}</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleOpenDialog(expert)}
+                            data-testid={`button-edit-expert-${expert.id}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setDeletingExpert(expert)}
+                            data-testid={`button-delete-expert-${expert.id}`}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-muted-foreground">
+                Page {page} of {totalPages}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={page <= 1}
+                  data-testid="button-experts-previous-page"
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" />
+                  Previous
+                </Button>
+                {paginationPages.map((pageNumber, index) => (
+                  <div key={pageNumber} className="flex items-center gap-2">
+                    {index > 0 && paginationPages[index - 1] !== pageNumber - 1 && (
+                      <span className="text-sm text-muted-foreground">...</span>
+                    )}
                     <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenDialog(expert);
-                      }}
-                      data-testid={`button-edit-expert-${expert.id}`}
+                      variant={page === pageNumber ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setPage(pageNumber)}
+                      data-testid={`button-experts-page-${pageNumber}`}
                     >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeletingExpert(expert);
-                      }}
-                      data-testid={`button-delete-expert-${expert.id}`}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                      {pageNumber}
                     </Button>
                   </div>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-4 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-1">
-                    <Briefcase className="h-3.5 w-3.5" />
-                    <span>{expert.industry}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <DollarSign className="h-3.5 w-3.5" />
-                    <span className="font-mono">${Number(expert.hourlyRate).toFixed(0)}/hr</span>
-                  </div>
-                </div>
-                {expert.recruiterName && (
-                  <div className="mt-3 pt-3 border-t border-border">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Recruited by: <span className="font-medium text-foreground">{expert.recruiterName}</span></span>
-                      {expert.sourcedAt && (
-                        <span>{format(new Date(expert.sourcedAt), "MMM d, yyyy")}</span>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  disabled={page >= totalPages}
+                  data-testid="button-experts-next-page"
+                >
+                  Next
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <Dialog
@@ -989,178 +1039,6 @@ export default function Experts() {
               </DialogFooter>
             </form>
           </Form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!viewingExpert} onOpenChange={() => setViewingExpert(null)}>
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Expert Profile</DialogTitle>
-          </DialogHeader>
-          {viewingExpert && (
-            <div className="space-y-6">
-              <div className="flex items-start gap-4">
-                <Avatar className="h-16 w-16 border border-border">
-                  <AvatarFallback className="bg-primary/10 text-lg text-primary">
-                    {getInitials(viewingExpert.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1">
-                  <h3 className="text-xl font-medium">{viewingExpert.name}</h3>
-                  <p className="text-muted-foreground">
-                    {viewingExpert.jobTitle}
-                    {viewingExpert.company && ` at ${viewingExpert.company}`}
-                  </p>
-                  <StatusBadge status={viewingExpert.status} type="expert" />
-                </div>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Email
-                  </p>
-                  <a href={`mailto:${viewingExpert.email}`} className="font-medium text-primary hover:underline">
-                    {viewingExpert.email}
-                  </a>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Phone
-                  </p>
-                  <p className="font-medium">{viewingExpert.phone || "-"}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Company
-                  </p>
-                  <p className="font-medium">{viewingExpert.company || "-"}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Job Title
-                  </p>
-                  <p className="font-medium">{viewingExpert.jobTitle || "-"}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Expertise
-                  </p>
-                  <p className="font-medium">{viewingExpert.expertise}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Industry
-                  </p>
-                  <p className="font-medium">{viewingExpert.industry}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Experience
-                  </p>
-                  <p className="font-medium">{viewingExpert.yearsOfExperience} years</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Hourly Rate
-                  </p>
-                  <p className="font-mono font-medium">
-                    ${Number(viewingExpert.hourlyRate).toFixed(2)}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Status
-                  </p>
-                  <StatusBadge status={viewingExpert.status} type="expert" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    LinkedIn
-                  </p>
-                  {viewingExpert.linkedinUrl ? (
-                    <a
-                      href={viewingExpert.linkedinUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {viewingExpert.linkedinUrl}
-                    </a>
-                  ) : (
-                    <p className="font-medium">-</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Bio</p>
-                <p className="whitespace-pre-wrap text-sm">{viewingExpert.bio || "No bio added yet."}</p>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Work History</p>
-                {Array.isArray(viewingExpert.workHistory) && viewingExpert.workHistory.length > 0 ? (
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Company</TableHead>
-                          <TableHead>Job Title</TableHead>
-                          <TableHead>Years</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(viewingExpert.workHistory as Partial<WorkExperience>[]).map((experience, index) => (
-                          <TableRow key={`${experience.company}-${experience.jobTitle}-${index}`}>
-                            <TableCell>{experience.company}</TableCell>
-                            <TableCell>{experience.jobTitle}</TableCell>
-                            <TableCell>{formatWorkPeriod(experience)}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No work history added yet.</p>
-                )}
-              </div>
-
-              {viewingExpert.recruiterName && (
-                <div className="space-y-2 border-t pt-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Recruitment Info</p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Recruited By</p>
-                      <p className="text-sm font-medium">{viewingExpert.recruiterName}</p>
-                      <p className="text-xs text-muted-foreground">{viewingExpert.recruiterEmail}</p>
-                    </div>
-                    {viewingExpert.sourcedAt && (
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Recruited On</p>
-                        <p className="text-sm font-medium">{format(new Date(viewingExpert.sourcedAt), "MMMM d, yyyy")}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    const expertToEdit = viewingExpert;
-                    setViewingExpert(null);
-                    handleOpenDialog(expertToEdit);
-                  }}
-                  data-testid={`button-edit-viewing-expert-${viewingExpert.id}`}
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Edit Expert
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
 
