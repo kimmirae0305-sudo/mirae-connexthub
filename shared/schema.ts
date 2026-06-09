@@ -69,6 +69,34 @@ export const clientPocs = pgTable("client_pocs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Companies referenced by expert work history (reviewed internally after onboarding)
+export const companies = pgTable("companies", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  normalizedName: text("normalized_name").notNull(),
+  legalName: text("legal_name"),
+  officialWebsite: text("official_website"),
+  linkedinUrl: text("linkedin_url"),
+  country: text("country").notNull(),
+  companyType: text("company_type").notNull(),
+  industry: text("industry"),
+  city: text("city"),
+  description: text("description"),
+  ownershipNotes: text("ownership_notes"),
+  notes: text("notes"),
+  status: text("status").notNull().default("unverified"), // unverified, verified, restricted, dnc
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const companyAliases = pgTable("company_aliases", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  alias: text("alias").notNull(),
+  normalizedAlias: text("normalized_alias").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Projects table (Extended)
 export const projects = pgTable("projects", {
   id: serial("id").primaryKey(),
@@ -122,6 +150,11 @@ export const experts = pgTable("experts", {
   bio: text("bio"),
   workHistory: jsonb("work_history").$type<Array<{
     company: string;
+    rawCompanyName?: string;
+    companyId?: number | null;
+    companyLinkStatus?: "pending_review" | "suggested" | "linked" | "unclear" | "ignored";
+    reviewedBy?: number | null;
+    reviewedAt?: string | null;
     jobTitle: string;
     fromMonth?: number;
     fromYear: number;
@@ -404,6 +437,17 @@ export const clientOrganizationsRelations = relations(clientOrganizations, ({ on
   invoices: many(invoices),
 }));
 
+export const companiesRelations = relations(companies, ({ many }) => ({
+  aliases: many(companyAliases),
+}));
+
+export const companyAliasesRelations = relations(companyAliases, ({ one }) => ({
+  company: one(companies, {
+    fields: [companyAliases.companyId],
+    references: [companies.id],
+  }),
+}));
+
 export const clientPocsRelations = relations(clientPocs, ({ one }) => ({
   organization: one(clientOrganizations, {
     fields: [clientPocs.organizationId],
@@ -657,6 +701,19 @@ export const insertClientPocSchema = createInsertSchema(clientPocs).omit({
   createdAt: true,
 });
 
+export const insertCompanySchema = createInsertSchema(companies).omit({
+  id: true,
+  normalizedName: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertCompanyAliasSchema = createInsertSchema(companyAliases).omit({
+  id: true,
+  normalizedAlias: true,
+  createdAt: true,
+});
+
 export const insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
   createdAt: true,
@@ -790,6 +847,10 @@ export type InsertClientOrganization = z.infer<typeof insertClientOrganizationSc
 
 export type ClientPoc = typeof clientPocs.$inferSelect;
 export type InsertClientPoc = z.infer<typeof insertClientPocSchema>;
+export type Company = typeof companies.$inferSelect;
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
+export type CompanyAlias = typeof companyAliases.$inferSelect;
+export type InsertCompanyAlias = z.infer<typeof insertCompanyAliasSchema>;
 
 export type Project = typeof projects.$inferSelect;
 export type InsertProject = z.infer<typeof insertProjectSchema>;
