@@ -13,6 +13,7 @@ import Projects from "@/pages/projects";
 import ProjectDetail from "@/pages/project-detail";
 import ProjectCreate from "@/pages/project-create";
 import Experts from "@/pages/experts";
+import ExpertDetail from "@/pages/expert-detail";
 import Clients from "@/pages/clients";
 import InsightHub from "@/pages/insight-hub";
 import Consultations from "@/pages/consultations";
@@ -121,6 +122,9 @@ function Router() {
       <Route path="/app/projects">
         <MainLayout><Projects /></MainLayout>
       </Route>
+      <Route path="/app/experts/:id">
+        <MainLayout><ExpertDetail /></MainLayout>
+      </Route>
       <Route path="/app/experts">
         <MainLayout><Experts /></MainLayout>
       </Route>
@@ -156,6 +160,9 @@ function Router() {
       </Route>
       <Route path="/">
         <MainLayout><Dashboard /></MainLayout>
+      </Route>
+      <Route path="/experts/:id">
+        <MainLayout><ExpertDetail /></MainLayout>
       </Route>
       <Route path="/experts">
         <MainLayout><Experts /></MainLayout>

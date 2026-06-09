@@ -32,7 +32,7 @@ import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
 import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles, hashPassword, comparePassword, type AuthRequest } from "./auth";
 import { insertClientSchema } from "@shared/schema";
-import { eq, and, gte, lt, sql, desc, inArray } from "drizzle-orm";
+import { eq, and, gte, lt, sql, desc, inArray, or, ilike } from "drizzle-orm";
 import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
 import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
@@ -4778,7 +4778,46 @@ export async function registerRoutes(
   // GET /api/experts-with-recruiter - Get experts with their recruiter info
   app.get("/api/experts-with-recruiter", authMiddleware, async (req, res) => {
     try {
-      // Get all experts with recruiter info via a join
+      const page = Math.max(parseInt(String(req.query.page || "1"), 10) || 1, 1);
+      const pageSize = Math.min(Math.max(parseInt(String(req.query.pageSize || "25"), 10) || 25, 1), 100);
+      const search = String(req.query.search || "").trim();
+      const availabilityStatus = String(req.query.availabilityStatus || "")
+        .split(",")
+        .map((status) => status.trim())
+        .filter(Boolean);
+      const hourlyRateMin = req.query.hourlyRateMin !== undefined ? Number(req.query.hourlyRateMin) : undefined;
+      const hourlyRateMax = req.query.hourlyRateMax !== undefined ? Number(req.query.hourlyRateMax) : undefined;
+      const conditions = [];
+
+      if (search) {
+        const pattern = `%${search}%`;
+        conditions.push(
+          or(
+            ilike(experts.name, pattern),
+            ilike(experts.expertise, pattern),
+            ilike(experts.industry, pattern),
+            ilike(experts.company, pattern),
+            ilike(experts.jobTitle, pattern)
+          )
+        );
+      }
+      if (availabilityStatus.length > 0) {
+        conditions.push(inArray(experts.status, availabilityStatus));
+      }
+      if (Number.isFinite(hourlyRateMin)) {
+        conditions.push(sql`${experts.hourlyRate} >= ${hourlyRateMin}`);
+      }
+      if (Number.isFinite(hourlyRateMax)) {
+        conditions.push(sql`${experts.hourlyRate} <= ${hourlyRateMax}`);
+      }
+
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const [{ totalCount }] = await db
+        .select({ totalCount: sql<number>`count(*)` })
+        .from(experts)
+        .leftJoin(users, eq(experts.sourcedByRaId, users.id))
+        .where(whereClause);
+
       const expertsWithRecruiter = await db
         .select({
           id: experts.id,
@@ -4807,9 +4846,19 @@ export async function registerRoutes(
         })
         .from(experts)
         .leftJoin(users, eq(experts.sourcedByRaId, users.id))
-        .orderBy(desc(experts.createdAt));
+        .where(whereClause)
+        .orderBy(desc(experts.createdAt))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize);
 
-      res.json(expertsWithRecruiter);
+      const total = Number(totalCount || 0);
+      res.json({
+        data: expertsWithRecruiter,
+        totalCount: total,
+        page,
+        pageSize,
+        totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      });
     } catch (error) {
       console.error("Error fetching experts with recruiter:", error);
       res.status(500).json({ error: "Failed to fetch experts" });
