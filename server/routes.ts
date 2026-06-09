@@ -2747,6 +2747,9 @@ export async function registerRoutes(
       if (!record) {
         return res.status(404).json({ error: "Call record not found" });
       }
+      if (record.status === "completed") {
+        await storage.syncBillableUsageForCallRecord(record.id);
+      }
       res.json(record);
     } catch (error) {
       res.status(500).json({ error: "Failed to update call record" });
@@ -2799,6 +2802,7 @@ export async function registerRoutes(
       if (!record) {
         return res.status(404).json({ error: "Call record not found" });
       }
+      await storage.syncBillableUsageForCallRecord(record.id);
       res.json(record);
     } catch (error) {
       res.status(500).json({ error: "Failed to complete consultation" });

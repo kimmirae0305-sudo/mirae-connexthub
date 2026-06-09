@@ -47,6 +47,7 @@ import {
   type InsertProjectAngle,
   type Expense,
   type InsertExpense,
+  type BillableUsage,
   calculateCU,
 } from "@shared/schema";
 import { db } from "./db";
@@ -497,6 +498,7 @@ export interface IStorage {
 
   // Billable Usage (Finance)
   getBillableUsage(filters: BillableUsageFilters): Promise<BillableUsageReport>;
+  syncBillableUsageForCallRecord(callRecordId: number): Promise<BillableUsage | undefined>;
   syncBillableUsageFromCompletedCalls(): Promise<BillableUsageSyncResult>;
   refreshMissingBillableUsageRates(): Promise<BillableUsageRateRefreshResult>;
 
@@ -1809,6 +1811,79 @@ export class DatabaseStorage implements IStorage {
       },
       rows: mappedRows,
     };
+  }
+
+  async syncBillableUsageForCallRecord(callRecordId: number): Promise<BillableUsage | undefined> {
+    const [row] = await db
+      .select({
+        callRecordId: callRecords.id,
+        clientOrganizationId: projects.clientOrganizationId,
+        projectId: callRecords.projectId,
+        expertId: callRecords.expertId,
+        callDate: callRecords.callDate,
+        cuUsed: callRecords.cuUsed,
+        projectCuRatePerCU: projects.cuRatePerCU,
+        defaultCuRate: clientOrganizations.defaultCuRate,
+        currency: clientOrganizations.currency,
+      })
+      .from(callRecords)
+      .innerJoin(projects, eq(callRecords.projectId, projects.id))
+      .leftJoin(clientOrganizations, eq(projects.clientOrganizationId, clientOrganizations.id))
+      .where(and(eq(callRecords.id, callRecordId), eq(callRecords.status, "completed")));
+
+    if (!row) return undefined;
+
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const cuUsed = Number(row.cuUsed || 0);
+    const projectRate = Number(row.projectCuRatePerCU || 0);
+    const clientRate = Number(row.defaultCuRate || 0);
+    const rate = projectRate > 0 ? projectRate : clientRate > 0 ? clientRate : null;
+    const amount = rate !== null ? round(cuUsed * rate) : null;
+    const values = {
+      callRecordId: row.callRecordId,
+      clientOrganizationId: row.clientOrganizationId,
+      projectId: row.projectId,
+      expertId: row.expertId,
+      callDate: row.callDate,
+      cuUsed: row.cuUsed,
+      currency: row.currency || "USD",
+      cuRate: rate !== null ? rate.toFixed(2) : null,
+      amount: amount !== null ? amount.toFixed(2) : null,
+      status: "unbilled",
+      source: "completed_call_record",
+      updatedAt: new Date(),
+    };
+
+    const [existing] = await db
+      .select()
+      .from(billableUsage)
+      .where(eq(billableUsage.callRecordId, callRecordId));
+
+    if (existing) {
+      if (existing.status !== "unbilled") {
+        return existing;
+      }
+      const [updated] = await db
+        .update(billableUsage)
+        .set(values)
+        .where(and(eq(billableUsage.id, existing.id), eq(billableUsage.status, "unbilled")))
+        .returning();
+      return updated || existing;
+    }
+
+    const [created] = await db
+      .insert(billableUsage)
+      .values(values)
+      .onConflictDoNothing({ target: billableUsage.callRecordId })
+      .returning();
+
+    if (created) return created;
+
+    const [conflicted] = await db
+      .select()
+      .from(billableUsage)
+      .where(eq(billableUsage.callRecordId, callRecordId));
+    return conflicted;
   }
 
   async syncBillableUsageFromCompletedCalls(): Promise<BillableUsageSyncResult> {

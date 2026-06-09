@@ -792,6 +792,8 @@ export default function ProjectDetail() {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billable-usage"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
       setIsCompleteCallModalOpen(false);
       setSelectedCallRecord(null);
       completeCallForm.reset();
@@ -827,6 +829,8 @@ export default function ProjectDetail() {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billable-usage"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
       setIsEditCallModalOpen(false);
       setSelectedCallRecord(null);
       editCallForm.reset();

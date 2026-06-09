@@ -120,6 +120,8 @@ export default function Consultations() {
       apiRequest("POST", `/api/call-records/${selectedCall?.id}/complete`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billable-usage"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
       setIsCompleteDialogOpen(false);
       setSelectedCall(null);
       completeForm.reset();
