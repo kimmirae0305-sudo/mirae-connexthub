@@ -390,6 +390,35 @@ export interface CreateAndLinkCompanyInput extends InsertCompany {
   alias?: string;
 }
 
+export interface CompanyFilters {
+  search?: string;
+  country?: string;
+  companyType?: string;
+  status?: string;
+  dncStatus?: string;
+  verificationStatus?: string;
+}
+
+export interface CompanyListRow extends Company {
+  linkedExpertsCount: number;
+}
+
+export interface CompanyLinkedExpertRow {
+  expertId: number;
+  expertName: string;
+  expertEmail: string;
+  workHistoryIndex: number;
+  rawCompanyName: string;
+  jobTitle: string | null;
+  fromYear: string | null;
+  toYear: string | null;
+}
+
+export interface CompanyDetail {
+  company: CompanyListRow;
+  linkedExperts: CompanyLinkedExpertRow[];
+}
+
 export interface IStorage {
   // Users (Employees)
   getUsers(): Promise<User[]>;
@@ -415,9 +444,11 @@ export interface IStorage {
   deleteClientOrganization(id: number): Promise<boolean>;
 
   // Companies (expert work history review)
-  getCompanies(query?: string): Promise<Company[]>;
+  getCompanies(queryOrFilters?: string | CompanyFilters): Promise<CompanyListRow[]>;
   getCompany(id: number): Promise<Company | undefined>;
+  getCompanyDetail(id: number): Promise<CompanyDetail | undefined>;
   createCompany(company: InsertCompany): Promise<Company>;
+  updateCompany(id: number, company: Partial<InsertCompany>): Promise<Company | undefined>;
   getExpertCompanyReview(expertId: number): Promise<ExpertCompanyReview | undefined>;
   linkExpertWorkHistoryCompany(expertId: number, workHistoryIndex: number, companyId: number, reviewedBy: number): Promise<Expert | undefined>;
   createCompanyAndLinkExpertWorkHistory(
@@ -754,26 +785,73 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
-  // Companies (expert work history review)
-  async getCompanies(query?: string): Promise<Company[]> {
-    if (query?.trim()) {
-      const normalizedQuery = normalizeCompanyName(query);
-      const pattern = `%${query.trim()}%`;
-      const normalizedPattern = `%${normalizedQuery}%`;
-      return db
-        .select()
-        .from(companies)
-        .where(
-          or(
-            ilike(companies.name, pattern),
-            ilike(companies.legalName, pattern),
-            ilike(companies.officialWebsite, pattern),
-            ilike(companies.normalizedName, normalizedPattern)
-          )
-        )
-        .orderBy(companies.name);
+  private async getLinkedExpertsByCompanyId(companyId?: number): Promise<Map<number, CompanyLinkedExpertRow[]>> {
+    const expertRows = await db
+      .select({
+        id: experts.id,
+        name: experts.name,
+        email: experts.email,
+        workHistory: experts.workHistory,
+      })
+      .from(experts)
+      .orderBy(experts.name);
+
+    const linkedByCompanyId = new Map<number, CompanyLinkedExpertRow[]>();
+    for (const expert of expertRows) {
+      const workHistory = normalizeExpertWorkHistory(expert.workHistory) as any[];
+      for (const [index, item] of workHistory.entries()) {
+        const linkedCompanyId = Number(item.companyId || 0);
+        if (!linkedCompanyId || (companyId && linkedCompanyId !== companyId)) continue;
+
+        const row: CompanyLinkedExpertRow = {
+          expertId: expert.id,
+          expertName: expert.name,
+          expertEmail: expert.email,
+          workHistoryIndex: index,
+          rawCompanyName: String(item.rawCompanyName || item.company || "").trim(),
+          jobTitle: item.jobTitle ? String(item.jobTitle) : null,
+          fromYear: item.fromYear ? String(item.fromYear) : null,
+          toYear: item.toYear ? String(item.toYear) : null,
+        };
+        linkedByCompanyId.set(linkedCompanyId, [...(linkedByCompanyId.get(linkedCompanyId) || []), row]);
+      }
     }
-    return db.select().from(companies).orderBy(companies.name);
+
+    return linkedByCompanyId;
+  }
+
+  // Companies (expert work history review)
+  async getCompanies(queryOrFilters?: string | CompanyFilters): Promise<CompanyListRow[]> {
+    const filters: CompanyFilters = typeof queryOrFilters === "string" ? { search: queryOrFilters } : (queryOrFilters || {});
+    const conditions = [];
+    if (filters.search?.trim()) {
+      const normalizedQuery = normalizeCompanyName(filters.search);
+      const pattern = `%${filters.search.trim()}%`;
+      const normalizedPattern = `%${normalizedQuery}%`;
+      conditions.push(
+        or(
+          ilike(companies.name, pattern),
+          ilike(companies.legalName, pattern),
+          ilike(companies.officialWebsite, pattern),
+          ilike(companies.normalizedName, normalizedPattern)
+        )
+      );
+    }
+    if (filters.country?.trim()) conditions.push(eq(companies.country, filters.country.trim()));
+    if (filters.companyType?.trim()) conditions.push(eq(companies.companyType, filters.companyType.trim()));
+    if (filters.status?.trim()) conditions.push(eq(companies.status, filters.status.trim()));
+    if (filters.dncStatus?.trim()) conditions.push(eq(companies.dncStatus, filters.dncStatus.trim()));
+    if (filters.verificationStatus?.trim()) conditions.push(eq(companies.verificationStatus, filters.verificationStatus.trim()));
+
+    const companyRows = conditions.length > 0
+      ? await db.select().from(companies).where(and(...conditions)).orderBy(companies.name)
+      : await db.select().from(companies).orderBy(companies.name);
+
+    const linkedByCompanyId = await this.getLinkedExpertsByCompanyId();
+    return companyRows.map((company) => ({
+      ...company,
+      linkedExpertsCount: linkedByCompanyId.get(company.id)?.length || 0,
+    }));
   }
 
   async getCompany(id: number): Promise<Company | undefined> {
@@ -781,8 +859,21 @@ export class DatabaseStorage implements IStorage {
     return company || undefined;
   }
 
+  async getCompanyDetail(id: number): Promise<CompanyDetail | undefined> {
+    const company = await this.getCompany(id);
+    if (!company) return undefined;
+    const linkedByCompanyId = await this.getLinkedExpertsByCompanyId(id);
+    return {
+      company: {
+        ...company,
+        linkedExpertsCount: linkedByCompanyId.get(company.id)?.length || 0,
+      },
+      linkedExperts: linkedByCompanyId.get(company.id) || [],
+    };
+  }
+
   async createCompany(company: InsertCompany): Promise<Company> {
-    if (String(company.status || "").toLowerCase() === "verified" && !String(company.officialWebsite || "").trim()) {
+    if (String(company.verificationStatus || "").toLowerCase() === "verified" && !String(company.officialWebsite || "").trim()) {
       throw new Error("Official website is required for verified companies.");
     }
 
@@ -799,10 +890,45 @@ export class DatabaseStorage implements IStorage {
         description: company.description?.trim() || null,
         ownershipNotes: company.ownershipNotes?.trim() || null,
         notes: company.notes?.trim() || null,
+        status: company.status || "active",
+        dncStatus: company.dncStatus || "none",
+        verificationStatus: company.verificationStatus || "unverified",
       })
       .returning();
 
     return createdCompany;
+  }
+
+  async updateCompany(id: number, company: Partial<InsertCompany>): Promise<Company | undefined> {
+    if (String(company.verificationStatus || "").toLowerCase() === "verified" && !String(company.officialWebsite || "").trim()) {
+      const existing = await this.getCompany(id);
+      if (!String(existing?.officialWebsite || "").trim()) {
+        throw new Error("Official website is required for verified companies.");
+      }
+    }
+
+    const updatePayload: Partial<InsertCompany> = {
+      ...company,
+      ...(company.name !== undefined ? { normalizedName: normalizeCompanyName(company.name) } : {}),
+      ...(company.officialWebsite !== undefined ? { officialWebsite: company.officialWebsite?.trim() || null } : {}),
+      ...(company.linkedinUrl !== undefined ? { linkedinUrl: company.linkedinUrl?.trim() || null } : {}),
+      ...(company.legalName !== undefined ? { legalName: company.legalName?.trim() || null } : {}),
+      ...(company.industry !== undefined ? { industry: company.industry?.trim() || null } : {}),
+      ...(company.city !== undefined ? { city: company.city?.trim() || null } : {}),
+      ...(company.description !== undefined ? { description: company.description?.trim() || null } : {}),
+      ...(company.ownershipNotes !== undefined ? { ownershipNotes: company.ownershipNotes?.trim() || null } : {}),
+      ...(company.notes !== undefined ? { notes: company.notes?.trim() || null } : {}),
+    };
+
+    const [updatedCompany] = await db
+      .update(companies)
+      .set({
+        ...updatePayload,
+        updatedAt: new Date(),
+      })
+      .where(eq(companies.id, id))
+      .returning();
+    return updatedCompany || undefined;
   }
 
   private async getCompanySuggestions(rawCompanyName: string): Promise<CompanySuggestion[]> {

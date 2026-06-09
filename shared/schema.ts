@@ -84,7 +84,9 @@ export const companies = pgTable("companies", {
   description: text("description"),
   ownershipNotes: text("ownership_notes"),
   notes: text("notes"),
-  status: text("status").notNull().default("unverified"), // unverified, verified, restricted, dnc
+  status: text("status").notNull().default("active"), // active, restricted, dnc, archived
+  dncStatus: text("dnc_status").notNull().default("none"), // none, do_not_contact, consent_required, legal_hold
+  verificationStatus: text("verification_status").notNull().default("unverified"), // unverified, verified, needs_review
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
