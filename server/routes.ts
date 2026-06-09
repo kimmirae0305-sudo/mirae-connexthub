@@ -3635,6 +3635,8 @@ export async function registerRoutes(
   });
 
   // ==================== INVOICES (FINANCE DRAFT LAYER) ====================
+  const CRM_DISPLAY_TIME_ZONE = "America/Sao_Paulo";
+
   const normalizeInvoiceDateOnly = (value: Date | string | null | undefined) => {
     if (!value) return "";
     if (value instanceof Date) {
@@ -3675,9 +3677,24 @@ export async function registerRoutes(
     const normalizedStart = normalizeInvoiceDateOnly(start);
     const normalizedEnd = normalizeInvoiceDateOnly(end);
     if (!normalizedStart && !normalizedEnd) return "-";
-    if (!normalizedEnd || normalizedStart === normalizedEnd) return formatInvoiceDateOnly(normalizedStart);
+    if (!normalizedEnd) return formatInvoiceDateOnly(normalizedStart);
     if (!normalizedStart) return formatInvoiceDateOnly(normalizedEnd);
     return `${formatInvoiceDateOnly(normalizedStart)} - ${formatInvoiceDateOnly(normalizedEnd)}`;
+  };
+
+  const formatInvoiceTimestampBRT = (value: Date | string | null | undefined) => {
+    if (!value) return "-";
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return "-";
+    return `${new Intl.DateTimeFormat("en-US", {
+      timeZone: CRM_DISPLAY_TIME_ZONE,
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(date)} BRT`;
   };
 
   app.get("/api/invoices", authMiddleware, requireRoles("admin", "finance"), async (_req, res) => {
@@ -3795,7 +3812,7 @@ export async function registerRoutes(
         .font("Helvetica")
         .fontSize(9)
         .fillColor(brandMuted)
-        .text(`Issue Date: ${formatInvoiceDateOnly(invoice.issuedAt || invoice.invoiceDate)}`, rightEdge - 250, headerTop + 49, { width: 250, align: "right" });
+        .text(`Issue Date: ${formatInvoiceTimestampBRT(invoice.issuedAt || invoice.invoiceDate)}`, rightEdge - 250, headerTop + 49, { width: 250, align: "right" });
       doc
         .font("Helvetica")
         .fontSize(9)
@@ -3828,7 +3845,7 @@ export async function registerRoutes(
       doc.roundedRect(summaryX, panelTop, panelWidth, panelHeight, 6).strokeColor(brandLine).lineWidth(1).stroke();
       const summaryRows = [
         ["Billing Period", invoicePeriod],
-        ["Issue Date", formatInvoiceDateOnly(invoice.issuedAt || invoice.invoiceDate)],
+        ["Issue Date", formatInvoiceTimestampBRT(invoice.issuedAt || invoice.invoiceDate)],
         ["Currency", "USD"],
         ["Total", formatUsd(invoice.total)],
       ];
