@@ -72,6 +72,12 @@ const networkItems: NavItem[] = [
     icon: Building2,
     pageKey: "clients",
   },
+  {
+    title: "Companies",
+    url: "/companies",
+    icon: Briefcase,
+    pageKey: "companies",
+  },
 ];
 
 const intelligenceItems: NavItem[] = [

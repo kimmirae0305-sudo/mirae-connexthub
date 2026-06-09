@@ -5,6 +5,7 @@ export type PageKey =
   | "projects"
   | "experts"
   | "clients"
+  | "companies"
   | "insight-hub"
   | "consultations"
   | "usage"
@@ -41,6 +42,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "projects",
     "experts",
     "clients",
+    "companies",
     "insight-hub",
     "consultations",
     "usage",
@@ -60,6 +62,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "projects",
     "experts",
     "clients",
+    "companies",
     "insight-hub",
     "consultations",
     "usage",
@@ -79,6 +82,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "projects",
     "experts",
     "clients",
+    "companies",
     "insight-hub",
     "consultations",
     "usage",
@@ -98,6 +102,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "projects",
     "experts",
     "clients",
+    "companies",
     "consultations",
     "invites",
     "ra-performance",
@@ -107,6 +112,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "projects",
     "experts",
     "clients",
+    "companies",
     "consultations",
     "invites",
   ],
@@ -129,6 +135,7 @@ export const PAGE_TO_ROUTE: Record<PageKey, string> = {
   projects: "/projects",
   experts: "/experts",
   clients: "/clients",
+  companies: "/companies",
   "insight-hub": "/insight-hub",
   consultations: "/consultations",
   usage: "/usage",
@@ -149,6 +156,7 @@ export const ROUTE_TO_PAGE: Record<string, PageKey> = {
   "/projects": "projects",
   "/experts": "experts",
   "/clients": "clients",
+  "/companies": "companies",
   "/insight-hub": "insight-hub",
   "/consultations": "consultations",
   "/usage": "usage",

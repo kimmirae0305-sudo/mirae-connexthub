@@ -1832,12 +1832,47 @@ export async function registerRoutes(
 
   app.get("/api/companies", authMiddleware, async (req, res) => {
     try {
-      const companies = await storage.getCompanies(req.query.search as string | undefined);
+      const companies = await storage.getCompanies({
+        search: req.query.search as string | undefined,
+        country: req.query.country as string | undefined,
+        companyType: req.query.companyType as string | undefined,
+        status: req.query.status as string | undefined,
+        dncStatus: req.query.dncStatus as string | undefined,
+        verificationStatus: req.query.verificationStatus as string | undefined,
+      });
       res.json(companies);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch companies" });
     }
   });
+
+  app.get("/api/companies/:id", authMiddleware, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Company id is required" });
+      }
+      const company = await storage.getCompanyDetail(id);
+      if (!company) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      res.json(company);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch company" });
+    }
+  });
+
+  const normalizeCompanyAccessRole = (role?: string | null) => {
+    const normalized = String(role || "").toLowerCase().trim();
+    if (normalized === "administrator") return "admin";
+    if (normalized === "chief executive officer") return "ceo";
+    if (normalized === "chief operating officer") return "coo";
+    if (normalized === "research associate") return "ra";
+    if (normalized === "project manager") return "pm";
+    return normalized;
+  };
+  const hasCompanyComplianceAccess = (role?: string | null) =>
+    ["admin", "ceo", "coo"].includes(normalizeCompanyAccessRole(role));
 
   app.post("/api/companies", authMiddleware, requireRoles("admin", "ceo", "coo", "ra"), async (req, res) => {
     try {
@@ -1845,13 +1880,57 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
-      if (String(result.data.status || "").toLowerCase() === "verified" && !String(result.data.officialWebsite || "").trim()) {
+      if (String(result.data.verificationStatus || "").toLowerCase() === "verified" && !String(result.data.officialWebsite || "").trim()) {
         return res.status(400).json({ error: "Official website is required for verified companies" });
+      }
+      if (
+        !hasCompanyComplianceAccess((req as AuthRequest).user?.role) &&
+        (
+          ["restricted", "dnc"].includes(String(result.data.status || "")) ||
+          ["do_not_contact", "consent_required", "legal_hold"].includes(String(result.data.dncStatus || ""))
+        )
+      ) {
+        return res.status(403).json({ error: "Only Admin, CEO, or COO users can set restricted, DNC, consent required, or legal hold statuses." });
       }
       const company = await storage.createCompany(result.data);
       res.status(201).json(company);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create company";
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.patch("/api/companies/:id", authMiddleware, requireRoles("admin", "ceo", "coo", "ra"), async (req: AuthRequest, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Company id is required" });
+      }
+      const result = insertCompanySchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+      const existing = await storage.getCompany(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      const nextVerificationStatus = result.data.verificationStatus ?? existing.verificationStatus;
+      const nextOfficialWebsite = result.data.officialWebsite ?? existing.officialWebsite;
+      if (String(nextVerificationStatus || "").toLowerCase() === "verified" && !String(nextOfficialWebsite || "").trim()) {
+        return res.status(400).json({ error: "Official website is required for verified companies" });
+      }
+
+      const complianceChanging =
+        (result.data.status !== undefined && result.data.status !== existing.status) ||
+        (result.data.dncStatus !== undefined && result.data.dncStatus !== existing.dncStatus);
+      if (complianceChanging && !hasCompanyComplianceAccess(req.user?.role)) {
+        return res.status(403).json({ error: "Only Admin, CEO, or COO users can update restricted, DNC, consent required, or legal hold statuses." });
+      }
+
+      const company = await storage.updateCompany(id, result.data);
+      res.json(company);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to update company";
       res.status(400).json({ error: message });
     }
   });
@@ -1896,7 +1975,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
-      if (String(result.data.status || "").toLowerCase() === "verified" && !String(result.data.officialWebsite || "").trim()) {
+      if (String(result.data.verificationStatus || "").toLowerCase() === "verified" && !String(result.data.officialWebsite || "").trim()) {
         return res.status(400).json({ error: "Official website is required for verified companies" });
       }
       const linked = await storage.createCompanyAndLinkExpertWorkHistory(

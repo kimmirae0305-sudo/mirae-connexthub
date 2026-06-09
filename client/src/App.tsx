@@ -15,6 +15,7 @@ import ProjectCreate from "@/pages/project-create";
 import Experts from "@/pages/experts";
 import ExpertDetail from "@/pages/expert-detail";
 import Clients from "@/pages/clients";
+import Companies from "@/pages/companies";
 import InsightHub from "@/pages/insight-hub";
 import Consultations from "@/pages/consultations";
 import Usage from "@/pages/usage";
@@ -129,7 +130,7 @@ function Router() {
         <MainLayout><Experts /></MainLayout>
       </Route>
       <Route path="/app/companies">
-        <MainLayout><Clients /></MainLayout>
+        <MainLayout><Companies /></MainLayout>
       </Route>
       <Route path="/app/consultations">
         <MainLayout><Consultations /></MainLayout>
@@ -172,6 +173,9 @@ function Router() {
       </Route>
       <Route path="/clients">
         <MainLayout><Clients /></MainLayout>
+      </Route>
+      <Route path="/companies">
+        <MainLayout><Companies /></MainLayout>
       </Route>
       <Route path="/insight-hub">
         <MainLayout><InsightHub /></MainLayout>
