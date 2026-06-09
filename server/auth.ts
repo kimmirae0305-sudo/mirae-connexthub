@@ -77,7 +77,19 @@ export function requireRoles(...allowedRoles: string[]) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const normalizeRole = (role: string) => {
+      const normalized = role.toLowerCase().trim();
+      if (normalized === "administrator") return "admin";
+      if (normalized === "research associate") return "ra";
+      if (normalized === "project manager") return "pm";
+      if (normalized === "chief executive officer") return "ceo";
+      if (normalized === "chief operating officer") return "coo";
+      return normalized;
+    };
+
+    const userRole = normalizeRole(req.user.role);
+    const normalizedAllowedRoles = allowedRoles.map(normalizeRole);
+    if (!normalizedAllowedRoles.includes(userRole)) {
       return res.status(403).json({ error: "Forbidden - Insufficient permissions" });
     }
 

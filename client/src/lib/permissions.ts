@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "pm" | "ra" | "finance";
+export type UserRole = "admin" | "ceo" | "coo" | "pm" | "ra" | "finance";
 
 export type PageKey = 
   | "dashboard"
@@ -29,12 +29,52 @@ export function normalizeRole(dbRole: string | null | undefined): UserRole | und
   if (normalized === "research associate" || normalized === "ra") return "ra";
   if (normalized === "pm" || normalized === "project manager") return "pm";
   if (normalized === "admin" || normalized === "administrator") return "admin";
+  if (normalized === "ceo" || normalized === "chief executive officer") return "ceo";
+  if (normalized === "coo" || normalized === "chief operating officer") return "coo";
   if (normalized === "finance") return "finance";
   return undefined;
 }
 
 export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
   admin: [
+    "dashboard",
+    "projects",
+    "experts",
+    "clients",
+    "insight-hub",
+    "consultations",
+    "usage",
+    "billable-usage",
+    "contracts",
+    "invoices",
+    "expenses",
+    "analytics",
+    "pm-performance",
+    "employees",
+    "invites",
+    "ra-performance",
+    "settings",
+  ],
+  ceo: [
+    "dashboard",
+    "projects",
+    "experts",
+    "clients",
+    "insight-hub",
+    "consultations",
+    "usage",
+    "billable-usage",
+    "contracts",
+    "invoices",
+    "expenses",
+    "analytics",
+    "pm-performance",
+    "employees",
+    "invites",
+    "ra-performance",
+    "settings",
+  ],
+  coo: [
     "dashboard",
     "projects",
     "experts",
