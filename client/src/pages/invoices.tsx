@@ -124,6 +124,7 @@ interface BillableUsageResponse {
 }
 
 const ELIGIBLE_BILLABLE_USAGE_URL = "/api/billable-usage?status=unbilled";
+const CRM_DISPLAY_TIME_ZONE = "America/Sao_Paulo";
 
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})/;
 
@@ -138,7 +139,7 @@ const normalizeDateOnly = (value: string | null | undefined) => {
   return Number.isNaN(date.getTime()) ? "" : format(date, "yyyy-MM-dd");
 };
 
-const formatDate = (value: string | null | undefined) => {
+const formatDateOnly = (value: string | null | undefined) => {
   const normalizedDate = normalizeDateOnly(value);
   if (!normalizedDate) return "-";
   const [year, month, day] = normalizedDate.split("-").map(Number);
@@ -150,19 +151,27 @@ const formatDateInput = (value: string | null | undefined) => {
   return normalizedDate;
 };
 
-const formatDateTime = (value: string | null | undefined) => {
+const formatDateTimeBRT = (value: string | null | undefined) => {
   if (!value) return "-";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM dd, yyyy h:mm a");
+  if (Number.isNaN(date.getTime())) return "-";
+  return `${new Intl.DateTimeFormat("en-US", {
+    timeZone: CRM_DISPLAY_TIME_ZONE,
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date)} BRT`;
 };
 
-const formatInvoicePeriod = (start: string | null | undefined, end: string | null | undefined) => {
-  const formattedStart = formatDate(start);
-  const formattedEnd = formatDate(end);
+const formatBillingPeriodRange = (start: string | null | undefined, end: string | null | undefined) => {
+  const formattedStart = formatDateOnly(start);
+  const formattedEnd = formatDateOnly(end);
   if (formattedStart === "-" && formattedEnd === "-") return "-";
   if (formattedStart === "-") return formattedEnd;
   if (formattedEnd === "-") return formattedStart;
-  if (formattedStart === formattedEnd) return formattedStart;
   return `${formattedStart} - ${formattedEnd}`;
 };
 
@@ -676,7 +685,7 @@ export default function Invoices() {
                         </div>
                       </TableCell>
                       <TableCell className="font-medium">{invoice.clientName}</TableCell>
-                      <TableCell>{formatInvoicePeriod(invoice.periodStart, invoice.periodEnd)}</TableCell>
+                      <TableCell>{formatBillingPeriodRange(invoice.periodStart, invoice.periodEnd)}</TableCell>
                       <TableCell className="text-right font-mono font-medium">{formatMoney(invoice.total)}</TableCell>
                       <TableCell className="text-center">
                         <Badge
@@ -686,10 +695,10 @@ export default function Invoices() {
                           {formatInvoiceStatus(invoice.status)}
                         </Badge>
                       </TableCell>
-                      <TableCell>{formatDateTime(invoice.createdAt)}</TableCell>
-                      <TableCell>{formatDateTime(invoice.issuedAt)}</TableCell>
-                      <TableCell>{formatDateTime(invoice.sentAt)}</TableCell>
-                      <TableCell>{formatDateTime(invoice.paidAt)}</TableCell>
+                      <TableCell>{formatDateTimeBRT(invoice.createdAt)}</TableCell>
+                      <TableCell>{formatDateTimeBRT(invoice.issuedAt)}</TableCell>
+                      <TableCell>{formatDateTimeBRT(invoice.sentAt)}</TableCell>
+                      <TableCell>{formatDateTimeBRT(invoice.paidAt)}</TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="outline"
@@ -868,7 +877,7 @@ export default function Invoices() {
                           data-testid={`checkbox-billable-usage-${row.id}`}
                         />
                       </TableCell>
-                      <TableCell>{formatDate(row.callDate)}</TableCell>
+                      <TableCell>{formatDateOnly(row.callDate)}</TableCell>
                       <TableCell>{row.clientName}</TableCell>
                       <TableCell>{row.projectName}</TableCell>
                       <TableCell>{row.expertName}</TableCell>
@@ -914,7 +923,7 @@ export default function Invoices() {
                       {formatInvoiceStatus(selectedInvoice.invoice.status)}
                     </Badge>
                     <span className="text-sm text-muted-foreground">
-                      Created {formatDateTime(selectedInvoice.invoice.createdAt)}
+                      Created {formatDateTimeBRT(selectedInvoice.invoice.createdAt)}
                     </span>
                   </div>
                 )}
@@ -1044,7 +1053,7 @@ export default function Invoices() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-xs uppercase text-muted-foreground">Billing Period</div>
-                    <div className="mt-1 font-medium">{formatInvoicePeriod(selectedInvoice.invoice.periodStart, selectedInvoice.invoice.periodEnd)}</div>
+                    <div className="mt-1 font-medium">{formatBillingPeriodRange(selectedInvoice.invoice.periodStart, selectedInvoice.invoice.periodEnd)}</div>
                   </CardContent>
                 </Card>
                 <Card>
@@ -1066,12 +1075,12 @@ export default function Invoices() {
                     </div>
                     <div className="mt-1 font-medium">
                       {selectedInvoice.invoice.paidAt
-                        ? formatDateTime(selectedInvoice.invoice.paidAt)
+                        ? formatDateTimeBRT(selectedInvoice.invoice.paidAt)
                         : selectedInvoice.invoice.sentAt
-                        ? formatDateTime(selectedInvoice.invoice.sentAt)
+                        ? formatDateTimeBRT(selectedInvoice.invoice.sentAt)
                         : selectedInvoice.invoice.issuedAt
-                        ? formatDateTime(selectedInvoice.invoice.issuedAt)
-                        : formatDateTime(selectedInvoice.invoice.createdAt)}
+                        ? formatDateTimeBRT(selectedInvoice.invoice.issuedAt)
+                        : formatDateTimeBRT(selectedInvoice.invoice.createdAt)}
                     </div>
                   </CardContent>
                 </Card>
@@ -1150,7 +1159,7 @@ export default function Invoices() {
                       <TableBody>
                         {selectedInvoice.lineItems.map((item) => (
                           <TableRow key={item.id}>
-                            <TableCell>{formatDate(item.serviceDate)}</TableCell>
+                            <TableCell>{formatDateOnly(item.serviceDate)}</TableCell>
                             <TableCell className="font-medium">{item.projectName}</TableCell>
                             <TableCell>{item.expertName}</TableCell>
                             <TableCell className="text-right font-mono">{formatCu(item.cuUsed)}</TableCell>
