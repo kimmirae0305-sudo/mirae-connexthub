@@ -147,8 +147,8 @@ export interface InvoiceListRow {
   clientOrganizationId: number;
   clientName: string;
   invoiceDate: Date;
-  periodStart: Date | null;
-  periodEnd: Date | null;
+  periodStart: string | null;
+  periodEnd: string | null;
   currency: string;
   subtotal: string;
   total: string;
@@ -176,7 +176,7 @@ export interface InvoiceLineItemRow {
   invoiceId: number;
   billableUsageId: number;
   description: string;
-  serviceDate: Date;
+  serviceDate: string;
   projectId: number;
   projectName: string;
   expertId: number;
@@ -2051,8 +2051,8 @@ export class DatabaseStorage implements IStorage {
         clientOrganizationId: invoices.clientOrganizationId,
         clientName: clientOrganizations.name,
         invoiceDate: invoices.invoiceDate,
-        periodStart: invoices.periodStart,
-        periodEnd: invoices.periodEnd,
+        periodStart: sql<string | null>`to_char(${invoices.periodStart}, 'YYYY-MM-DD')`,
+        periodEnd: sql<string | null>`to_char(${invoices.periodEnd}, 'YYYY-MM-DD')`,
         currency: invoices.currency,
         subtotal: invoices.subtotal,
         total: invoices.total,
@@ -2101,8 +2101,8 @@ export class DatabaseStorage implements IStorage {
         clientOrganizationId: invoices.clientOrganizationId,
         clientName: clientOrganizations.name,
         invoiceDate: invoices.invoiceDate,
-        periodStart: invoices.periodStart,
-        periodEnd: invoices.periodEnd,
+        periodStart: sql<string | null>`to_char(${invoices.periodStart}, 'YYYY-MM-DD')`,
+        periodEnd: sql<string | null>`to_char(${invoices.periodEnd}, 'YYYY-MM-DD')`,
         currency: invoices.currency,
         subtotal: invoices.subtotal,
         total: invoices.total,
@@ -2135,7 +2135,7 @@ export class DatabaseStorage implements IStorage {
         invoiceId: invoiceLineItems.invoiceId,
         billableUsageId: invoiceLineItems.billableUsageId,
         description: invoiceLineItems.description,
-        serviceDate: invoiceLineItems.serviceDate,
+        serviceDate: sql<string>`to_char(${invoiceLineItems.serviceDate}, 'YYYY-MM-DD')`,
         projectId: invoiceLineItems.projectId,
         projectName: projects.name,
         expertId: invoiceLineItems.expertId,
@@ -2328,8 +2328,8 @@ export class DatabaseStorage implements IStorage {
           clientOrganizationId: invoices.clientOrganizationId,
           clientName: clientOrganizations.name,
           invoiceDate: invoices.invoiceDate,
-          periodStart: invoices.periodStart,
-          periodEnd: invoices.periodEnd,
+          periodStart: sql<string | null>`to_char(${invoices.periodStart}, 'YYYY-MM-DD')`,
+          periodEnd: sql<string | null>`to_char(${invoices.periodEnd}, 'YYYY-MM-DD')`,
           currency: invoices.currency,
           subtotal: invoices.subtotal,
           total: invoices.total,
@@ -2364,7 +2364,7 @@ export class DatabaseStorage implements IStorage {
           invoiceId: invoiceLineItems.invoiceId,
           billableUsageId: invoiceLineItems.billableUsageId,
           description: invoiceLineItems.description,
-          serviceDate: invoiceLineItems.serviceDate,
+          serviceDate: sql<string>`to_char(${invoiceLineItems.serviceDate}, 'YYYY-MM-DD')`,
           projectId: invoiceLineItems.projectId,
           projectName: projects.name,
           expertId: invoiceLineItems.expertId,
@@ -2476,8 +2476,8 @@ export class DatabaseStorage implements IStorage {
           clientOrganizationId: invoices.clientOrganizationId,
           clientName: clientOrganizations.name,
           invoiceDate: invoices.invoiceDate,
-          periodStart: invoices.periodStart,
-          periodEnd: invoices.periodEnd,
+          periodStart: sql<string | null>`to_char(${invoices.periodStart}, 'YYYY-MM-DD')`,
+          periodEnd: sql<string | null>`to_char(${invoices.periodEnd}, 'YYYY-MM-DD')`,
           currency: invoices.currency,
           subtotal: invoices.subtotal,
           total: invoices.total,
@@ -2512,7 +2512,7 @@ export class DatabaseStorage implements IStorage {
           invoiceId: invoiceLineItems.invoiceId,
           billableUsageId: invoiceLineItems.billableUsageId,
           description: invoiceLineItems.description,
-          serviceDate: invoiceLineItems.serviceDate,
+          serviceDate: sql<string>`to_char(${invoiceLineItems.serviceDate}, 'YYYY-MM-DD')`,
           projectId: invoiceLineItems.projectId,
           projectName: projects.name,
           expertId: invoiceLineItems.expertId,
@@ -2632,8 +2632,8 @@ export class DatabaseStorage implements IStorage {
           clientOrganizationId: invoices.clientOrganizationId,
           clientName: clientOrganizations.name,
           invoiceDate: invoices.invoiceDate,
-          periodStart: invoices.periodStart,
-          periodEnd: invoices.periodEnd,
+          periodStart: sql<string | null>`to_char(${invoices.periodStart}, 'YYYY-MM-DD')`,
+          periodEnd: sql<string | null>`to_char(${invoices.periodEnd}, 'YYYY-MM-DD')`,
           currency: invoices.currency,
           subtotal: invoices.subtotal,
           total: invoices.total,
@@ -2668,7 +2668,7 @@ export class DatabaseStorage implements IStorage {
           invoiceId: invoiceLineItems.invoiceId,
           billableUsageId: invoiceLineItems.billableUsageId,
           description: invoiceLineItems.description,
-          serviceDate: invoiceLineItems.serviceDate,
+          serviceDate: sql<string>`to_char(${invoiceLineItems.serviceDate}, 'YYYY-MM-DD')`,
           projectId: invoiceLineItems.projectId,
           projectName: projects.name,
           expertId: invoiceLineItems.expertId,
@@ -2752,8 +2752,8 @@ export class DatabaseStorage implements IStorage {
           clientOrganizationId: invoices.clientOrganizationId,
           clientName: clientOrganizations.name,
           invoiceDate: invoices.invoiceDate,
-          periodStart: invoices.periodStart,
-          periodEnd: invoices.periodEnd,
+          periodStart: sql<string | null>`to_char(${invoices.periodStart}, 'YYYY-MM-DD')`,
+          periodEnd: sql<string | null>`to_char(${invoices.periodEnd}, 'YYYY-MM-DD')`,
           currency: invoices.currency,
           subtotal: invoices.subtotal,
           total: invoices.total,
@@ -2788,7 +2788,7 @@ export class DatabaseStorage implements IStorage {
           invoiceId: invoiceLineItems.invoiceId,
           billableUsageId: invoiceLineItems.billableUsageId,
           description: invoiceLineItems.description,
-          serviceDate: invoiceLineItems.serviceDate,
+          serviceDate: sql<string>`to_char(${invoiceLineItems.serviceDate}, 'YYYY-MM-DD')`,
           projectId: invoiceLineItems.projectId,
           projectName: projects.name,
           expertId: invoiceLineItems.expertId,
@@ -2871,8 +2871,8 @@ export class DatabaseStorage implements IStorage {
           clientOrganizationId: invoices.clientOrganizationId,
           clientName: clientOrganizations.name,
           invoiceDate: invoices.invoiceDate,
-          periodStart: invoices.periodStart,
-          periodEnd: invoices.periodEnd,
+          periodStart: sql<string | null>`to_char(${invoices.periodStart}, 'YYYY-MM-DD')`,
+          periodEnd: sql<string | null>`to_char(${invoices.periodEnd}, 'YYYY-MM-DD')`,
           currency: invoices.currency,
           subtotal: invoices.subtotal,
           total: invoices.total,
@@ -2907,7 +2907,7 @@ export class DatabaseStorage implements IStorage {
           invoiceId: invoiceLineItems.invoiceId,
           billableUsageId: invoiceLineItems.billableUsageId,
           description: invoiceLineItems.description,
-          serviceDate: invoiceLineItems.serviceDate,
+          serviceDate: sql<string>`to_char(${invoiceLineItems.serviceDate}, 'YYYY-MM-DD')`,
           projectId: invoiceLineItems.projectId,
           projectName: projects.name,
           expertId: invoiceLineItems.expertId,
