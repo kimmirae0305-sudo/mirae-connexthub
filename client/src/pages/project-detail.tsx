@@ -399,9 +399,9 @@ export default function ProjectDetail() {
 
   // Call records for this project (Consultations tab)
   const { data: projectCallRecords, isLoading: callRecordsLoading } = useQuery<CallRecord[]>({
-    queryKey: ["/api/call-records", { projectId }],
+    queryKey: ["/api/projects", projectId, "consultations"],
     queryFn: async () => {
-      const res = await fetch(resolveApiUrl(`/api/call-records?projectId=${projectId}`), {
+      const res = await fetch(resolveApiUrl(`/api/projects/${projectId}/consultations`), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
@@ -771,9 +771,10 @@ export default function ProjectDetail() {
 
   // Call Record mutations (Consultations tab)
   const createCallMutation = useMutation({
-    mutationFn: (data: InsertCallRecord) => apiRequest("POST", "/api/call-records", data),
+    mutationFn: (data: InsertCallRecord) =>
+      apiRequest("POST", `/api/projects/${projectId}/consultations`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
       setIsScheduleCallModalOpen(false);
       scheduleCallForm.reset();
@@ -788,7 +789,7 @@ export default function ProjectDetail() {
     mutationFn: (data: { actualDurationMinutes: number; recordingUrl?: string; notes?: string }) =>
       apiRequest("POST", `/api/call-records/${selectedCallRecord?.id}/complete`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
       setIsCompleteCallModalOpen(false);
@@ -805,7 +806,7 @@ export default function ProjectDetail() {
     mutationFn: (callId: number) =>
       apiRequest("POST", `/api/call-records/${callId}/cancel`, { reason: "Cancelled by user" }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
       toast({ title: "Consultation cancelled" });
     },
@@ -823,7 +824,7 @@ export default function ProjectDetail() {
     mutationFn: (data: { durationMinutes: number; cuUsed: string }) =>
       apiRequest("PATCH", `/api/call-records/${selectedCallRecord?.id}`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
       setIsEditCallModalOpen(false);
@@ -840,8 +841,6 @@ export default function ProjectDetail() {
   const scheduleCallFormSchema = z.object({
     expertId: z.number().min(1, "Expert is required"),
     callDate: z.string().min(1, "Call date is required"),
-    startTime: z.string().min(1, "Start time is required"),
-    timezone: z.string().min(1, "Time zone is required"),
     durationMinutes: z.number().min(1, "Planned duration is required"),
     zoomLink: z.string().optional(),
     notes: z.string().optional(),
@@ -854,8 +853,6 @@ export default function ProjectDetail() {
     defaultValues: {
       expertId: 0,
       callDate: format(new Date(), "yyyy-MM-dd"),
-      startTime: "",
-      timezone: "America/Sao_Paulo",
       durationMinutes: 30,
       zoomLink: "",
       notes: "",
@@ -957,7 +954,7 @@ export default function ProjectDetail() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/insights", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/call-records", { projectId }] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
       setSelectedInsightCallRecord(null);
       createInsightForm.reset();
@@ -977,19 +974,6 @@ export default function ProjectDetail() {
     return Math.ceil(minutes / 15) * 0.25;
   };
 
-  const consultationTimezones = [
-    "America/Sao_Paulo",
-    "Asia/Seoul",
-    "America/New_York",
-    "Europe/London",
-    "UTC",
-  ];
-
-  const buildScheduledDateTime = (callDate: string, startTime: string) => {
-    if (!callDate || !startTime) return null;
-    return new Date(`${callDate}T${startTime}:00`);
-  };
-
   const onEditCallSubmit = (data: EditCallFormData) => {
     editCallMutation.mutate({
       durationMinutes: data.durationMinutes,
@@ -998,20 +982,13 @@ export default function ProjectDetail() {
   };
 
   const onScheduleCallSubmit = (data: ScheduleCallFormData) => {
-    const scheduledStart = buildScheduledDateTime(data.callDate, data.startTime);
-    const estimatedEnd = scheduledStart
-      ? new Date(scheduledStart.getTime() + data.durationMinutes * 60_000)
-      : null;
     const callData: InsertCallRecord = {
       projectId,
       expertId: data.expertId,
-      callDate: scheduledStart || new Date(data.callDate),
+      callDate: new Date(data.callDate),
       durationMinutes: data.durationMinutes,
       cuUsed: "0",
-      status: "scheduled",
-      scheduledStartTime: scheduledStart,
-      scheduledEndTime: estimatedEnd,
-      timezone: data.timezone,
+      status: "pending",
       zoomLink: data.zoomLink || null,
       notes: data.notes || null,
     };
@@ -1128,7 +1105,7 @@ export default function ProjectDetail() {
     consultationStatusFilter === "all" || record.status === consultationStatusFilter
   );
 
-  const projectScheduledCalls = projectCallRecords?.filter((r) => r.status === "scheduled").length || 0;
+  const projectScheduledCalls = projectCallRecords?.filter((r) => r.status === "pending" || r.status === "scheduled").length || 0;
   const projectCompletedCalls = projectCallRecords?.filter((r) => r.status === "completed").length || 0;
   const projectTotalCuUsed = projectCallRecords
     ?.filter((r) => r.status === "completed")
@@ -1138,15 +1115,10 @@ export default function ProjectDetail() {
   const completionCalculatedCu = completionDurationMinutes > 0
     ? Math.ceil(completionDurationMinutes / 15) * 0.25
     : 0;
-  const scheduleCallDate = scheduleCallForm.watch("callDate");
-  const scheduleStartTime = scheduleCallForm.watch("startTime");
-  const scheduleTimezone = scheduleCallForm.watch("timezone");
   const schedulePlannedDuration = scheduleCallForm.watch("durationMinutes") || 0;
-  const estimatedScheduleEnd = (() => {
-    const start = buildScheduledDateTime(scheduleCallDate, scheduleStartTime);
-    if (!start || schedulePlannedDuration <= 0) return null;
-    return new Date(start.getTime() + schedulePlannedDuration * 60_000);
-  })();
+  const scheduledCallEstimatedCu = schedulePlannedDuration > 0
+    ? calculateCuFromDuration(schedulePlannedDuration)
+    : 0;
 
   // Vetting Questions mutations
   const createVQMutation = useMutation({
@@ -1307,6 +1279,18 @@ export default function ProjectDetail() {
     });
     return Array.from(byId.values());
   }, [projectDetail?.projectAdvisors, projectDetail?.internalExperts, projectDetail?.raSourcedExperts]);
+
+  const projectAdvisorOptions = useMemo(() => {
+    const byExpertId = new Map<number, EnrichedExpert>();
+    projectAdvisors.forEach((advisor) => {
+      if (advisor.expertId && advisor.expert && !byExpertId.has(advisor.expertId)) {
+        byExpertId.set(advisor.expertId, advisor);
+      }
+    });
+    return Array.from(byExpertId.values()).sort((a, b) =>
+      (a.expert?.name || "").localeCompare(b.expert?.name || "")
+    );
+  }, [projectAdvisors]);
 
   // Filter project advisors by angle
   const filteredInternalExperts = useMemo(() => {
@@ -3226,7 +3210,7 @@ export default function ProjectDetail() {
                       <SelectItem value="scheduled">Scheduled</SelectItem>
                       <SelectItem value="completed">Completed</SelectItem>
                       <SelectItem value="cancelled">Cancelled</SelectItem>
-                      <SelectItem value="no-show">No Show</SelectItem>
+                      <SelectItem value="no_show">No Show</SelectItem>
                     </SelectContent>
                   </Select>
                   {!isRA && (
@@ -3267,43 +3251,47 @@ export default function ProjectDetail() {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead>Date</TableHead>
                         <TableHead>Expert</TableHead>
-                        <TableHead>Advisor Link</TableHead>
-                        <TableHead>Scheduled</TableHead>
                         <TableHead>Duration</TableHead>
+                        <TableHead>CU</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Owners</TableHead>
-                        <TableHead>Links & Notes</TableHead>
+                        <TableHead>Zoom Link</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredProjectCalls.map((record) => (
                         <TableRow key={record.id} data-testid={`row-call-record-${record.id}`}>
-                          <TableCell className="font-medium">
-                            {getExpertNameById(record.expertId)}
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {getAdvisorLabelForCall(record)}
-                          </TableCell>
                           <TableCell className="text-sm">
                             {format(new Date(record.callDate), "MMM dd, yyyy")}
                             {record.scheduledStartTime && (
                               <span className="block text-xs text-muted-foreground">
                                 {format(new Date(record.scheduledStartTime), "HH:mm")}
                                 {record.scheduledEndTime && ` - ${format(new Date(record.scheduledEndTime), "HH:mm")}`}
-                                {record.timezone && ` (${record.timezone})`}
                               </span>
                             )}
                           </TableCell>
+                          <TableCell className="font-medium">
+                            <div>{getExpertNameById(record.expertId)}</div>
+                            <div className="text-xs font-normal text-muted-foreground">
+                              {getAdvisorLabelForCall(record)}
+                            </div>
+                          </TableCell>
                           <TableCell>
                             <div className="space-y-1 font-mono text-sm">
-                              <p>Planned: {record.durationMinutes} min</p>
+                              <p>{record.durationMinutes} min</p>
                               {record.status === "completed" && (
-                                <p>Actual: {record.actualDurationMinutes || record.durationMinutes} min</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Actual: {record.actualDurationMinutes || record.durationMinutes} min
+                                </p>
                               )}
-                              <p>{parseFloat(record.cuUsed || "0").toFixed(2)} CU</p>
                             </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {record.status === "completed"
+                              ? parseFloat(record.cuUsed || "0").toFixed(2)
+                              : calculateCuFromDuration(record.durationMinutes || 0).toFixed(2)}
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={record.status} type="call" />
@@ -3313,11 +3301,7 @@ export default function ProjectDetail() {
                               </p>
                             )}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            <p>PM: {getPmNameById(record.pmId)}</p>
-                            <p>RA: {getRaNameById(record.raId)}</p>
-                          </TableCell>
-                          <TableCell className="max-w-[260px] text-sm">
+                          <TableCell className="max-w-[220px] text-sm">
                             <div className="space-y-1">
                               {record.zoomLink ? (
                                 <button
@@ -3329,17 +3313,6 @@ export default function ProjectDetail() {
                                 </button>
                               ) : (
                                 <p className="text-muted-foreground">No Zoom link</p>
-                              )}
-                              {record.recordingUrl ? (
-                                <button
-                                  type="button"
-                                  onClick={() => window.open(record.recordingUrl!, "_blank")}
-                                  className="block text-primary hover:underline"
-                                >
-                                  Recording
-                                </button>
-                              ) : (
-                                <p className="text-muted-foreground">No recording</p>
                               )}
                               {record.notes && (
                                 <p className="line-clamp-2 text-muted-foreground">{record.notes}</p>
@@ -4588,7 +4561,7 @@ export default function ProjectDetail() {
           <DialogHeader>
             <DialogTitle>Schedule Consultation</DialogTitle>
             <DialogDescription id="schedule-call-description">
-              Schedule the planned call time. Actual duration and CU are confirmed when the call is completed.
+              Schedule a pending consultation for this project. CU is calculated from duration when the call is completed.
             </DialogDescription>
           </DialogHeader>
           <Form {...scheduleCallForm}>
@@ -4608,23 +4581,17 @@ export default function ProjectDetail() {
                           <SelectValue placeholder="Select expert" />
                         </SelectTrigger>
                         <SelectContent>
-                          {(() => {
-                            const projectExpertIds = new Set([
-                              ...(projectDetail?.internalExperts?.map((pe) => pe.expertId) || []),
-                              ...(projectDetail?.raSourcedExperts?.map((pe) => pe.expertId) || []),
-                            ]);
-                            const projectExperts = allExperts?.filter((e) =>
-                              projectExpertIds.has(e.id)
-                            );
-                            return projectExperts?.map((expert) => (
-                              <SelectItem key={expert.id} value={String(expert.id)}>
-                                {expert.name}
-                              </SelectItem>
-                            ));
-                          })()}
+                          {projectAdvisorOptions.map((advisor) => (
+                            <SelectItem key={advisor.expertId} value={String(advisor.expertId)}>
+                              {advisor.expert?.name || `Expert #${advisor.expertId}`}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </FormControl>
+                    <FormDescription>
+                      Only advisors already attached to this project are shown.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -4646,49 +4613,6 @@ export default function ProjectDetail() {
                   </FormItem>
                 )}
               />
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={scheduleCallForm.control}
-                  name="startTime"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Start Time</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="time"
-                          {...field}
-                          data-testid="input-schedule-start-time"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={scheduleCallForm.control}
-                  name="timezone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Time Zone</FormLabel>
-                      <FormControl>
-                        <Select value={field.value} onValueChange={field.onChange}>
-                          <SelectTrigger data-testid="select-schedule-timezone">
-                            <SelectValue placeholder="Select time zone" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {consultationTimezones.map((timezone) => (
-                              <SelectItem key={timezone} value={timezone}>
-                                {timezone}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
               <FormField
                 control={scheduleCallForm.control}
                 name="durationMinutes"
@@ -4712,14 +4636,12 @@ export default function ProjectDetail() {
                 )}
               />
               <div className="rounded-md border bg-muted/30 p-3 text-sm">
-                <p className="font-medium">Estimated End Time</p>
+                <p className="font-medium">Estimated CU</p>
                 <p className="text-muted-foreground">
-                  {estimatedScheduleEnd
-                    ? `${format(estimatedScheduleEnd, "HH:mm")} (${scheduleTimezone || "America/Sao_Paulo"})`
-                    : "Select a date, start time, and planned duration to preview."}
+                  {scheduledCallEstimatedCu.toFixed(2)} CU
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  End time is a preview only. The completed call record uses actual duration.
+                  Pending consultations do not count as CU used until they are marked completed.
                 </p>
               </div>
               <FormField
@@ -4757,7 +4679,7 @@ export default function ProjectDetail() {
                 )}
               />
               <p className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
-                Invitation notification will be supported in a future integration. No email or WhatsApp message is sent yet.
+                This creates a Pending consultation linked to this project. No email or WhatsApp message is sent yet.
               </p>
               <DialogFooter>
                 <Button
