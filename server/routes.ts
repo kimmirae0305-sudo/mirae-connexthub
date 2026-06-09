@@ -3635,6 +3635,51 @@ export async function registerRoutes(
   });
 
   // ==================== INVOICES (FINANCE DRAFT LAYER) ====================
+  const normalizeInvoiceDateOnly = (value: Date | string | null | undefined) => {
+    if (!value) return "";
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) return "";
+      return value.toISOString().slice(0, 10);
+    }
+
+    const rawValue = String(value).trim();
+    const dateOnlyMatch = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (dateOnlyMatch) {
+      return `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}`;
+    }
+
+    const date = new Date(rawValue);
+    return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+  };
+
+  const parseInvoiceDateOnly = (value: unknown) => {
+    if (!value) return null;
+    const normalizedDate = normalizeInvoiceDateOnly(String(value));
+    if (!normalizedDate) return undefined;
+    return new Date(`${normalizedDate}T12:00:00.000Z`);
+  };
+
+  const formatInvoiceDateOnly = (value: Date | string | null | undefined) => {
+    const normalizedDate = normalizeInvoiceDateOnly(value);
+    if (!normalizedDate) return "-";
+    const [year, month, day] = normalizedDate.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      timeZone: "UTC",
+    });
+  };
+
+  const formatInvoiceDateRange = (start: Date | string | null | undefined, end: Date | string | null | undefined) => {
+    const normalizedStart = normalizeInvoiceDateOnly(start);
+    const normalizedEnd = normalizeInvoiceDateOnly(end);
+    if (!normalizedStart && !normalizedEnd) return "-";
+    if (!normalizedEnd || normalizedStart === normalizedEnd) return formatInvoiceDateOnly(normalizedStart);
+    if (!normalizedStart) return formatInvoiceDateOnly(normalizedEnd);
+    return `${formatInvoiceDateOnly(normalizedStart)} - ${formatInvoiceDateOnly(normalizedEnd)}`;
+  };
+
   app.get("/api/invoices", authMiddleware, requireRoles("admin", "finance"), async (_req, res) => {
     try {
       const invoices = await storage.getInvoices();
@@ -3684,22 +3729,14 @@ export async function registerRoutes(
 
       const invoiceNumber = invoice.invoiceNumber || invoice.draftNumber || `INV-${invoice.id}`;
       const safeFileName = `${invoiceNumber.replace(/[^a-zA-Z0-9-_]/g, "_")}.pdf`;
-      const formatDateForPdf = (value: Date | string | null | undefined) => {
-        if (!value) return "-";
-        const date = value instanceof Date ? value : new Date(value);
-        return Number.isNaN(date.getTime())
-          ? "-"
-          : date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "2-digit" });
-      };
       const formatUsd = (value: string | number | null | undefined) => {
         const amount = Number(value || 0);
         return `USD ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
       };
       const formatCu = (value: string | number | null | undefined) => Number(value || 0).toFixed(2);
-      const invoicePeriod =
-        formatDateForPdf(invoice.periodStart) === formatDateForPdf(invoice.periodEnd)
-          ? formatDateForPdf(invoice.periodStart)
-          : `${formatDateForPdf(invoice.periodStart)} - ${formatDateForPdf(invoice.periodEnd)}`;
+      const invoicePeriodFromStoredDates = formatInvoiceDateRange(invoice.periodStart, invoice.periodEnd);
+      const fallbackInvoicePeriod = formatInvoiceDateRange(lineItems[0]?.serviceDate, lineItems[lineItems.length - 1]?.serviceDate);
+      const invoicePeriod = invoicePeriodFromStoredDates === "-" ? fallbackInvoicePeriod : invoicePeriodFromStoredDates;
 
       const doc = new PDFDocument({
         size: "A4",
@@ -3758,7 +3795,7 @@ export async function registerRoutes(
         .font("Helvetica")
         .fontSize(9)
         .fillColor(brandMuted)
-        .text(`Issue Date: ${formatDateForPdf(invoice.issuedAt || invoice.invoiceDate)}`, rightEdge - 250, headerTop + 49, { width: 250, align: "right" });
+        .text(`Issue Date: ${formatInvoiceDateOnly(invoice.issuedAt || invoice.invoiceDate)}`, rightEdge - 250, headerTop + 49, { width: 250, align: "right" });
       doc
         .font("Helvetica")
         .fontSize(9)
@@ -3791,7 +3828,7 @@ export async function registerRoutes(
       doc.roundedRect(summaryX, panelTop, panelWidth, panelHeight, 6).strokeColor(brandLine).lineWidth(1).stroke();
       const summaryRows = [
         ["Billing Period", invoicePeriod],
-        ["Issue Date", formatDateForPdf(invoice.issuedAt || invoice.invoiceDate)],
+        ["Issue Date", formatInvoiceDateOnly(invoice.issuedAt || invoice.invoiceDate)],
         ["Currency", "USD"],
         ["Total", formatUsd(invoice.total)],
       ];
@@ -3856,7 +3893,7 @@ export async function registerRoutes(
           }
           doc.moveTo(tableLeft, rowTop + rowHeight - 2).lineTo(rightEdge, rowTop + rowHeight - 2).strokeColor(brandLine).stroke();
           doc.font("Helvetica").fontSize(8.5).fillColor(brandInk);
-          doc.text(formatDateForPdf(item.serviceDate), columns[0].x + 4, rowTop + 7, { width: columns[0].width - 8 });
+          doc.text(formatInvoiceDateOnly(item.serviceDate), columns[0].x + 4, rowTop + 7, { width: columns[0].width - 8 });
           doc.font("Helvetica-Bold").text(item.projectName || "-", columns[1].x + 4, rowTop + 7, { width: columns[1].width - 8 });
           doc.font("Helvetica").text(item.expertName || "-", columns[2].x + 4, rowTop + 7, { width: columns[2].width - 8 });
           doc.text(formatCu(item.cuUsed), columns[3].x + 4, rowTop + 7, { width: columns[3].width - 8, align: "right" });
@@ -3917,22 +3954,16 @@ export async function registerRoutes(
         return res.status(400).json({ error: "At least one billable usage id is required" });
       }
 
-      const parseOptionalBillingDate = (value: unknown) => {
-        if (!value) return null;
-        const rawValue = String(value);
-        const date = /^\d{4}-\d{2}-\d{2}$/.test(rawValue)
-          ? new Date(`${rawValue}T00:00:00.000`)
-          : new Date(rawValue);
-        return Number.isNaN(date.getTime()) ? undefined : date;
-      };
-      const periodStart = parseOptionalBillingDate(req.body?.periodStart);
-      const periodEnd = parseOptionalBillingDate(req.body?.periodEnd);
+      const periodStart = parseInvoiceDateOnly(req.body?.periodStart);
+      const periodEnd = parseInvoiceDateOnly(req.body?.periodEnd);
 
       if (periodStart === undefined || periodEnd === undefined) {
         return res.status(400).json({ error: "Billing Period dates must be valid dates" });
       }
 
-      if (periodStart && periodEnd && periodStart > periodEnd) {
+      const normalizedPeriodStart = periodStart ? normalizeInvoiceDateOnly(periodStart) : "";
+      const normalizedPeriodEnd = periodEnd ? normalizeInvoiceDateOnly(periodEnd) : "";
+      if (normalizedPeriodStart && normalizedPeriodEnd && normalizedPeriodStart > normalizedPeriodEnd) {
         return res.status(400).json({ error: "Billing Period Start must be on or before Billing Period End" });
       }
 
