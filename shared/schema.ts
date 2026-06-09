@@ -358,6 +358,35 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Expenses table (Finance operating expense tracking)
+export const expenses = pgTable("expenses", {
+  id: serial("id").primaryKey(),
+  expenseId: text("expense_id").notNull().unique(),
+  vendor: text("vendor").notNull(),
+  category: text("category").notNull(),
+  description: text("description"),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  currency: text("currency").notNull().default("USD"),
+  billingType: text("billing_type").notNull(),
+  expenseDate: timestamp("expense_date").notNull(),
+  renewalDate: timestamp("renewal_date"),
+  paymentMethod: text("payment_method"),
+  status: text("status").notNull().default("Active"),
+  ownerId: integer("owner_id").references(() => users.id),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  accountingStatus: text("accounting_status").notNull().default("Pending"),
+  notes: text("notes"),
+  receiptFileName: text("receipt_file_name"),
+  receiptMimeType: text("receipt_mime_type"),
+  receiptFileSize: integer("receipt_file_size"),
+  receiptUploadedBy: integer("receipt_uploaded_by").references(() => users.id),
+  receiptUploadedAt: timestamp("receipt_uploaded_at"),
+  receiptData: text("receipt_data"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   managedOrganizations: many(clientOrganizations),
@@ -572,6 +601,21 @@ export const invoiceLineItemsRelations = relations(invoiceLineItems, ({ one }) =
   }),
 }));
 
+export const expensesRelations = relations(expenses, ({ one }) => ({
+  owner: one(users, {
+    fields: [expenses.ownerId],
+    references: [users.id],
+  }),
+  approver: one(users, {
+    fields: [expenses.approvedBy],
+    references: [users.id],
+  }),
+  receiptUploader: one(users, {
+    fields: [expenses.receiptUploadedBy],
+    references: [users.id],
+  }),
+}));
+
 // Helper for coercing date strings to Date objects
 const coerceDate = z.preprocess((val) => {
   if (val === null || val === undefined || val === "") return null;
@@ -717,6 +761,23 @@ export const insertInvoiceLineItemSchema = createInsertSchema(invoiceLineItems).
   serviceDate: coerceDateRequired,
 });
 
+export const insertExpenseSchema = createInsertSchema(expenses).omit({
+  id: true,
+  expenseId: true,
+  receiptFileName: true,
+  receiptMimeType: true,
+  receiptFileSize: true,
+  receiptUploadedBy: true,
+  receiptUploadedAt: true,
+  receiptData: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  expenseDate: coerceDateRequired,
+  renewalDate: coerceDate.optional(),
+  approvedAt: coerceDate.optional(),
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -765,6 +826,9 @@ export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 
 export type InvoiceLineItem = typeof invoiceLineItems.$inferSelect;
 export type InsertInvoiceLineItem = z.infer<typeof insertInvoiceLineItemSchema>;
+
+export type Expense = typeof expenses.$inferSelect;
+export type InsertExpense = z.infer<typeof insertExpenseSchema>;
 
 export type ProjectActivity = typeof projectActivities.$inferSelect;
 export type InsertProjectActivity = z.infer<typeof insertProjectActivitySchema>;

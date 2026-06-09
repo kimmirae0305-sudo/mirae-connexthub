@@ -9,6 +9,7 @@ import {
   Building2,
   Phone,
   Receipt,
+  ClipboardList,
   LogOut,
   UsersRound,
   Award,
@@ -127,6 +128,12 @@ const financeItems: NavItem[] = [
     url: "/invoices",
     icon: Receipt,
     pageKey: "invoices",
+  },
+  {
+    title: "Expenses",
+    url: "/expenses",
+    icon: ClipboardList,
+    pageKey: "expenses",
   },
 ];
 

@@ -1,4 +1,4 @@
-import type { Express, Router } from "express";
+import { raw, type Express, type Router } from "express";
 import { createServer, type Server } from "http";
 import { Router as ExpressRouter } from "express";
 import fs from "fs";
@@ -18,6 +18,7 @@ import {
   insertInsightSchema,
   insertExpertInvitationLinkSchema,
   insertProjectAngleSchema,
+  insertExpenseSchema,
   calculateCU,
   callRecords,
   experts,
@@ -38,6 +39,10 @@ import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
 import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
+const expenseReceiptUpload = raw({
+  type: ["application/pdf", "image/png", "image/jpeg"],
+  limit: "5mb",
+});
 
 export async function registerRoutes(
   httpServer: Server,
@@ -3944,6 +3949,270 @@ export async function registerRoutes(
       console.error("Failed to mark invoice as paid:", error);
       const status = message === "Invoice not found." ? 404 : 400;
       res.status(status).json({ error: message });
+    }
+  });
+
+  // ==================== EXPENSES (FINANCE OPERATING EXPENSES) ====================
+  const expenseCategories = new Set([
+    "Software",
+    "Hosting",
+    "Database",
+    "Email",
+    "Website",
+    "Sales Tool",
+    "Communication",
+    "Legal",
+    "Accounting",
+    "Admin",
+    "AI / Automation",
+    "Other",
+  ]);
+  const expenseBillingTypes = new Set(["One-time", "Monthly", "Annual", "Free Plan"]);
+  const expenseStatuses = new Set(["Active", "Paid", "Cancelled", "Archived"]);
+  const expenseAccountingStatuses = new Set(["Not Applicable", "Pending", "Sent to Accountant", "Booked", "No Cost"]);
+  const allowedReceiptMimeTypes = new Set(["application/pdf", "image/png", "image/jpeg"]);
+
+  const parseExpenseFilters = (query: Record<string, unknown>) => {
+    const parseOptionalDate = (value: unknown, endOfDay = false) => {
+      if (!value) return undefined;
+      const date = new Date(`${String(value)}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
+      return Number.isNaN(date.getTime()) ? undefined : date;
+    };
+    return {
+      search: query.search ? String(query.search).trim() : undefined,
+      category: query.category ? String(query.category) : undefined,
+      status: query.status ? String(query.status) : undefined,
+      currency: query.currency ? String(query.currency).toUpperCase() : undefined,
+      billingType: query.billingType ? String(query.billingType) : undefined,
+      accountingStatus: query.accountingStatus ? String(query.accountingStatus) : undefined,
+      fromDate: parseOptionalDate(query.fromDate),
+      toDate: parseOptionalDate(query.toDate, true),
+    };
+  };
+
+  const normalizeExpensePayload = (body: Record<string, unknown>) => ({
+    vendor: String(body.vendor || "").trim(),
+    category: String(body.category || "").trim(),
+    description: body.description ? String(body.description).trim() : null,
+    amount: Number(body.amount ?? 0).toFixed(2),
+    currency: String(body.currency || "USD").trim().toUpperCase(),
+    billingType: String(body.billingType || "").trim(),
+    expenseDate: body.expenseDate,
+    renewalDate: body.renewalDate || null,
+    paymentMethod: body.paymentMethod ? String(body.paymentMethod).trim() : null,
+    status: String(body.status || "Active").trim(),
+    ownerId: body.ownerId ? Number(body.ownerId) : null,
+    approvedBy: body.approvedBy ? Number(body.approvedBy) : null,
+    approvedAt: body.approvedAt || null,
+    accountingStatus: String(body.accountingStatus || "Pending").trim(),
+    notes: body.notes ? String(body.notes).trim() : null,
+  });
+
+  const validateExpensePayload = (payload: ReturnType<typeof normalizeExpensePayload>) => {
+    const amount = Number(payload.amount);
+    if (!payload.vendor) return "Vendor is required.";
+    if (!payload.category || !expenseCategories.has(payload.category)) return "A valid category is required.";
+    if (!payload.currency) return "Currency is required.";
+    if (!payload.billingType || !expenseBillingTypes.has(payload.billingType)) return "A valid billing type is required.";
+    if (!payload.expenseDate) return "Expense date is required.";
+    if (!payload.status || !expenseStatuses.has(payload.status)) return "A valid status is required.";
+    if (!payload.accountingStatus || !expenseAccountingStatuses.has(payload.accountingStatus)) return "A valid accounting status is required.";
+    if (!Number.isFinite(amount) || amount < 0) return "Amount must be 0 or greater.";
+    if (amount === 0 && payload.billingType !== "Free Plan" && payload.accountingStatus !== "No Cost") {
+      return "Amount can be 0 only for Free Plan or No Cost expenses.";
+    }
+    return null;
+  };
+
+  const escapeCsvValue = (value: unknown) => {
+    if (value === null || value === undefined) return "";
+    const text = value instanceof Date ? value.toISOString() : String(value);
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  app.get("/api/expenses/export.csv", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const report = await storage.getExpenses(parseExpenseFilters(req.query as Record<string, unknown>));
+      const headers = [
+        "Expense ID",
+        "Vendor",
+        "Category",
+        "Description",
+        "Amount",
+        "Currency",
+        "Billing Type",
+        "Expense Date",
+        "Renewal Date",
+        "Payment Method",
+        "Status",
+        "Accounting Status",
+        "Owner",
+        "Approved By",
+        "Approved At",
+        "Receipt Status",
+        "Receipt File Name",
+        "Notes",
+        "Created At",
+        "Updated At",
+      ];
+      const rows = report.rows.map((row) => [
+        row.expenseId,
+        row.vendor,
+        row.category,
+        row.description,
+        row.amount,
+        row.currency,
+        row.billingType,
+        row.expenseDate,
+        row.renewalDate,
+        row.paymentMethod,
+        row.status,
+        row.accountingStatus,
+        row.ownerName,
+        row.approvedByName,
+        row.approvedAt,
+        row.hasReceipt ? "Attached" : Number(row.amount || 0) === 0 || row.billingType === "Free Plan" ? "N/A" : "Missing",
+        row.receiptFileName,
+        row.notes,
+        row.createdAt,
+        row.updatedAt,
+      ]);
+      const csv = [headers, ...rows].map((row) => row.map(escapeCsvValue).join(",")).join("\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="expenses_export.csv"`);
+      res.send(csv);
+    } catch (error) {
+      console.error("Failed to export expenses:", error);
+      res.status(500).json({ error: "Failed to export expenses" });
+    }
+  });
+
+  app.get("/api/expenses", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const report = await storage.getExpenses(parseExpenseFilters(req.query as Record<string, unknown>));
+      res.json(report);
+    } catch (error) {
+      console.error("Failed to fetch expenses:", error);
+      res.status(500).json({ error: "Failed to fetch expenses" });
+    }
+  });
+
+  app.get("/api/expenses/:id", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid expense id" });
+      const expense = await storage.getExpense(id);
+      if (!expense) return res.status(404).json({ error: "Expense not found" });
+      res.json(expense);
+    } catch (error) {
+      console.error("Failed to fetch expense:", error);
+      res.status(500).json({ error: "Failed to fetch expense" });
+    }
+  });
+
+  app.post("/api/expenses", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const payload = normalizeExpensePayload(req.body || {});
+      const validationError = validateExpensePayload(payload);
+      if (validationError) return res.status(400).json({ error: validationError });
+      const parsed = insertExpenseSchema.parse(payload);
+      const expense = await storage.createExpense(parsed, req.user?.id);
+      res.status(201).json(expense);
+    } catch (error) {
+      console.error("Failed to create expense:", error);
+      if (error instanceof Error) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: "Failed to create expense" });
+    }
+  });
+
+  app.patch("/api/expenses/:id", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid expense id" });
+      const payload = normalizeExpensePayload(req.body || {});
+      const validationError = validateExpensePayload(payload);
+      if (validationError) return res.status(400).json({ error: validationError });
+      const parsed = insertExpenseSchema.partial().parse(payload);
+      const expense = await storage.updateExpense(id, parsed);
+      if (!expense) return res.status(404).json({ error: "Expense not found" });
+      res.json(expense);
+    } catch (error) {
+      console.error("Failed to update expense:", error);
+      if (error instanceof Error) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: "Failed to update expense" });
+    }
+  });
+
+  app.delete("/api/expenses/:id", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid expense id" });
+      const expense = await storage.archiveExpense(id);
+      if (!expense) return res.status(404).json({ error: "Expense not found" });
+      res.json(expense);
+    } catch (error) {
+      console.error("Failed to archive expense:", error);
+      res.status(500).json({ error: "Failed to archive expense" });
+    }
+  });
+
+  app.post("/api/expenses/:id/receipt", authMiddleware, requireRoles("admin", "finance"), expenseReceiptUpload, async (req: AuthRequest, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid expense id" });
+      const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+      const mimeType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+      const fileName = decodeURIComponent(String(req.headers["x-file-name"] || "receipt").trim());
+      if (!allowedReceiptMimeTypes.has(mimeType)) {
+        return res.status(400).json({ error: "Receipt must be a PDF, PNG, JPG, or JPEG file." });
+      }
+      if (!body.length) return res.status(400).json({ error: "Receipt file is required." });
+      if (body.length > 5 * 1024 * 1024) return res.status(400).json({ error: "Receipt file must be 5MB or smaller." });
+      const expense = await storage.saveExpenseReceipt(id, {
+        fileName,
+        mimeType,
+        fileSize: body.length,
+        data: body,
+        uploadedBy: req.user?.id,
+      });
+      if (!expense) return res.status(404).json({ error: "Expense not found" });
+      res.json(expense);
+    } catch (error) {
+      console.error("Failed to upload expense receipt:", error);
+      res.status(500).json({ error: "Failed to upload expense receipt" });
+    }
+  });
+
+  app.get("/api/expenses/:id/receipt", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid expense id" });
+      const receipt = await storage.getExpenseReceipt(id);
+      if (!receipt) return res.status(404).json({ error: "Receipt not found" });
+      res.setHeader("Content-Type", receipt.mimeType);
+      res.setHeader("Content-Length", String(receipt.fileSize));
+      res.setHeader("Content-Disposition", `attachment; filename="${receipt.fileName.replace(/"/g, "")}"`);
+      res.send(receipt.data);
+    } catch (error) {
+      console.error("Failed to download expense receipt:", error);
+      res.status(500).json({ error: "Failed to download expense receipt" });
+    }
+  });
+
+  app.delete("/api/expenses/:id/receipt", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid expense id" });
+      const expense = await storage.deleteExpenseReceipt(id);
+      if (!expense) return res.status(404).json({ error: "Expense not found" });
+      res.json(expense);
+    } catch (error) {
+      console.error("Failed to delete expense receipt:", error);
+      res.status(500).json({ error: "Failed to delete expense receipt" });
     }
   });
 

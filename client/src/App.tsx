@@ -20,6 +20,7 @@ import Usage from "@/pages/usage";
 import BillableUsage from "@/pages/billable-usage";
 import Contracts from "@/pages/contracts";
 import Invoices from "@/pages/invoices";
+import Expenses from "@/pages/expenses";
 import Analytics from "@/pages/analytics";
 import Employees from "@/pages/employees";
 import ExpertRegister from "@/pages/expert-register";
@@ -182,6 +183,9 @@ function Router() {
       </Route>
       <Route path="/invoices">
         <MainLayout><Invoices /></MainLayout>
+      </Route>
+      <Route path="/expenses">
+        <MainLayout><Expenses /></MainLayout>
       </Route>
       <Route path="/analytics">
         <MainLayout><Analytics /></MainLayout>
