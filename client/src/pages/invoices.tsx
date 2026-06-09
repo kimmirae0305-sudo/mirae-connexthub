@@ -125,16 +125,29 @@ interface BillableUsageResponse {
 
 const ELIGIBLE_BILLABLE_USAGE_URL = "/api/billable-usage?status=unbilled";
 
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})/;
+
+const normalizeDateOnly = (value: string | null | undefined) => {
+  if (!value) return "";
+  const rawValue = String(value).trim();
+  const dateOnlyMatch = rawValue.match(DATE_ONLY_PATTERN);
+  if (dateOnlyMatch) {
+    return `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}`;
+  }
+  const date = new Date(rawValue);
+  return Number.isNaN(date.getTime()) ? "" : format(date, "yyyy-MM-dd");
+};
+
 const formatDate = (value: string | null | undefined) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM dd, yyyy");
+  const normalizedDate = normalizeDateOnly(value);
+  if (!normalizedDate) return "-";
+  const [year, month, day] = normalizedDate.split("-").map(Number);
+  return format(new Date(year, month - 1, day), "MMM dd, yyyy");
 };
 
 const formatDateInput = (value: string | null | undefined) => {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : format(date, "yyyy-MM-dd");
+  const normalizedDate = normalizeDateOnly(value);
+  return normalizedDate;
 };
 
 const formatDateTime = (value: string | null | undefined) => {
@@ -147,6 +160,8 @@ const formatInvoicePeriod = (start: string | null | undefined, end: string | nul
   const formattedStart = formatDate(start);
   const formattedEnd = formatDate(end);
   if (formattedStart === "-" && formattedEnd === "-") return "-";
+  if (formattedStart === "-") return formattedEnd;
+  if (formattedEnd === "-") return formattedStart;
   if (formattedStart === formattedEnd) return formattedStart;
   return `${formattedStart} - ${formattedEnd}`;
 };
@@ -343,7 +358,7 @@ export default function Invoices() {
   const selectedCu = selectedRows.reduce((sum, row) => sum + parseAmount(row.cuUsed), 0);
   const billingPeriodInvalid =
     Boolean(billingPeriodStart && billingPeriodEnd) &&
-    new Date(`${billingPeriodStart}T00:00:00`) > new Date(`${billingPeriodEnd}T00:00:00`);
+    billingPeriodStart > billingPeriodEnd;
 
   useEffect(() => {
     if (selectedRows.length === 0) {
@@ -353,12 +368,12 @@ export default function Invoices() {
     }
 
     const selectedDates = selectedRows
-      .map((row) => row.callDate)
-      .filter((date) => formatDateInput(date))
-      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      .map((row) => formatDateInput(row.callDate))
+      .filter(Boolean)
+      .sort();
 
-    setBillingPeriodStart(formatDateInput(selectedDates[0]));
-    setBillingPeriodEnd(formatDateInput(selectedDates[selectedDates.length - 1]));
+    setBillingPeriodStart(selectedDates[0] || "");
+    setBillingPeriodEnd(selectedDates[selectedDates.length - 1] || "");
   }, [selectedBillableUsageSignature]);
 
   const createDraftMutation = useMutation({
