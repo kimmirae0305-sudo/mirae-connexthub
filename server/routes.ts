@@ -3635,8 +3635,6 @@ export async function registerRoutes(
   });
 
   // ==================== INVOICES (FINANCE DRAFT LAYER) ====================
-  const CRM_DISPLAY_TIME_ZONE = "America/Sao_Paulo";
-
   const normalizeInvoiceDateOnly = (value: Date | string | null | undefined) => {
     if (!value) return "";
     if (value instanceof Date) {
@@ -3680,21 +3678,6 @@ export async function registerRoutes(
     if (!normalizedEnd) return formatInvoiceDateOnly(normalizedStart);
     if (!normalizedStart) return formatInvoiceDateOnly(normalizedEnd);
     return `${formatInvoiceDateOnly(normalizedStart)} - ${formatInvoiceDateOnly(normalizedEnd)}`;
-  };
-
-  const formatInvoiceTimestampBRT = (value: Date | string | null | undefined) => {
-    if (!value) return "-";
-    const date = value instanceof Date ? value : new Date(value);
-    if (Number.isNaN(date.getTime())) return "-";
-    return `${new Intl.DateTimeFormat("en-US", {
-      timeZone: CRM_DISPLAY_TIME_ZONE,
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }).format(date)} BRT`;
   };
 
   app.get("/api/invoices", authMiddleware, requireRoles("admin", "finance"), async (_req, res) => {
@@ -3781,8 +3764,8 @@ export async function registerRoutes(
       };
 
       const logoPath = path.resolve(process.cwd(), "attached_assets", "Logo_1764382033313.png");
-      const headerTop = doc.page.margins.top;
-      doc.rect(0, 0, doc.page.width, 116).fill(brandPanel);
+      const headerTop = doc.page.margins.top - 14;
+      doc.rect(0, 0, doc.page.width, 104).fill(brandPanel);
       doc.rect(0, 0, 7, doc.page.height).fill(brandBurgundy);
 
       const logoY = headerTop;
@@ -3802,31 +3785,32 @@ export async function registerRoutes(
         .font("Helvetica-Bold")
         .fontSize(26)
         .fillColor(brandInk)
-        .text("Invoice", rightEdge - 210, headerTop - 2, { width: 210, align: "right" });
+        .text("Invoice", rightEdge - 210, headerTop - 1, { width: 210, align: "right" });
       doc
         .font("Helvetica-Bold")
         .fontSize(12)
         .fillColor(brandBurgundy)
-        .text(invoiceNumber, rightEdge - 250, headerTop + 31, { width: 250, align: "right" });
+        .text(invoiceNumber, rightEdge - 250, headerTop + 30, { width: 250, align: "right" });
       doc
         .font("Helvetica")
         .fontSize(9)
         .fillColor(brandMuted)
-        .text(`Issue Date: ${formatInvoiceTimestampBRT(invoice.issuedAt || invoice.invoiceDate)}`, rightEdge - 250, headerTop + 49, { width: 250, align: "right" });
+        .text(`Issue Date: ${formatInvoiceDateOnly(invoice.issuedAt || invoice.invoiceDate)}`, rightEdge - 250, headerTop + 48, { width: 250, align: "right" });
       doc
         .font("Helvetica")
         .fontSize(9)
         .fillColor(brandMuted)
-        .text("Currency: USD", rightEdge - 250, headerTop + 64, { width: 250, align: "right" });
+        .text("Currency: USD", rightEdge - 250, headerTop + 63, { width: 250, align: "right" });
 
-      doc.y = 142;
+      doc.y = 122;
 
       const panelTop = doc.y;
-      const panelGap = 16;
-      const panelWidth = (pageWidth - panelGap) / 2;
-      const panelHeight = 122;
-      doc.roundedRect(doc.page.margins.left, panelTop, panelWidth, panelHeight, 6).fill("#ffffff");
-      doc.roundedRect(doc.page.margins.left, panelTop, panelWidth, panelHeight, 6).strokeColor(brandLine).lineWidth(1).stroke();
+      const panelGap = 14;
+      const billToPanelWidth = 210;
+      const summaryPanelWidth = pageWidth - billToPanelWidth - panelGap;
+      const panelHeight = 118;
+      doc.roundedRect(doc.page.margins.left, panelTop, billToPanelWidth, panelHeight, 6).fill("#ffffff");
+      doc.roundedRect(doc.page.margins.left, panelTop, billToPanelWidth, panelHeight, 6).strokeColor(brandLine).lineWidth(1).stroke();
       doc
         .font("Helvetica-Bold")
         .fontSize(9)
@@ -3837,36 +3821,38 @@ export async function registerRoutes(
         .fontSize(14)
         .fillColor(brandInk)
         .text(invoice.clientName || "-", doc.page.margins.left + 18, panelTop + 40, {
-          width: panelWidth - 36,
+          width: billToPanelWidth - 36,
         });
 
-      const summaryX = doc.page.margins.left + panelWidth + panelGap;
-      doc.roundedRect(summaryX, panelTop, panelWidth, panelHeight, 6).fill("#ffffff");
-      doc.roundedRect(summaryX, panelTop, panelWidth, panelHeight, 6).strokeColor(brandLine).lineWidth(1).stroke();
+      const summaryX = doc.page.margins.left + billToPanelWidth + panelGap;
+      doc.roundedRect(summaryX, panelTop, summaryPanelWidth, panelHeight, 6).fill("#ffffff");
+      doc.roundedRect(summaryX, panelTop, summaryPanelWidth, panelHeight, 6).strokeColor(brandLine).lineWidth(1).stroke();
       const summaryRows = [
         ["Billing Period", invoicePeriod],
-        ["Issue Date", formatInvoiceTimestampBRT(invoice.issuedAt || invoice.invoiceDate)],
+        ["Issue Date", formatInvoiceDateOnly(invoice.issuedAt || invoice.invoiceDate)],
         ["Currency", "USD"],
         ["Total", formatUsd(invoice.total)],
       ];
       summaryRows.forEach(([label, value], index) => {
-        const y = panelTop + 18 + index * 22;
-        doc.font("Helvetica-Bold").fontSize(8.5).fillColor(brandMuted).text(label.toUpperCase(), summaryX + 18, y, { width: 108 });
+        const y = panelTop + 17 + index * 22;
+        doc.font("Helvetica-Bold").fontSize(8).fillColor(brandMuted).text(label.toUpperCase(), summaryX + 16, y, { width: 82 });
         doc
           .font(index === summaryRows.length - 1 ? "Helvetica-Bold" : "Helvetica")
-          .fontSize(index === summaryRows.length - 1 ? 13 : 10)
+          .fontSize(index === summaryRows.length - 1 ? 13 : 9.5)
           .fillColor(index === summaryRows.length - 1 ? brandBurgundy : brandInk)
-          .text(value, summaryX + 126, y - (index === summaryRows.length - 1 ? 3 : 0), {
-          width: panelWidth - 144,
+          .text(value, summaryX + 102, y - (index === summaryRows.length - 1 ? 3 : 0), {
+          width: summaryPanelWidth - 118,
           align: "right",
+          lineGap: 1,
         });
       });
 
-      doc.y = panelTop + panelHeight + 26;
+      doc.y = panelTop + panelHeight + 24;
 
-      doc.font("Helvetica-Bold").fontSize(13).fillColor(brandInk).text("Line Items");
-      doc.font("Helvetica").fontSize(9).fillColor(brandMuted).text("Completed consultation services billed in USD.");
-      doc.moveDown(0.8);
+      doc.font("Helvetica-Bold").fontSize(13).fillColor(brandInk).text("Line Items", doc.page.margins.left, doc.y);
+      doc.moveDown(0.25);
+      doc.font("Helvetica").fontSize(9).fillColor(brandMuted).text("Completed consultation services billed in USD.", doc.page.margins.left, doc.y);
+      doc.moveDown(0.9);
 
       const tableLeft = doc.page.margins.left;
       const columns = [
@@ -3924,14 +3910,14 @@ export async function registerRoutes(
       }
 
       ensureSpace(76);
-      doc.moveDown(0.9);
+      doc.moveDown(0.8);
       const totalBoxWidth = 230;
       const totalBoxX = rightEdge - totalBoxWidth;
       const totalBoxY = doc.y;
       doc.roundedRect(totalBoxX, totalBoxY, totalBoxWidth, 58, 6).fill(brandPanel);
       doc.roundedRect(totalBoxX, totalBoxY, totalBoxWidth, 58, 6).strokeColor("#eadeda").stroke();
-      doc.font("Helvetica-Bold").fontSize(9).fillColor(brandMuted).text("TOTAL DUE", totalBoxX + 18, totalBoxY + 14, { width: 82 });
-      doc.font("Helvetica-Bold").fontSize(16).fillColor(brandBurgundy).text(formatUsd(invoice.total), totalBoxX + 96, totalBoxY + 14, {
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(brandMuted).text("TOTAL DUE", totalBoxX + 18, totalBoxY + 15, { width: 82 });
+      doc.font("Helvetica-Bold").fontSize(16).fillColor(brandBurgundy).text(formatUsd(invoice.total), totalBoxX + 96, totalBoxY + 13, {
         width: totalBoxWidth - 114,
         align: "right",
       });
