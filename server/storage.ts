@@ -7,6 +7,7 @@ import {
   billableUsage,
   invoices,
   invoiceLineItems,
+  expenses,
   users,
   clients,
   clientOrganizations,
@@ -44,6 +45,8 @@ import {
   type InsertProjectActivity,
   type ProjectAngle,
   type InsertProjectAngle,
+  type Expense,
+  type InsertExpense,
   calculateCU,
 } from "@shared/schema";
 import { db } from "./db";
@@ -215,6 +218,73 @@ export interface MarkInvoicePaidInput {
 }
 
 export interface MarkInvoicePaidResult extends InvoiceDetail {}
+
+export interface ExpenseFilters {
+  search?: string;
+  category?: string;
+  status?: string;
+  currency?: string;
+  billingType?: string;
+  accountingStatus?: string;
+  fromDate?: Date;
+  toDate?: Date;
+}
+
+export interface ExpenseRow {
+  id: number;
+  expenseId: string;
+  vendor: string;
+  category: string;
+  description: string | null;
+  amount: string;
+  currency: string;
+  billingType: string;
+  expenseDate: Date;
+  renewalDate: Date | null;
+  paymentMethod: string | null;
+  status: string;
+  ownerId: number | null;
+  ownerName: string | null;
+  approvedBy: number | null;
+  approvedByName: string | null;
+  approvedAt: Date | null;
+  accountingStatus: string;
+  notes: string | null;
+  receiptFileName: string | null;
+  receiptMimeType: string | null;
+  receiptFileSize: number | null;
+  receiptUploadedBy: number | null;
+  receiptUploadedByName: string | null;
+  receiptUploadedAt: Date | null;
+  hasReceipt: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ExpenseReport {
+  summary: {
+    monthlyOperatingExpenses: number;
+    activeSubscriptions: number;
+    freePlanTools: number;
+    annualizedSoftwareCost: number;
+  };
+  rows: ExpenseRow[];
+}
+
+export interface ExpenseReceipt {
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  data: Buffer;
+}
+
+export interface ExpenseReceiptInput {
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  data: Buffer;
+  uploadedBy?: number | null;
+}
 
 export interface OperationsAnalyticsFilters {
   startDate?: Date;
@@ -449,6 +519,16 @@ export interface IStorage {
     input?: MarkInvoicePaidInput,
     paidByUserId?: number
   ): Promise<MarkInvoicePaidResult>;
+
+  // Expenses (Finance operating expense tracking)
+  getExpenses(filters: ExpenseFilters): Promise<ExpenseReport>;
+  getExpense(id: number): Promise<ExpenseRow | undefined>;
+  createExpense(expense: InsertExpense, createdByUserId?: number): Promise<ExpenseRow>;
+  updateExpense(id: number, expense: Partial<InsertExpense>): Promise<ExpenseRow | undefined>;
+  archiveExpense(id: number): Promise<ExpenseRow | undefined>;
+  saveExpenseReceipt(id: number, receipt: ExpenseReceiptInput): Promise<ExpenseRow | undefined>;
+  getExpenseReceipt(id: number): Promise<ExpenseReceipt | undefined>;
+  deleteExpenseReceipt(id: number): Promise<ExpenseRow | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2776,6 +2856,219 @@ export class DatabaseStorage implements IStorage {
         lineItems,
       };
     });
+  }
+
+  private async buildExpenseRows(rows: Expense[]): Promise<ExpenseRow[]> {
+    const userRows = await db.select({ id: users.id, fullName: users.fullName }).from(users);
+    const userNameById = new Map(userRows.map((user) => [user.id, user.fullName]));
+
+    return rows.map((row) => ({
+      id: row.id,
+      expenseId: row.expenseId,
+      vendor: row.vendor,
+      category: row.category,
+      description: row.description,
+      amount: row.amount,
+      currency: row.currency,
+      billingType: row.billingType,
+      expenseDate: row.expenseDate,
+      renewalDate: row.renewalDate,
+      paymentMethod: row.paymentMethod,
+      status: row.status,
+      ownerId: row.ownerId,
+      ownerName: row.ownerId ? userNameById.get(row.ownerId) || null : null,
+      approvedBy: row.approvedBy,
+      approvedByName: row.approvedBy ? userNameById.get(row.approvedBy) || null : null,
+      approvedAt: row.approvedAt,
+      accountingStatus: row.accountingStatus,
+      notes: row.notes,
+      receiptFileName: row.receiptFileName,
+      receiptMimeType: row.receiptMimeType,
+      receiptFileSize: row.receiptFileSize,
+      receiptUploadedBy: row.receiptUploadedBy,
+      receiptUploadedByName: row.receiptUploadedBy ? userNameById.get(row.receiptUploadedBy) || null : null,
+      receiptUploadedAt: row.receiptUploadedAt,
+      hasReceipt: Boolean(row.receiptData && row.receiptFileName && row.receiptMimeType),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  private buildExpenseConditions(filters: ExpenseFilters) {
+    const conditions = [];
+    if (filters.search) {
+      const search = `%${filters.search}%`;
+      conditions.push(or(ilike(expenses.vendor, search), ilike(expenses.description, search)));
+    }
+    if (filters.category && filters.category !== "all") conditions.push(eq(expenses.category, filters.category));
+    if (filters.status && filters.status !== "all") conditions.push(eq(expenses.status, filters.status));
+    if (filters.currency && filters.currency !== "all") conditions.push(eq(expenses.currency, filters.currency));
+    if (filters.billingType && filters.billingType !== "all") conditions.push(eq(expenses.billingType, filters.billingType));
+    if (filters.accountingStatus && filters.accountingStatus !== "all") conditions.push(eq(expenses.accountingStatus, filters.accountingStatus));
+    if (filters.fromDate) conditions.push(gte(expenses.expenseDate, filters.fromDate));
+    if (filters.toDate) conditions.push(lte(expenses.expenseDate, filters.toDate));
+    return conditions;
+  }
+
+  private calculateExpenseSummary(rows: ExpenseRow[]): ExpenseReport["summary"] {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const activeRows = rows.filter((row) => row.status !== "Archived" && row.status !== "Cancelled");
+    const monthlyOperatingExpenses = activeRows.reduce((sum, row) => {
+      const expenseDate = row.expenseDate;
+      if (expenseDate.getFullYear() !== currentYear || expenseDate.getMonth() !== currentMonth) return sum;
+      return sum + Number(row.amount || 0);
+    }, 0);
+    const activeSubscriptions = activeRows.filter((row) => row.status === "Active" && (row.billingType === "Monthly" || row.billingType === "Annual")).length;
+    const freePlanTools = activeRows.filter((row) => Number(row.amount || 0) === 0 || row.billingType === "Free Plan" || row.accountingStatus === "No Cost").length;
+    const annualizedSoftwareCost = activeRows
+      .filter((row) => row.category === "Software")
+      .reduce((sum, row) => {
+        const amount = Number(row.amount || 0);
+        if (row.billingType === "Monthly") return sum + amount * 12;
+        if (row.billingType === "Annual" || row.billingType === "One-time") return sum + amount;
+        return sum;
+      }, 0);
+
+    return {
+      monthlyOperatingExpenses,
+      activeSubscriptions,
+      freePlanTools,
+      annualizedSoftwareCost,
+    };
+  }
+
+  private async generateExpenseId(): Promise<string> {
+    const year = new Date().getFullYear();
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(expenses)
+      .where(sql`${expenses.expenseId} LIKE ${`EXP-${year}-%`}`);
+    return `EXP-${year}-${String(Number(count || 0) + 1).padStart(4, "0")}`;
+  }
+
+  async getExpenses(filters: ExpenseFilters = {}): Promise<ExpenseReport> {
+    const conditions = this.buildExpenseConditions(filters);
+    const rows = await db
+      .select()
+      .from(expenses)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(expenses.expenseDate), desc(expenses.createdAt));
+    const mappedRows = await this.buildExpenseRows(rows);
+    return {
+      summary: this.calculateExpenseSummary(mappedRows),
+      rows: mappedRows,
+    };
+  }
+
+  async getExpense(id: number): Promise<ExpenseRow | undefined> {
+    const [row] = await db.select().from(expenses).where(eq(expenses.id, id));
+    if (!row) return undefined;
+    const [mappedRow] = await this.buildExpenseRows([row]);
+    return mappedRow;
+  }
+
+  async createExpense(expense: InsertExpense, createdByUserId?: number): Promise<ExpenseRow> {
+    const expenseId = await this.generateExpenseId();
+    const [created] = await db
+      .insert(expenses)
+      .values({
+        ...expense,
+        expenseId,
+        ownerId: expense.ownerId || createdByUserId || null,
+        amount: Number(expense.amount || 0).toFixed(2),
+        currency: expense.currency || "USD",
+        status: expense.status || "Active",
+        accountingStatus: expense.accountingStatus || "Pending",
+        updatedAt: new Date(),
+      })
+      .returning();
+    const [mappedRow] = await this.buildExpenseRows([created]);
+    return mappedRow;
+  }
+
+  async updateExpense(id: number, expense: Partial<InsertExpense>): Promise<ExpenseRow | undefined> {
+    const [updated] = await db
+      .update(expenses)
+      .set({
+        ...expense,
+        amount: expense.amount !== undefined ? Number(expense.amount || 0).toFixed(2) : undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(expenses.id, id))
+      .returning();
+    if (!updated) return undefined;
+    const [mappedRow] = await this.buildExpenseRows([updated]);
+    return mappedRow;
+  }
+
+  async archiveExpense(id: number): Promise<ExpenseRow | undefined> {
+    const [updated] = await db
+      .update(expenses)
+      .set({ status: "Archived", updatedAt: new Date() })
+      .where(eq(expenses.id, id))
+      .returning();
+    if (!updated) return undefined;
+    const [mappedRow] = await this.buildExpenseRows([updated]);
+    return mappedRow;
+  }
+
+  async saveExpenseReceipt(id: number, receipt: ExpenseReceiptInput): Promise<ExpenseRow | undefined> {
+    const [updated] = await db
+      .update(expenses)
+      .set({
+        receiptFileName: receipt.fileName,
+        receiptMimeType: receipt.mimeType,
+        receiptFileSize: receipt.fileSize,
+        receiptUploadedBy: receipt.uploadedBy || null,
+        receiptUploadedAt: new Date(),
+        receiptData: receipt.data.toString("base64"),
+        updatedAt: new Date(),
+      })
+      .where(eq(expenses.id, id))
+      .returning();
+    if (!updated) return undefined;
+    const [mappedRow] = await this.buildExpenseRows([updated]);
+    return mappedRow;
+  }
+
+  async getExpenseReceipt(id: number): Promise<ExpenseReceipt | undefined> {
+    const [row] = await db
+      .select({
+        fileName: expenses.receiptFileName,
+        mimeType: expenses.receiptMimeType,
+        fileSize: expenses.receiptFileSize,
+        data: expenses.receiptData,
+      })
+      .from(expenses)
+      .where(eq(expenses.id, id));
+    if (!row?.fileName || !row.mimeType || !row.data) return undefined;
+    return {
+      fileName: row.fileName,
+      mimeType: row.mimeType,
+      fileSize: row.fileSize || Buffer.byteLength(row.data, "base64"),
+      data: Buffer.from(row.data, "base64"),
+    };
+  }
+
+  async deleteExpenseReceipt(id: number): Promise<ExpenseRow | undefined> {
+    const [updated] = await db
+      .update(expenses)
+      .set({
+        receiptFileName: null,
+        receiptMimeType: null,
+        receiptFileSize: null,
+        receiptUploadedBy: null,
+        receiptUploadedAt: null,
+        receiptData: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(expenses.id, id))
+      .returning();
+    if (!updated) return undefined;
+    const [mappedRow] = await this.buildExpenseRows([updated]);
+    return mappedRow;
   }
 
   // Insights
