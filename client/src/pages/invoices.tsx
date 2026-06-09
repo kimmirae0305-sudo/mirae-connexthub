@@ -333,6 +333,10 @@ export default function Invoices() {
     () => eligibleRows.filter((row) => selectedBillableUsageIds.includes(row.id)),
     [eligibleRows, selectedBillableUsageIds]
   );
+  const selectedBillableUsageSignature = useMemo(
+    () => [...selectedBillableUsageIds].sort((a, b) => a - b).join(","),
+    [selectedBillableUsageIds]
+  );
   const selectedClientIds = Array.from(new Set(selectedRows.map(getClientOrganizationId)));
   const hasMixedClients = selectedClientIds.length > 1;
   const selectedTotal = selectedRows.reduce((sum, row) => sum + getAmountUsd(row), 0);
@@ -355,7 +359,7 @@ export default function Invoices() {
 
     setBillingPeriodStart(formatDateInput(selectedDates[0]));
     setBillingPeriodEnd(formatDateInput(selectedDates[selectedDates.length - 1]));
-  }, [selectedRows]);
+  }, [selectedBillableUsageSignature]);
 
   const createDraftMutation = useMutation({
     mutationFn: async () => {
