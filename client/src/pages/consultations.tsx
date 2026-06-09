@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { z } from "zod";
-import { Plus, Phone, Calendar, Clock, Video, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { Phone, Calendar, Clock, Video, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,18 +46,7 @@ import { useAuth } from "@/lib/auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
-import type { CallRecord, InsertCallRecord, Project, Expert } from "@shared/schema";
-
-const callFormSchema = z.object({
-  projectId: z.number().min(1, "Project is required"),
-  expertId: z.number().min(1, "Expert is required"),
-  callDate: z.string().min(1, "Call date is required"),
-  durationMinutes: z.number().min(1, "Duration is required"),
-  scheduledStartTime: z.string().optional(),
-  scheduledEndTime: z.string().optional(),
-  zoomLink: z.string().optional(),
-  notes: z.string().optional(),
-});
+import type { CallRecord, Project, Expert } from "@shared/schema";
 
 const completeFormSchema = z.object({
   actualDurationMinutes: z.number().min(1, "Duration is required"),
@@ -65,7 +54,6 @@ const completeFormSchema = z.object({
   notes: z.string().optional(),
 });
 
-type CallFormData = z.infer<typeof callFormSchema>;
 type CompleteFormData = z.infer<typeof completeFormSchema>;
 
 function getStatusIcon(status: string) {
@@ -98,10 +86,11 @@ function getStatusBadge(status: string) {
 export default function Consultations() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isCompleteDialogOpen, setIsCompleteDialogOpen] = useState(false);
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [fromDateFilter, setFromDateFilter] = useState("");
+  const [toDateFilter, setToDateFilter] = useState("");
 
   const { data: callRecords, isLoading } = useQuery<CallRecord[]>({
     queryKey: ["/api/call-records"],
@@ -117,39 +106,12 @@ export default function Consultations() {
     queryKey: ["/api/experts"],
   });
 
-  const form = useForm<CallFormData>({
-    resolver: zodResolver(callFormSchema),
-    defaultValues: {
-      projectId: 0,
-      expertId: 0,
-      callDate: format(new Date(), "yyyy-MM-dd"),
-      durationMinutes: 30,
-      scheduledStartTime: "",
-      scheduledEndTime: "",
-      zoomLink: "",
-      notes: "",
-    },
-  });
-
   const completeForm = useForm<CompleteFormData>({
     resolver: zodResolver(completeFormSchema),
     defaultValues: {
       actualDurationMinutes: 30,
       recordingUrl: "",
       notes: "",
-    },
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (data: InsertCallRecord) => apiRequest("POST", "/api/call-records", data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/call-records"] });
-      setIsDialogOpen(false);
-      form.reset();
-      toast({ title: "Call scheduled successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to schedule call", variant: "destructive" });
     },
   });
 
@@ -180,24 +142,13 @@ export default function Consultations() {
     },
   });
 
-  const filteredRecords = callRecords?.filter((record) =>
-    statusFilter === "all" || record.status === statusFilter
-  );
-
-  const onSubmit = (data: CallFormData) => {
-    const cuUsed = Math.ceil((data.durationMinutes / 60) * 4) / 4;
-    const callData: InsertCallRecord = {
-      ...data,
-      callDate: new Date(data.callDate),
-      cuUsed: cuUsed.toString(),
-      status: data.scheduledStartTime ? "scheduled" : "pending",
-      scheduledStartTime: data.scheduledStartTime ? new Date(data.scheduledStartTime) : null,
-      scheduledEndTime: data.scheduledEndTime ? new Date(data.scheduledEndTime) : null,
-      zoomLink: data.zoomLink || null,
-      notes: data.notes || null,
-    };
-    createMutation.mutate(callData);
-  };
+  const filteredRecords = callRecords?.filter((record) => {
+    if (statusFilter !== "all" && record.status !== statusFilter) return false;
+    const callDate = new Date(record.callDate);
+    if (fromDateFilter && callDate < new Date(`${fromDateFilter}T00:00:00`)) return false;
+    if (toDateFilter && callDate > new Date(`${toDateFilter}T23:59:59`)) return false;
+    return true;
+  });
 
   const onCompleteSubmit = (data: CompleteFormData) => {
     completeMutation.mutate(data);
@@ -215,7 +166,7 @@ export default function Consultations() {
     ?.filter((r) => r.status === "completed")
     .reduce((sum, r) => sum + parseFloat(r.cuUsed || "0"), 0) || 0;
 
-  const scheduledCalls = callRecords?.filter((r) => r.status === "scheduled").length || 0;
+  const scheduledCalls = callRecords?.filter((r) => r.status === "pending" || r.status === "scheduled").length || 0;
   const completedCalls = callRecords?.filter((r) => r.status === "completed").length || 0;
 
   return (
@@ -224,14 +175,9 @@ export default function Consultations() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground">Consultations</h1>
           <p className="text-sm text-muted-foreground">
-            {isRA ? "Monitor calls for your assigned projects." : "Schedule and track expert consultations with CU usage."}
+            {isRA ? "Monitor calls for your assigned projects." : "Monitor consultations across projects. Schedule new calls from Project Details."}
           </p>
         </div>
-        {!isRA && (
-          <Button onClick={() => setIsDialogOpen(true)} className="gap-2" data-testid="button-schedule-call">
-            <Plus className="h-4 w-4" /> Schedule Call
-          </Button>
-        )}
       </div>
 
       <div className={`grid gap-4 ${isRA ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
@@ -276,18 +222,34 @@ export default function Consultations() {
         <CardHeader className="pb-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-base font-medium">All Consultations</CardTitle>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40" data-testid="select-status-filter">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="scheduled">Scheduled</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-40" data-testid="select-status-filter">
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="scheduled">Scheduled</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                type="date"
+                value={fromDateFilter}
+                onChange={(event) => setFromDateFilter(event.target.value)}
+                className="w-40"
+                data-testid="input-consultations-from-date"
+              />
+              <Input
+                type="date"
+                value={toDateFilter}
+                onChange={(event) => setToDateFilter(event.target.value)}
+                className="w-40"
+                data-testid="input-consultations-to-date"
+              />
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -299,12 +261,7 @@ export default function Consultations() {
               title="No consultations found"
               description={isRA 
                 ? "No consultations yet. Once your projects have scheduled calls, they will appear here."
-                : "Schedule your first call to get started."}
-              action={!isRA && (
-                <Button onClick={() => setIsDialogOpen(true)} className="gap-2">
-                  <Plus className="h-4 w-4" /> Schedule Call
-                </Button>
-              )}
+                : "Schedule calls from the Consultations tab inside Project Details."}
             />
           ) : (
             <div className="overflow-x-auto">
@@ -340,7 +297,7 @@ export default function Consultations() {
                       {!isRA && (
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            {record.status === "scheduled" && (
+                            {(record.status === "pending" || record.status === "scheduled") && (
                               <>
                                 <Button
                                   variant="outline"
@@ -390,144 +347,6 @@ export default function Consultations() {
           )}
         </CardContent>
       </Card>
-
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Schedule Consultation</DialogTitle>
-            <DialogDescription>
-              Schedule a new consultation call between a project and an expert.
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="projectId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Project *</FormLabel>
-                    <Select onValueChange={(v) => field.onChange(parseInt(v))} value={field.value?.toString()}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-project">
-                          <SelectValue placeholder="Select project" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {projects?.map((project) => (
-                          <SelectItem key={project.id} value={project.id.toString()}>
-                            {project.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="expertId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Expert *</FormLabel>
-                    <Select onValueChange={(v) => field.onChange(parseInt(v))} value={field.value?.toString()}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-expert">
-                          <SelectValue placeholder="Select expert" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {experts?.map((expert) => (
-                          <SelectItem key={expert.id} value={expert.id.toString()}>
-                            {expert.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="callDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Call Date *</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} data-testid="input-call-date" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="durationMinutes"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Duration (minutes) *</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min={15}
-                          step={15}
-                          {...field}
-                          onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
-                          data-testid="input-duration"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <FormField
-                control={form.control}
-                name="zoomLink"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Zoom Link</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://zoom.us/j/..." {...field} data-testid="input-zoom-link" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Additional notes..."
-                        className="resize-none"
-                        rows={2}
-                        {...field}
-                        data-testid="input-call-notes"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={createMutation.isPending} data-testid="button-save-call">
-                  {createMutation.isPending ? "Saving..." : "Schedule Call"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={isCompleteDialogOpen} onOpenChange={setIsCompleteDialogOpen}>
         <DialogContent className="max-w-lg">

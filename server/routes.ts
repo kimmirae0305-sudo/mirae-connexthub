@@ -824,6 +824,79 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/projects/:projectId/consultations", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const user = req.user!;
+      const project = await storage.getProject(projectId);
+
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      if ((user.role === "ra" || user.role === "Research Associate") && !raHasProjectAccess(project, user.id)) {
+        return res.status(403).json({ error: "Access denied: You are not assigned to this project" });
+      }
+
+      if (user.role === "pm" && project.createdByPmId && project.createdByPmId !== user.id) {
+        return res.status(403).json({ error: "Access denied: You are not the PM owner for this project" });
+      }
+
+      const records = await storage.getCallRecordsByProject(projectId);
+      res.json(records);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch project consultations" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/consultations", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const user = req.user!;
+      const project = await storage.getProject(projectId);
+
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      if (user.role === "ra" || user.role === "Research Associate") {
+        return res.status(403).json({ error: "Access denied: RAs cannot schedule consultations" });
+      }
+
+      if (user.role === "pm" && project.createdByPmId && project.createdByPmId !== user.id) {
+        return res.status(403).json({ error: "Access denied: You are not the PM owner for this project" });
+      }
+
+      const result = insertCallRecordSchema.safeParse({
+        ...req.body,
+        projectId,
+        status: req.body.status || "pending",
+      });
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+
+      if (result.data.projectId !== projectId) {
+        return res.status(400).json({ error: "Consultation project does not match route project" });
+      }
+
+      const projectExperts = await storage.getProjectExpertsByProject(projectId);
+      const isAttachedExpert = projectExperts.some((assignment) => assignment.expertId === result.data.expertId);
+      if (!isAttachedExpert) {
+        return res.status(400).json({ error: "Expert is not attached to this project" });
+      }
+
+      const record = await storage.createCallRecord({
+        ...result.data,
+        projectId,
+        status: "pending",
+      });
+      res.status(201).json(record);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create project consultation" });
+    }
+  });
+
   // Assign RAs to project
   app.post("/api/projects/:id/assign-ras", authMiddleware, async (req, res) => {
     try {
