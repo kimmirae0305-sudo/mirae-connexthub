@@ -1839,7 +1839,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/companies", authMiddleware, requireRoles("admin", "ra"), async (req, res) => {
+  app.post("/api/companies", authMiddleware, requireRoles("admin", "ceo", "coo", "ra"), async (req, res) => {
     try {
       const result = insertCompanySchema.safeParse(req.body);
       if (!result.success) {
@@ -1869,7 +1869,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/experts/:id/work-history/:index/link-company", authMiddleware, requireRoles("admin", "ra"), async (req: AuthRequest, res) => {
+  app.post("/api/experts/:id/work-history/:index/link-company", authMiddleware, requireRoles("admin", "ceo", "coo", "ra"), async (req: AuthRequest, res) => {
     try {
       const expertId = parseInt(req.params.id);
       const workHistoryIndex = parseInt(req.params.index);
@@ -1888,7 +1888,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/experts/:id/work-history/:index/create-company", authMiddleware, requireRoles("admin", "ra"), async (req: AuthRequest, res) => {
+  app.post("/api/experts/:id/work-history/:index/create-company", authMiddleware, requireRoles("admin", "ceo", "coo", "ra"), async (req: AuthRequest, res) => {
     try {
       const expertId = parseInt(req.params.id);
       const workHistoryIndex = parseInt(req.params.index);
@@ -1915,7 +1915,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/experts/:id/work-history/:index/company-status", authMiddleware, requireRoles("admin", "ra"), async (req: AuthRequest, res) => {
+  app.post("/api/experts/:id/work-history/:index/company-status", authMiddleware, requireRoles("admin", "ceo", "coo", "ra"), async (req: AuthRequest, res) => {
     try {
       const expertId = parseInt(req.params.id);
       const workHistoryIndex = parseInt(req.params.index);

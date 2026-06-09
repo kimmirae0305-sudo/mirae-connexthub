@@ -34,7 +34,9 @@ import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { StatusBadge } from "@/components/status-badge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { normalizeRole } from "@/lib/permissions";
 import type { CallRecord, Expert, ProjectExpert } from "@shared/schema";
 
 interface WorkExperience {
@@ -259,9 +261,13 @@ export default function ExpertDetail() {
   const expertId = Number(params.id);
   const isValidExpertId = Number.isInteger(expertId) && expertId > 0;
   const { toast } = useToast();
+  const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<ExpertEditForm | null>(null);
   const [newCompanyForm, setNewCompanyForm] = useState<NewCompanyForm>(emptyNewCompanyForm());
+  const [selectedExistingCompanyIds, setSelectedExistingCompanyIds] = useState<Record<number, string>>({});
+  const normalizedUserRole = normalizeRole(user?.role);
+  const canReviewCompanies = normalizedUserRole === "admin" || normalizedUserRole === "ceo" || normalizedUserRole === "coo" || normalizedUserRole === "ra";
 
   const {
     data: expert,
@@ -302,6 +308,15 @@ export default function ExpertDetail() {
       return response.json();
     },
     enabled: isValidExpertId,
+  });
+
+  const { data: companies = [] } = useQuery<Company[]>({
+    queryKey: ["/api/companies"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/companies");
+      return response.json();
+    },
+    enabled: isValidExpertId && canReviewCompanies,
   });
 
   useEffect(() => {
@@ -1178,26 +1193,30 @@ export default function ExpertDetail() {
                           Work history row {item.index + 1}. Link this raw company name to a reviewed Company record.
                         </p>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => updateCompanyReviewStatusMutation.mutate({ index: item.index, status: "unclear" })}
-                          disabled={updateCompanyReviewStatusMutation.isPending}
-                          data-testid={`button-company-unclear-${item.index}`}
-                        >
-                          Mark Unclear
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => updateCompanyReviewStatusMutation.mutate({ index: item.index, status: "ignored" })}
-                          disabled={updateCompanyReviewStatusMutation.isPending}
-                          data-testid={`button-company-ignore-${item.index}`}
-                        >
-                          Ignore
-                        </Button>
-                      </div>
+                      {canReviewCompanies ? (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => updateCompanyReviewStatusMutation.mutate({ index: item.index, status: "unclear" })}
+                            disabled={updateCompanyReviewStatusMutation.isPending}
+                            data-testid={`button-company-unclear-${item.index}`}
+                          >
+                            Mark Unclear
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => updateCompanyReviewStatusMutation.mutate({ index: item.index, status: "ignored" })}
+                            disabled={updateCompanyReviewStatusMutation.isPending}
+                            data-testid={`button-company-ignore-${item.index}`}
+                          >
+                            Ignore
+                          </Button>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Company review actions are available to Admin, CEO, COO, and RA users.</p>
+                      )}
                     </div>
 
                     <div className="mt-4 space-y-3">
@@ -1222,14 +1241,16 @@ export default function ExpertDetail() {
                                     .join(" • ")}
                                 </p>
                               </div>
-                              <Button
-                                size="sm"
-                                onClick={() => linkCompanyMutation.mutate({ index: item.index, companyId: suggestion.company.id })}
-                                disabled={linkCompanyMutation.isPending}
-                                data-testid={`button-link-company-${item.index}-${suggestion.company.id}`}
-                              >
-                                Link
-                              </Button>
+                              {canReviewCompanies && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => linkCompanyMutation.mutate({ index: item.index, companyId: suggestion.company.id })}
+                                  disabled={linkCompanyMutation.isPending}
+                                  data-testid={`button-link-company-${item.index}-${suggestion.company.id}`}
+                                >
+                                  Link Existing Company
+                                </Button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1238,7 +1259,47 @@ export default function ExpertDetail() {
                       )}
                     </div>
 
-                    {newCompanyForm.workHistoryIndex === item.index ? (
+                    {canReviewCompanies && (
+                      <div className="mt-4 rounded-md border bg-muted/30 p-3">
+                        <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
+                          <div className="flex-1 space-y-2">
+                            <label className="text-sm font-medium">Link Existing Company</label>
+                            <Select
+                              value={selectedExistingCompanyIds[item.index] || ""}
+                              onValueChange={(value) =>
+                                setSelectedExistingCompanyIds((current) => ({ ...current, [item.index]: value }))
+                              }
+                            >
+                              <SelectTrigger data-testid={`select-existing-company-${item.index}`}>
+                                <SelectValue placeholder={companies.length > 0 ? "Select a company" : "No companies available"} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {companies.map((company) => (
+                                  <SelectItem key={company.id} value={String(company.id)}>
+                                    {company.name} ({company.country})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Button
+                            onClick={() => {
+                              const companyId = Number(selectedExistingCompanyIds[item.index]);
+                              if (Number.isInteger(companyId) && companyId > 0) {
+                                linkCompanyMutation.mutate({ index: item.index, companyId });
+                              }
+                            }}
+                            disabled={linkCompanyMutation.isPending || !selectedExistingCompanyIds[item.index]}
+                            data-testid={`button-link-existing-company-${item.index}`}
+                          >
+                            Link Existing Company
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {canReviewCompanies ? (
+                      newCompanyForm.workHistoryIndex === item.index ? (
                       <div className="mt-4 rounded-md border bg-background p-4">
                         <div className="mb-3 flex items-center justify-between">
                           <p className="font-medium">Create Company and Link</p>
@@ -1309,7 +1370,7 @@ export default function ExpertDetail() {
                           Create and Link
                         </Button>
                       </div>
-                    ) : (
+                      ) : (
                       <Button
                         variant="outline"
                         className="mt-4"
@@ -1319,7 +1380,8 @@ export default function ExpertDetail() {
                         <Plus className="mr-2 h-4 w-4" />
                         Create New Company
                       </Button>
-                    )}
+                      )
+                    ) : null}
                   </div>
                 ))
               ) : (
