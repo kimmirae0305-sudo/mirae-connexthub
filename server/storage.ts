@@ -3771,8 +3771,9 @@ export class DatabaseStorage implements IStorage {
       );
   }
 
-  // Calculate sourcing incentives for a specific period
-  // Business rule: R$250 per completed call for sourced experts within 60 days of recruitment
+  // Calculate sourcing incentives for a specific period.
+  // Business rule: sourced experts must complete consultations within 60 days.
+  // First 4 eligible completed calls are unpaid, then R$250 per call up to R$4,000/month.
   async calculateRaIncentives(
     sourcerId: number,
     periodFromDate?: Date,
@@ -3797,6 +3798,14 @@ export class DatabaseStorage implements IStorage {
   }> {
     const INCENTIVE_PER_CALL_BRL = 250;
     const ELIGIBILITY_DAYS = 60;
+    const UNPAID_ELIGIBLE_CALLS = 4;
+    const MONTHLY_CAP_BRL = 4000;
+    const MAX_PAID_CALLS = MONTHLY_CAP_BRL / INCENTIVE_PER_CALL_BRL;
+    const calculatePayable = (eligibleCompletedCalls: number) =>
+      Math.min(
+        Math.max(0, eligibleCompletedCalls - UNPAID_ELIGIBLE_CALLS) * INCENTIVE_PER_CALL_BRL,
+        MONTHLY_CAP_BRL
+      );
 
     // Get sourcing owner info
     const [sourcer] = await db.select().from(users).where(eq(users.id, sourcerId));
@@ -3852,7 +3861,6 @@ export class DatabaseStorage implements IStorage {
       if (completedCalls.length > 0) {
         expertsWithCompletedCalls++;
         totalEligibleCalls += completedCalls.length;
-        const incentiveBRL = completedCalls.length * INCENTIVE_PER_CALL_BRL;
         for (const call of completedCalls) {
           const callActivityDate = call.completedAt || call.callDate || null;
           if (callActivityDate && (!lastActivityAt || new Date(callActivityDate) > lastActivityAt)) {
@@ -3865,9 +3873,19 @@ export class DatabaseStorage implements IStorage {
           expertName: expert.name,
           recruitedAt: expert.sourcedAt,
           eligibleCalls: completedCalls.length,
-          incentiveBRL,
+          incentiveBRL: 0,
         });
       }
+    }
+
+    let unpaidCallsRemaining = UNPAID_ELIGIBLE_CALLS;
+    let paidCallsRemaining = MAX_PAID_CALLS;
+    for (const expert of eligibleExperts) {
+      const unpaidCalls = Math.min(unpaidCallsRemaining, expert.eligibleCalls);
+      unpaidCallsRemaining -= unpaidCalls;
+      const payableCalls = Math.min(Math.max(0, expert.eligibleCalls - unpaidCalls), paidCallsRemaining);
+      paidCallsRemaining -= payableCalls;
+      expert.incentiveBRL = payableCalls * INCENTIVE_PER_CALL_BRL;
     }
 
     return {
@@ -3878,7 +3896,7 @@ export class DatabaseStorage implements IStorage {
       totalRecruitedExperts: recruitedExperts.length,
       expertsWithCompletedCalls,
       totalEligibleCalls,
-      totalIncentiveBRL: totalEligibleCalls * INCENTIVE_PER_CALL_BRL,
+      totalIncentiveBRL: calculatePayable(totalEligibleCalls),
       lastActivityAt,
       eligibleExperts,
     };
