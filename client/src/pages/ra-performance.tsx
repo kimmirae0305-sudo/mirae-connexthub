@@ -66,7 +66,7 @@ interface AllRaIncentivesResponse {
   summaries: RaIncentiveSummary[];
 }
 
-type SortBy = "incentivePayable" | "eligibleCompletedCalls" | "expertsSourced" | "acceptedExperts" | "latestActivity";
+type SortBy = "incentivePayable" | "eligibleCompletedCalls" | "registeredExperts" | "latestActivity";
 type SortOrder = "asc" | "desc";
 
 const periodOptions = [
@@ -80,8 +80,7 @@ const periodOptions = [
 const sortOptions: Array<{ label: string; value: SortBy }> = [
   { label: "Incentive Payable", value: "incentivePayable" },
   { label: "Eligible Completed Calls", value: "eligibleCompletedCalls" },
-  { label: "Experts Sourced", value: "expertsSourced" },
-  { label: "Accepted Experts", value: "acceptedExperts" },
+  { label: "Registered Experts", value: "registeredExperts" },
   { label: "Latest Activity", value: "latestActivity" },
 ];
 
@@ -174,8 +173,7 @@ export default function RaPerformance() {
 
     const getSortValue = (row: RaIncentiveSummary) => {
       if (sortBy === "eligibleCompletedCalls") return row.totalEligibleCalls;
-      if (sortBy === "expertsSourced") return row.totalRecruitedExperts;
-      if (sortBy === "acceptedExperts") return row.expertsWithCompletedCalls;
+      if (sortBy === "registeredExperts") return row.totalRecruitedExperts;
       if (sortBy === "latestActivity") return row.lastActivityAt ? new Date(row.lastActivityAt).getTime() : 0;
       return row.totalIncentiveBRL;
     };
@@ -192,7 +190,7 @@ export default function RaPerformance() {
   const summary = useMemo(
     () => ({
       totalSourcers: rows.length,
-      expertsSourced: rows.reduce((sum, row) => sum + row.totalRecruitedExperts, 0),
+      registeredExperts: rows.reduce((sum, row) => sum + row.totalRecruitedExperts, 0),
       eligibleCompletedCalls: rows.reduce((sum, row) => sum + row.totalEligibleCalls, 0),
       incentivePayable: rows.reduce((sum, row) => sum + row.totalIncentiveBRL, 0),
     }),
@@ -414,8 +412,8 @@ export default function RaPerformance() {
           icon={Users}
         />
         <MetricCard
-          title="Experts Sourced"
-          value={formatNumber(summary.expertsSourced)}
+          title="Registered Experts"
+          value={formatNumber(summary.registeredExperts)}
           subtitle="Newly sourced expert profiles"
           icon={UserCheck}
         />
@@ -442,7 +440,7 @@ export default function RaPerformance() {
         </CardHeader>
         <CardContent>
           {isLoadingAll ? (
-            <DataTableSkeleton columns={7} rows={6} />
+            <DataTableSkeleton columns={6} rows={6} />
           ) : rows.length === 0 ? (
             <EmptyState
               icon={Users}
@@ -455,8 +453,7 @@ export default function RaPerformance() {
                 <TableRow>
                   <TableHead>Sourcer</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead className="text-right">Experts Sourced</TableHead>
-                  <TableHead className="text-right">Accepted Experts</TableHead>
+                  <TableHead className="text-right">Registered Experts</TableHead>
                   <TableHead className="text-right">Eligible Completed Calls</TableHead>
                   <TableHead className="text-right">Sourcing Incentive Payable</TableHead>
                   <TableHead>Last Activity</TableHead>
@@ -474,7 +471,6 @@ export default function RaPerformance() {
                     </TableCell>
                     <TableCell>{formatRole(ra.raRole)}</TableCell>
                     <TableCell className="text-right">{formatNumber(ra.totalRecruitedExperts)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(ra.expertsWithCompletedCalls)}</TableCell>
                     <TableCell className="text-right">{formatNumber(ra.totalEligibleCalls)}</TableCell>
                     <TableCell className="text-right font-medium text-green-600">{formatBRL(ra.totalIncentiveBRL)}</TableCell>
                     <TableCell>{formatDate(ra.lastActivityAt || null)}</TableCell>
