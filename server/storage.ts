@@ -3743,13 +3743,91 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Sourcing incentive calculations
-  // Get experts recruited by a specific sourcing owner
-  async getExpertsByRecruiterId(sourcerId: number): Promise<Expert[]> {
-    return db
+  // Get experts attributed to a specific sourcing owner.
+  async getExpertsByRecruiterId(sourcerId: number): Promise<Array<Expert & { resolvedSourcedAt: Date | null }>> {
+    const [sourcer] = await db.select().from(users).where(eq(users.id, sourcerId));
+    const sourcerEmail = String(sourcer?.email || "").trim().toLowerCase();
+    const expertsById = new Map<number, Expert & { resolvedSourcedAt: Date | null }>();
+
+    const addExpert = (expert: Expert | null | undefined, sourcedAt?: Date | string | null) => {
+      if (!expert?.id) return;
+      const existing = expertsById.get(expert.id);
+      const resolvedSourcedAt = sourcedAt ? new Date(sourcedAt) : expert.sourcedAt ? new Date(expert.sourcedAt) : null;
+      if (!existing) {
+        expertsById.set(expert.id, { ...expert, resolvedSourcedAt });
+        return;
+      }
+      if (!existing.resolvedSourcedAt || (resolvedSourcedAt && resolvedSourcedAt < existing.resolvedSourcedAt)) {
+        expertsById.set(expert.id, { ...expert, resolvedSourcedAt });
+      }
+    };
+
+    const directlySourcedExperts = await db
       .select()
       .from(experts)
-      .where(eq(experts.sourcedByRaId, sourcerId))
-      .orderBy(desc(experts.sourcedAt));
+      .where(eq(experts.sourcedByRaId, sourcerId));
+    directlySourcedExperts.forEach((expert) => addExpert(expert, expert.sourcedAt));
+
+    const projectAttributedExperts = await db
+      .select({
+        expert: experts,
+        assignedAt: projectExperts.assignedAt,
+        respondedAt: projectExperts.respondedAt,
+        lastActivityAt: projectExperts.lastActivityAt,
+      })
+      .from(projectExperts)
+      .innerJoin(experts, eq(projectExperts.expertId, experts.id))
+      .where(eq(projectExperts.sourcedByRaId, sourcerId));
+    projectAttributedExperts.forEach((row) =>
+      addExpert(row.expert, row.respondedAt || row.lastActivityAt || row.assignedAt)
+    );
+
+    const ownedInviteConditions = [eq(expertInvitationLinks.raId, sourcerId)];
+    if (sourcerEmail) {
+      ownedInviteConditions.push(sql`lower(trim(${expertInvitationLinks.recruitedBy})) = ${sourcerEmail}` as any);
+    }
+    const ownedInvites = await db
+      .select()
+      .from(expertInvitationLinks)
+      .where(or(...ownedInviteConditions));
+
+    const linkedExpertIds = Array.from(
+      new Set(ownedInvites.map((link) => link.expertId).filter((id): id is number => Number.isInteger(id)))
+    );
+    if (linkedExpertIds.length > 0) {
+      const linkedExperts = await db.select().from(experts).where(inArray(experts.id, linkedExpertIds));
+      const linkedExpertsById = new Map(linkedExperts.map((expert) => [expert.id, expert]));
+      ownedInvites.forEach((link) => addExpert(link.expertId ? linkedExpertsById.get(link.expertId) : null, link.usedAt || link.createdAt));
+    }
+
+    const candidateEmails = Array.from(
+      new Set(
+        ownedInvites
+          .map((link) => String(link.candidateEmail || "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    if (candidateEmails.length > 0) {
+      const emailMatchedExperts = await db
+        .select()
+        .from(experts)
+        .where(inArray(sql`lower(trim(${experts.email}))`, candidateEmails));
+      const inviteByEmail = new Map(
+        ownedInvites
+          .filter((link) => link.candidateEmail)
+          .map((link) => [String(link.candidateEmail).trim().toLowerCase(), link])
+      );
+      emailMatchedExperts.forEach((expert) => {
+        const link = inviteByEmail.get(String(expert.email || "").trim().toLowerCase());
+        addExpert(expert, link?.usedAt || link?.createdAt || expert.sourcedAt);
+      });
+    }
+
+    return Array.from(expertsById.values()).sort((a, b) => {
+      const aTime = a.resolvedSourcedAt?.getTime() || 0;
+      const bTime = b.resolvedSourcedAt?.getTime() || 0;
+      return bTime - aTime;
+    });
   }
 
   // Get completed calls for an expert within a date range
@@ -3813,7 +3891,7 @@ export class DatabaseStorage implements IStorage {
       throw new Error("Sourcing owner not found");
     }
 
-    // Get all experts recruited by this sourcing owner
+    // Get all experts attributed to this sourcing owner, independent of completed-call activity.
     const recruitedExperts = await this.getExpertsByRecruiterId(sourcerId);
 
     let totalEligibleCalls = 0;
@@ -3828,9 +3906,9 @@ export class DatabaseStorage implements IStorage {
     }> = [];
 
     for (const expert of recruitedExperts) {
-      if (!expert.sourcedAt) continue;
+      if (!expert.resolvedSourcedAt) continue;
 
-      const recruitedAt = new Date(expert.sourcedAt);
+      const recruitedAt = new Date(expert.resolvedSourcedAt);
       if (!lastActivityAt || recruitedAt > lastActivityAt) {
         lastActivityAt = recruitedAt;
       }
@@ -3871,7 +3949,7 @@ export class DatabaseStorage implements IStorage {
         eligibleExperts.push({
           expertId: expert.id,
           expertName: expert.name,
-          recruitedAt: expert.sourcedAt,
+          recruitedAt: expert.resolvedSourcedAt,
           eligibleCalls: completedCalls.length,
           incentiveBRL: 0,
         });
@@ -3917,11 +3995,50 @@ export class DatabaseStorage implements IStorage {
     totalIncentiveBRL: number;
     lastActivityAt: Date | null;
   }>> {
-    const sourcingOwnerRows = await db
+    const expertSourcingOwnerRows = await db
       .select({ sourcerId: experts.sourcedByRaId })
       .from(experts)
       .where(sql`${experts.sourcedByRaId} IS NOT NULL`);
-    const sourcerIds = Array.from(new Set(sourcingOwnerRows.map((row) => row.sourcerId).filter((id): id is number => Number.isInteger(id))));
+
+    const projectSourcingOwnerRows = await db
+      .select({ sourcerId: projectExperts.sourcedByRaId })
+      .from(projectExperts)
+      .where(sql`${projectExperts.sourcedByRaId} IS NOT NULL`);
+
+    const inviteSourcingOwnerRows = await db
+      .select({
+        sourcerId: expertInvitationLinks.raId,
+        recruitedBy: expertInvitationLinks.recruitedBy,
+      })
+      .from(expertInvitationLinks)
+      .where(
+        or(
+          sql`${expertInvitationLinks.raId} IS NOT NULL`,
+          sql`${expertInvitationLinks.recruitedBy} IS NOT NULL`
+        )
+      );
+
+    const sourcerIdSet = new Set<number>();
+    for (const row of [...expertSourcingOwnerRows, ...projectSourcingOwnerRows]) {
+      if (Number.isInteger(row.sourcerId)) sourcerIdSet.add(row.sourcerId as number);
+    }
+
+    const recruitedByEmails = Array.from(
+      new Set(
+        inviteSourcingOwnerRows
+          .map((row) => String(row.recruitedBy || "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    for (const row of inviteSourcingOwnerRows) {
+      if (Number.isInteger(row.sourcerId)) sourcerIdSet.add(row.sourcerId as number);
+    }
+    for (const email of recruitedByEmails) {
+      const user = await this.getUserByEmail(email);
+      if (user) sourcerIdSet.add(user.id);
+    }
+
+    const sourcerIds = Array.from(sourcerIdSet);
 
     if (sourcerIds.length === 0) return [];
 

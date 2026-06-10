@@ -437,7 +437,7 @@ export default function RaPerformance() {
         <CardHeader>
           <CardTitle>Sourcing Operations Table</CardTitle>
           <CardDescription>
-            Sourcing incentives are calculated based on newly sourced experts who complete eligible consultations within the selected period.
+            Sourcing activity and incentives are calculated from attributed sourced experts and eligible completed consultations within the selected period.
           </CardDescription>
         </CardHeader>
         <CardContent>
