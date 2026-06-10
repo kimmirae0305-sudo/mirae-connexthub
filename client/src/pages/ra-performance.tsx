@@ -11,6 +11,8 @@ import { Users, TrendingUp, DollarSign, Calendar, ArrowLeft, Search, UserCheck }
 import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/lib/auth";
+import { normalizeRole } from "@/lib/permissions";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { MetricCard } from "@/components/metric-card";
@@ -64,6 +66,7 @@ interface AllRaIncentivesResponse {
   unpaidEligibleCalls?: number;
   monthlyCapBRL?: number;
   summaries: RaIncentiveSummary[];
+  debug?: unknown;
 }
 
 type SortBy = "incentivePayable" | "eligibleCompletedCalls" | "expertsSourced" | "acceptedExperts" | "latestActivity";
@@ -133,20 +136,28 @@ function formatRole(value?: string | null) {
 
 export default function RaPerformance() {
   const { raId } = useParams<{ raId?: string }>();
+  const { user } = useAuth();
   const [selectedPeriod, setSelectedPeriod] = useState("all");
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("incentivePayable");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const isDebugEligibleCallsEnabled =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("debugEligibleCalls") === "1";
+  const userRole = normalizeRole(user?.role);
+  const canViewEligibleCallDebug =
+    isDebugEligibleCallsEnabled && (userRole === "admin" || userRole === "ceo" || userRole === "coo");
 
   const periodDates = getPeriodDates(selectedPeriod);
   const selectedPeriodLabel = formatPeriodLabel(selectedPeriod, periodDates.fromDate, periodDates.toDate);
   const queryParams = new URLSearchParams();
   if (periodDates.fromDate) queryParams.set("fromDate", periodDates.fromDate.toISOString());
   if (periodDates.toDate) queryParams.set("toDate", periodDates.toDate.toISOString());
+  if (canViewEligibleCallDebug) queryParams.set("debugEligibleCalls", "1");
   const queryString = queryParams.toString() ? `?${queryParams.toString()}` : "";
 
   const { data: allRaData, isLoading: isLoadingAll } = useQuery<AllRaIncentivesResponse>({
-    queryKey: ["/api/ra-incentives", selectedPeriod],
+    queryKey: ["/api/ra-incentives", selectedPeriod, canViewEligibleCallDebug],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/ra-incentives${queryString}`);
       return res.json();
@@ -495,6 +506,22 @@ export default function RaPerformance() {
           )}
         </CardContent>
       </Card>
+
+      {canViewEligibleCallDebug && allRaData?.debug && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Temporary Eligible Calls Diagnostic</CardTitle>
+            <CardDescription>
+              Debug output for Sourcing Performance eligible completed calls. Remove after the root cause is confirmed.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre className="max-h-[520px] overflow-auto rounded-md bg-muted p-4 text-xs">
+              {JSON.stringify(allRaData.debug, null, 2)}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
