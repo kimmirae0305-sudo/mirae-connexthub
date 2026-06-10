@@ -45,6 +45,19 @@ const expenseReceiptUpload = raw({
   limit: "5mb",
 });
 
+const normalizeSourcingRole = (role?: string | null) => {
+  const normalized = String(role || "").toLowerCase().trim();
+  if (normalized === "administrator") return "admin";
+  if (normalized === "project manager") return "pm";
+  if (normalized === "research associate") return "ra";
+  if (normalized === "chief executive officer") return "ceo";
+  if (normalized === "chief operating officer") return "coo";
+  return normalized;
+};
+
+const canOwnSourcingAttribution = (role?: string | null) =>
+  ["admin", "ceo", "coo", "pm", "ra"].includes(normalizeSourcingRole(role));
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -1036,9 +1049,9 @@ export async function registerRoutes(
         return `${e.title} at ${e.company} (${period})`;
       }).join("\n") || "";
 
-      // Get RA ID for sourcedByRaId
+      // Track the employee who directly sourced this expert.
       let sourcedByRaId: number | null = null;
-      if (user && (user.role === "ra" || user.role === "Research Associate")) {
+      if (user && canOwnSourcingAttribution(user.role)) {
         sourcedByRaId = user.id;
       }
 
@@ -3299,12 +3312,12 @@ export async function registerRoutes(
       // Get vetting questions
       const vettingQuestions = await storage.getVettingQuestionsByProject(projectIdNum);
       
-      // Get RA information if recruited by specific RA
+      // Get sourcing owner information when the invite was created by an eligible employee.
       let recruitedByRaId: number | null = null;
       if (link.recruitedBy) {
-        const raUser = await storage.getUserByEmail(link.recruitedBy);
-        if (raUser && (raUser.role === "ra" || raUser.role === "Research Associate")) {
-          recruitedByRaId = raUser.id;
+        const sourcingUser = await storage.getUserByEmail(link.recruitedBy);
+        if (sourcingUser && canOwnSourcingAttribution(sourcingUser.role)) {
+          recruitedByRaId = sourcingUser.id;
         }
       }
       
@@ -3384,12 +3397,12 @@ export async function registerRoutes(
       // Hash password for expert login (future use)
       const passwordHash = await hashPassword(password);
       
-      // Get RA ID for sourcedByRaId
+      // Track the employee who directly sourced this expert.
       let sourcedByRaId: number | null = null;
       if (link.recruitedBy) {
-        const raUser = await storage.getUserByEmail(link.recruitedBy);
-        if (raUser && (raUser.role === "ra" || raUser.role === "Research Associate")) {
-          sourcedByRaId = raUser.id;
+        const sourcingUser = await storage.getUserByEmail(link.recruitedBy);
+        if (sourcingUser && canOwnSourcingAttribution(sourcingUser.role)) {
+          sourcedByRaId = sourcingUser.id;
         }
       }
       
@@ -4999,15 +5012,16 @@ export async function registerRoutes(
     }
   });
 
-  // ==================== RA INCENTIVE ENDPOINTS ====================
+  // ==================== SOURCING INCENTIVE ENDPOINTS ====================
   
-  // GET /api/ra-incentives - Get all RAs incentive summary
+  // GET /api/ra-incentives - Get sourcing incentive summary.
+  // Route name is preserved for backward compatibility.
   app.get("/api/ra-incentives", authMiddleware, async (req, res) => {
     try {
       const user = (req as any).user;
+      const role = normalizeSourcingRole(user.role);
       
-      // Admin, PM, and finance can view all RA incentives
-      if (!["admin", "pm", "finance"].includes(user.role)) {
+      if (!["admin", "ceo", "coo", "pm", "finance"].includes(role)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -5028,23 +5042,24 @@ export async function registerRoutes(
         summaries,
       });
     } catch (error) {
-      console.error("Error fetching RA incentives:", error);
-      res.status(500).json({ error: "Failed to fetch RA incentives" });
+      console.error("Error fetching sourcing incentives:", error);
+      res.status(500).json({ error: "Failed to fetch sourcing incentives" });
     }
   });
 
-  // GET /api/ra-incentives/:raId - Get detailed incentive info for specific RA
+  // GET /api/ra-incentives/:raId - Get detailed incentive info for a specific sourcer.
+  // Route name is preserved for backward compatibility.
   app.get("/api/ra-incentives/:raId", authMiddleware, async (req, res) => {
     try {
       const user = (req as any).user;
       const raId = parseInt(req.params.raId);
+      const role = normalizeSourcingRole(user.role);
 
-      // RAs can only view their own incentives, admin/pm/finance can view all
-      if (user.role === "ra" && user.id !== raId) {
+      if (role === "ra" && user.id !== raId) {
         return res.status(403).json({ error: "Access denied" });
       }
       
-      if (!["admin", "pm", "finance", "ra"].includes(user.role)) {
+      if (!["admin", "ceo", "coo", "pm", "finance", "ra"].includes(role)) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -5065,8 +5080,8 @@ export async function registerRoutes(
         ...incentiveData,
       });
     } catch (error) {
-      console.error("Error fetching RA incentive details:", error);
-      res.status(500).json({ error: "Failed to fetch RA incentive details" });
+      console.error("Error fetching sourcing incentive details:", error);
+      res.status(500).json({ error: "Failed to fetch sourcing incentive details" });
     }
   });
 
