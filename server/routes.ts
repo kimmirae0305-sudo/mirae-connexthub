@@ -5053,6 +5053,11 @@ export async function registerRoutes(
       const periodToDate = toDate ? new Date(toDate as string) : undefined;
 
       const summaries = await storage.getAllRaIncentiveSummary(periodFromDate, periodToDate);
+      const includeEligibleCallDebug =
+        req.query.debugEligibleCalls === "1" && ["admin", "ceo", "coo"].includes(role) && periodFromDate && periodToDate;
+      const eligibleCallDiagnostics = includeEligibleCallDebug
+        ? await storage.getSourcingPerformanceCallDiagnostics(periodFromDate, periodToDate)
+        : undefined;
       
       res.json({
         period: {
@@ -5064,6 +5069,19 @@ export async function registerRoutes(
         unpaidEligibleCalls: 4,
         monthlyCapBRL: 4000,
         summaries,
+        ...(eligibleCallDiagnostics
+          ? {
+              debug: {
+                eligibleCallDiagnosticsEnabled: true,
+                selectedPeriod: {
+                  fromDate: periodFromDate?.toISOString() || null,
+                  toDate: periodToDate?.toISOString() || null,
+                },
+                callRecordsInSelectedPeriodCount: eligibleCallDiagnostics.length,
+                eligibleCallDiagnostics,
+              },
+            }
+          : {}),
       });
     } catch (error) {
       console.error("Error fetching sourcing incentives:", error);
