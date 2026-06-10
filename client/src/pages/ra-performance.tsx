@@ -50,6 +50,8 @@ interface RaIncentiveDetail {
   };
   incentivePerCallBRL: number;
   eligibilityWindowDays: number;
+  unpaidEligibleCalls?: number;
+  monthlyCapBRL?: number;
 }
 
 interface AllRaIncentivesResponse {
@@ -59,6 +61,8 @@ interface AllRaIncentivesResponse {
   };
   incentivePerCallBRL: number;
   eligibilityWindowDays: number;
+  unpaidEligibleCalls?: number;
+  monthlyCapBRL?: number;
   summaries: RaIncentiveSummary[];
 }
 
@@ -187,7 +191,7 @@ export default function RaPerformance() {
 
   const summary = useMemo(
     () => ({
-      totalRAs: rows.length,
+      totalSourcers: rows.length,
       expertsSourced: rows.reduce((sum, row) => sum + row.totalRecruitedExperts, 0),
       eligibleCompletedCalls: rows.reduce((sum, row) => sum + row.totalEligibleCalls, 0),
       incentivePayable: rows.reduce((sum, row) => sum + row.totalIncentiveBRL, 0),
@@ -206,7 +210,7 @@ export default function RaPerformance() {
           </Link>
           <div>
             <h1 className="text-3xl font-semibold text-foreground">{raDetail.raName}</h1>
-            <p className="text-sm text-muted-foreground">{raDetail.raEmail} · {formatRole(raDetail.raRole)}</p>
+            <p className="text-sm text-muted-foreground">{raDetail.raEmail} - {formatRole(raDetail.raRole)}</p>
           </div>
         </div>
 
@@ -261,14 +265,16 @@ export default function RaPerformance() {
 
           <Card className="bg-green-50 dark:bg-green-950/20">
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Incentive</CardTitle>
+              <CardTitle className="text-sm font-medium">Sourcing Incentive Payable</CardTitle>
               <DollarSign className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-green-600">
                 R$ {raDetail.totalIncentiveBRL.toLocaleString("pt-BR")}
               </div>
-              <p className="text-xs text-muted-foreground">@ R${raDetail.incentivePerCallBRL}/call</p>
+              <p className="text-xs text-muted-foreground">
+                First {raDetail.unpaidEligibleCalls ?? 4} calls unpaid; capped at {formatBRL(raDetail.monthlyCapBRL ?? 4000)}
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -292,7 +298,7 @@ export default function RaPerformance() {
                     <TableHead>Expert Name</TableHead>
                     <TableHead>Recruited On</TableHead>
                     <TableHead className="text-right">Eligible Calls</TableHead>
-                    <TableHead className="text-right">Incentive (BRL)</TableHead>
+                    <TableHead className="text-right">Allocated Incentive (BRL)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -393,8 +399,9 @@ export default function RaPerformance() {
           </div>
           <div className="flex flex-wrap items-center gap-3 border-t pt-4 text-sm">
             <span className="text-muted-foreground">Incentive metadata:</span>
-            <Badge variant="secondary">Incentive Rate: R$ {allRaData?.incentivePerCallBRL ?? 250} per call</Badge>
+            <Badge variant="secondary">Rate: R$ {allRaData?.incentivePerCallBRL ?? 250} per eligible call after first {allRaData?.unpaidEligibleCalls ?? 4}</Badge>
             <Badge variant="secondary">Eligibility Window: {allRaData?.eligibilityWindowDays ?? 60} days</Badge>
+            <Badge variant="secondary">Monthly Cap: {formatBRL(allRaData?.monthlyCapBRL ?? 4000)}</Badge>
           </div>
         </CardContent>
       </Card>
@@ -402,7 +409,7 @@ export default function RaPerformance() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           title="Sourcers"
-          value={formatNumber(summary.totalRAs)}
+          value={formatNumber(summary.totalSourcers)}
           subtitle="Team members with sourcing activity in this report"
           icon={Users}
         />
@@ -421,7 +428,7 @@ export default function RaPerformance() {
         <MetricCard
           title="Sourcing Incentive Payable"
           value={formatBRL(summary.incentivePayable)}
-          subtitle="Based on eligible calls × R$250"
+          subtitle="First 4 eligible calls unpaid; capped at R$4,000/month"
           icon={DollarSign}
         />
       </div>

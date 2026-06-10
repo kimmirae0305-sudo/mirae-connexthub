@@ -5061,6 +5061,8 @@ export async function registerRoutes(
         },
         incentivePerCallBRL: 250,
         eligibilityWindowDays: 60,
+        unpaidEligibleCalls: 4,
+        monthlyCapBRL: 4000,
         summaries,
       });
     } catch (error) {
@@ -5099,6 +5101,8 @@ export async function registerRoutes(
         },
         incentivePerCallBRL: 250,
         eligibilityWindowDays: 60,
+        unpaidEligibleCalls: 4,
+        monthlyCapBRL: 4000,
         ...incentiveData,
       });
     } catch (error) {
