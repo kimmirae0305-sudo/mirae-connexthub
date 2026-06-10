@@ -3752,7 +3752,13 @@ export class DatabaseStorage implements IStorage {
     const addExpert = (expert: Expert | null | undefined, sourcedAt?: Date | string | null) => {
       if (!expert?.id) return;
       const existing = expertsById.get(expert.id);
-      const resolvedSourcedAt = sourcedAt ? new Date(sourcedAt) : expert.sourcedAt ? new Date(expert.sourcedAt) : null;
+      const resolvedSourcedAt = sourcedAt
+        ? new Date(sourcedAt)
+        : expert.sourcedAt
+        ? new Date(expert.sourcedAt)
+        : expert.createdAt
+        ? new Date(expert.createdAt)
+        : null;
       if (!existing) {
         expertsById.set(expert.id, { ...expert, resolvedSourcedAt });
         return;
@@ -3779,7 +3785,7 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(experts, eq(projectExperts.expertId, experts.id))
       .where(eq(projectExperts.sourcedByRaId, sourcerId));
     projectAttributedExperts.forEach((row) =>
-      addExpert(row.expert, row.respondedAt || row.lastActivityAt || row.assignedAt)
+      addExpert(row.expert, row.assignedAt || row.respondedAt || row.lastActivityAt)
     );
 
     const ownedInviteConditions = [eq(expertInvitationLinks.raId, sourcerId)];
@@ -3797,7 +3803,7 @@ export class DatabaseStorage implements IStorage {
     if (linkedExpertIds.length > 0) {
       const linkedExperts = await db.select().from(experts).where(inArray(experts.id, linkedExpertIds));
       const linkedExpertsById = new Map(linkedExperts.map((expert) => [expert.id, expert]));
-      ownedInvites.forEach((link) => addExpert(link.expertId ? linkedExpertsById.get(link.expertId) : null, link.usedAt || link.createdAt));
+      ownedInvites.forEach((link) => addExpert(link.expertId ? linkedExpertsById.get(link.expertId) : null, link.createdAt || link.usedAt));
     }
 
     const candidateEmails = Array.from(
@@ -3819,7 +3825,7 @@ export class DatabaseStorage implements IStorage {
       );
       emailMatchedExperts.forEach((expert) => {
         const link = inviteByEmail.get(String(expert.email || "").trim().toLowerCase());
-        addExpert(expert, link?.usedAt || link?.createdAt || expert.sourcedAt);
+        addExpert(expert, link?.createdAt || link?.usedAt || expert.sourcedAt || expert.createdAt);
       });
     }
 
@@ -3836,15 +3842,16 @@ export class DatabaseStorage implements IStorage {
     fromDate: Date,
     toDate: Date
   ): Promise<CallRecord[]> {
+    const completionDate = sql<Date>`coalesce(${callRecords.completedAt}, ${callRecords.callDate})`;
     return db
       .select()
       .from(callRecords)
       .where(
         and(
           eq(callRecords.expertId, expertId),
-          eq(callRecords.status, "completed"),
-          gte(callRecords.completedAt, fromDate),
-          lte(callRecords.completedAt, toDate)
+          sql`lower(${callRecords.status}) in ('completed', 'done', 'billable', 'invoiced', 'invoice_issued')`,
+          gte(completionDate, fromDate),
+          lte(completionDate, toDate)
         )
       );
   }
