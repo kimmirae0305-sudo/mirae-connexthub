@@ -1,16 +1,19 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users, TrendingUp, DollarSign, Calendar, ArrowLeft } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Users, TrendingUp, DollarSign, Calendar, ArrowLeft, Search, UserCheck } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
+import { DataTableSkeleton } from "@/components/data-table-skeleton";
+import { EmptyState } from "@/components/empty-state";
+import { MetricCard } from "@/components/metric-card";
 
 interface RaIncentiveSummary {
   raId: number;
@@ -55,12 +58,23 @@ interface AllRaIncentivesResponse {
   summaries: RaIncentiveSummary[];
 }
 
+type SortBy = "incentivePayable" | "eligibleCompletedCalls" | "expertsSourced" | "acceptedExperts" | "latestActivity";
+type SortOrder = "asc" | "desc";
+
 const periodOptions = [
   { label: "All Time", value: "all" },
   { label: "This Month", value: "this-month" },
   { label: "Last Month", value: "last-month" },
   { label: "Last 3 Months", value: "last-3-months" },
   { label: "Last 6 Months", value: "last-6-months" },
+];
+
+const sortOptions: Array<{ label: string; value: SortBy }> = [
+  { label: "Incentive Payable", value: "incentivePayable" },
+  { label: "Eligible Completed Calls", value: "eligibleCompletedCalls" },
+  { label: "Experts Sourced", value: "expertsSourced" },
+  { label: "Accepted Experts", value: "acceptedExperts" },
+  { label: "Latest Activity", value: "latestActivity" },
 ];
 
 function getPeriodDates(period: string): { fromDate?: Date; toDate?: Date } {
@@ -79,11 +93,34 @@ function getPeriodDates(period: string): { fromDate?: Date; toDate?: Date } {
   }
 }
 
+function formatDate(value?: string | Date | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM d, yyyy");
+}
+
+function formatPeriodLabel(period: string, fromDate?: Date, toDate?: Date) {
+  if (!fromDate || !toDate) return "All available RA sourcing activity";
+  return `${format(fromDate, "MMM d, yyyy")} - ${format(toDate, "MMM d, yyyy")}`;
+}
+
+function formatNumber(value: number) {
+  return value.toLocaleString();
+}
+
+function formatBRL(value: number) {
+  return `R$ ${value.toLocaleString("pt-BR")}`;
+}
+
 export default function RaPerformance() {
   const { raId } = useParams<{ raId?: string }>();
   const [selectedPeriod, setSelectedPeriod] = useState("all");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<SortBy>("incentivePayable");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 
   const periodDates = getPeriodDates(selectedPeriod);
+  const selectedPeriodLabel = formatPeriodLabel(selectedPeriod, periodDates.fromDate, periodDates.toDate);
   const queryParams = new URLSearchParams();
   if (periodDates.fromDate) queryParams.set("fromDate", periodDates.fromDate.toISOString());
   if (periodDates.toDate) queryParams.set("toDate", periodDates.toDate.toISOString());
@@ -106,6 +143,42 @@ export default function RaPerformance() {
     },
     enabled: !!raId,
   });
+
+  const rows = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    const sourceRows = allRaData?.summaries || [];
+    const filteredRows = normalizedSearch
+      ? sourceRows.filter((ra) =>
+          `${ra.raName} ${ra.raEmail}`.toLowerCase().includes(normalizedSearch)
+        )
+      : sourceRows;
+
+    const getSortValue = (row: RaIncentiveSummary) => {
+      if (sortBy === "eligibleCompletedCalls") return row.totalEligibleCalls;
+      if (sortBy === "expertsSourced") return row.totalRecruitedExperts;
+      if (sortBy === "acceptedExperts") return row.expertsWithCompletedCalls;
+      if (sortBy === "latestActivity") return row.totalEligibleCalls > 0 || row.totalRecruitedExperts > 0 ? 1 : 0;
+      return row.totalIncentiveBRL;
+    };
+
+    return [...filteredRows].sort((a, b) => {
+      const aValue = getSortValue(a);
+      const bValue = getSortValue(b);
+      const direction = sortOrder === "desc" ? -1 : 1;
+      if (aValue === bValue) return a.raName.localeCompare(b.raName);
+      return aValue > bValue ? direction : -direction;
+    });
+  }, [allRaData?.summaries, search, sortBy, sortOrder]);
+
+  const summary = useMemo(
+    () => ({
+      totalRAs: rows.length,
+      expertsSourced: rows.reduce((sum, row) => sum + row.totalRecruitedExperts, 0),
+      eligibleCompletedCalls: rows.reduce((sum, row) => sum + row.totalEligibleCalls, 0),
+      incentivePayable: rows.reduce((sum, row) => sum + row.totalIncentiveBRL, 0),
+    }),
+    [rows]
+  );
 
   if (raId && raDetail) {
     return (
@@ -233,103 +306,166 @@ export default function RaPerformance() {
 
   return (
     <div className="space-y-6 p-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold text-foreground">RA Performance</h1>
-          <p className="text-sm text-muted-foreground">
-            Track RA recruitment incentives and expert sourcing metrics
-          </p>
-        </div>
-        <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-          <SelectTrigger className="w-48" data-testid="select-period">
-            <SelectValue placeholder="Select period" />
-          </SelectTrigger>
-          <SelectContent>
-            {periodOptions.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div>
+        <h1 className="text-3xl font-semibold text-foreground">RA Performance</h1>
+        <p className="text-sm text-muted-foreground">
+          Track RA recruitment incentives and expert sourcing metrics
+        </p>
       </div>
 
-      {allRaData && (
-        <Card className="bg-muted/50">
-          <CardContent className="py-4">
-            <div className="flex flex-wrap items-center gap-6 text-sm">
-              <div>
-                <span className="text-muted-foreground">Incentive Rate:</span>{" "}
-                <Badge variant="secondary">R$ {allRaData.incentivePerCallBRL} per call</Badge>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Eligibility Window:</span>{" "}
-                <Badge variant="secondary">{allRaData.eligibilityWindowDays} days</Badge>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Report Controls</CardTitle>
+          <CardDescription>Results for selected period: {selectedPeriodLabel}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Date Range</label>
+              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                <SelectTrigger data-testid="select-period">
+                  <SelectValue placeholder="Select period" />
+                </SelectTrigger>
+                <SelectContent>
+                  {periodOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Sort By</label>
+              <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortBy)}>
+                <SelectTrigger data-testid="select-sort-by">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {sortOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Order</label>
+              <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as SortOrder)}>
+                <SelectTrigger data-testid="select-sort-order">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="desc">Highest first</SelectItem>
+                  <SelectItem value="asc">Lowest first</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Search</label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search RA name or email..."
+                  className="pl-9"
+                  data-testid="input-search-ra"
+                />
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 border-t pt-4 text-sm">
+            <span className="text-muted-foreground">Incentive metadata:</span>
+            <Badge variant="secondary">Incentive Rate: R$ {allRaData?.incentivePerCallBRL ?? 250} per call</Badge>
+            <Badge variant="secondary">Eligibility Window: {allRaData?.eligibilityWindowDays ?? 60} days</Badge>
+          </div>
+        </CardContent>
+      </Card>
 
-      {isLoadingAll ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Card key={i}>
-              <CardContent className="p-6">
-                <div className="space-y-3">
-                  <Skeleton className="h-5 w-32" />
-                  <Skeleton className="h-4 w-24" />
-                  <div className="grid grid-cols-2 gap-4 pt-2">
-                    <Skeleton className="h-12" />
-                    <Skeleton className="h-12" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : allRaData?.summaries.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Users className="mx-auto h-12 w-12 text-muted-foreground/50" />
-            <h3 className="mt-4 text-lg font-medium">No RA Data</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              No Research Associates found or no incentive data available for this period.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {allRaData?.summaries.map((ra) => (
-            <Link key={ra.raId} href={`/ra-performance/${ra.raId}`}>
-              <Card className="cursor-pointer transition-colors hover-elevate" data-testid={`card-ra-${ra.raId}`}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">{ra.raName}</CardTitle>
-                  <CardDescription>{ra.raEmail}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Recruited</p>
-                      <p className="text-xl font-semibold">{ra.totalRecruitedExperts}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Eligible Calls</p>
-                      <p className="text-xl font-semibold">{ra.totalEligibleCalls}</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex items-center justify-between border-t pt-4">
-                    <span className="text-sm text-muted-foreground">Total Incentive</span>
-                    <span className="text-lg font-bold text-green-600">
-                      R$ {ra.totalIncentiveBRL.toLocaleString("pt-BR")}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
-      )}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          title="RAs"
+          value={formatNumber(summary.totalRAs)}
+          subtitle="Matching Research Associates in this report"
+          icon={Users}
+        />
+        <MetricCard
+          title="Experts Sourced"
+          value={formatNumber(summary.expertsSourced)}
+          subtitle="RA-sourced expert profiles"
+          icon={UserCheck}
+        />
+        <MetricCard
+          title="Eligible Completed Calls"
+          value={formatNumber(summary.eligibleCompletedCalls)}
+          subtitle="Completed consultations within the 60-day eligibility window"
+          icon={Calendar}
+        />
+        <MetricCard
+          title="Incentive Payable"
+          value={formatBRL(summary.incentivePayable)}
+          subtitle="Eligible calls x R$250"
+          icon={DollarSign}
+        />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>RA Operations Table</CardTitle>
+          <CardDescription>
+            RA incentives are calculated when an RA-sourced expert completes a consultation within the eligibility window.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingAll ? (
+            <DataTableSkeleton columns={7} rows={6} />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="No RA performance data yet"
+              description="No Research Associates with eligible sourced experts or completed calls were found for the selected period."
+            />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>RA</TableHead>
+                  <TableHead className="text-right">Experts Sourced</TableHead>
+                  <TableHead className="text-right">Accepted Experts</TableHead>
+                  <TableHead className="text-right">Eligible Completed Calls</TableHead>
+                  <TableHead className="text-right">Incentive Payable</TableHead>
+                  <TableHead>Last Activity</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((ra) => (
+                  <TableRow key={ra.raId} data-testid={`row-ra-performance-${ra.raId}`}>
+                    <TableCell>
+                      <Link href={`/ra-performance/${ra.raId}`} className="font-medium text-primary hover:underline">
+                        {ra.raName}
+                      </Link>
+                      <div className="text-xs text-muted-foreground">{ra.raEmail}</div>
+                    </TableCell>
+                    <TableCell className="text-right">{formatNumber(ra.totalRecruitedExperts)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(ra.expertsWithCompletedCalls)}</TableCell>
+                    <TableCell className="text-right">{formatNumber(ra.totalEligibleCalls)}</TableCell>
+                    <TableCell className="text-right font-medium text-green-600">{formatBRL(ra.totalIncentiveBRL)}</TableCell>
+                    <TableCell>{formatDate(null)}</TableCell>
+                    <TableCell>
+                      <Badge variant={ra.totalEligibleCalls > 0 ? "default" : ra.totalRecruitedExperts > 0 ? "secondary" : "outline"}>
+                        {ra.totalEligibleCalls > 0 ? "Eligible Activity" : ra.totalRecruitedExperts > 0 ? "Sourcing" : "No Activity"}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
