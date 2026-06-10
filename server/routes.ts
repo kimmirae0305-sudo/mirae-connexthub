@@ -816,8 +816,24 @@ export async function registerRoutes(
       const projectAdvisors = enrichedExperts;
       const projectApplications = enrichedExperts.filter(isReviewableApplication);
 
-      // Get RA invite links (including quick invites)
-      const raInviteLinks = inviteLinks.filter(l => (l.inviteType === "ra" || l.inviteType === "quick") && l.isActive);
+      const normalizeInviteEmail = (email?: string | null) => String(email || "").trim().toLowerCase();
+      const onboardedExpertEmails = new Set(
+        raSourcedExperts
+          .map((assignment) => normalizeInviteEmail(assignment.expert?.email))
+          .filter(Boolean)
+      );
+      const pendingInviteStatuses = new Set(["pending", "pending_onboarding", "sent", "opened", "in_progress", "awaiting_submission"]);
+
+      // Get RA/quick invite links that have not yet produced an onboarded expert.
+      const raInviteLinks = inviteLinks.filter((link) => {
+        if (link.inviteType !== "ra" && link.inviteType !== "quick") return false;
+        if (!link.isActive) return false;
+        if (!pendingInviteStatuses.has(link.status)) return false;
+        if (link.expertId) return false;
+        const candidateEmail = normalizeInviteEmail(link.candidateEmail);
+        if (candidateEmail && onboardedExpertEmails.has(candidateEmail)) return false;
+        return true;
+      });
 
       res.json({
         ...project,
@@ -1409,7 +1425,7 @@ export async function registerRoutes(
       }
 
       await db.update(expertInvitationLinks)
-        .set({ status: "onboarded", usedAt: new Date(), updatedAt: new Date() })
+        .set({ status: "onboarded", expertId: expert.id, usedAt: new Date(), updatedAt: new Date() })
         .where(eq(expertInvitationLinks.token, token));
 
       // Log activity
@@ -3261,7 +3277,7 @@ export async function registerRoutes(
       }
 
       const expert = await storage.createExpert(result.data);
-      await storage.markInvitationLinkUsed(token);
+      await storage.markInvitationLinkUsed(token, expert.id, "onboarded");
 
       // If link is for a specific project, auto-assign expert
       if (link.projectId) {
@@ -3457,8 +3473,8 @@ export async function registerRoutes(
       
       const expert = await storage.createExpert(result.data);
       
-      // Mark invitation link as used
-      await storage.markInvitationLinkUsed(token);
+      // Mark invitation link as used and link it to the created expert
+      await storage.markInvitationLinkUsed(token, expert.id, "onboarded");
       
       // Get project for vetting question mapping
       const project = await storage.getProject(projectIdNum);
@@ -3475,15 +3491,21 @@ export async function registerRoutes(
       });
       
       // Create project-expert assignment with status "interested"
-      const invitationToken = generateRecruitmentToken();
       await storage.createProjectExpert({
         projectId: projectIdNum,
         expertId: expert.id,
         status: "accepted",
+        invitationStatus: "submitted",
+        pipelineStatus: "interested",
+        sourceType: inviteType === "ra" ? "ra_external" : "quick_invite",
+        sourcedByRaId: sourcedByRaId || undefined,
         invitedAt: new Date(),
         respondedAt: new Date(),
-        invitationToken,
+        invitationToken: token,
         vqAnswers: formattedVqAnswers,
+        applicationStatus: "submitted",
+        acceptedAt: new Date(),
+        lastActivityAt: new Date(),
         notes: `Self-registered via invitation link. Invite type: ${inviteType}`,
       });
       

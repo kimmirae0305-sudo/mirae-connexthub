@@ -2864,9 +2864,26 @@ export default function ProjectDetail() {
             </CardHeader>
             <CardContent>
               {(() => {
-                const pendingInvites = projectDetail.raInviteLinks?.filter(
-                  (link: any) => link.status === "pending_onboarding" || link.status === "onboarded"
-                ) || [];
+                const onboardedExpertEmails = new Set(
+                  (projectDetail.raSourcedExperts || [])
+                    .map((pe) => String(pe.expert?.email || "").trim().toLowerCase())
+                    .filter(Boolean)
+                );
+                const pendingInviteStatuses = new Set(["pending", "pending_onboarding", "sent", "opened", "in_progress", "awaiting_submission"]);
+                const pendingInvites = projectDetail.raInviteLinks?.filter((link: any) => {
+                  const candidateEmail = String(link.candidateEmail || "").trim().toLowerCase();
+                  return (
+                    pendingInviteStatuses.has(link.status) &&
+                    !link.expertId &&
+                    (!candidateEmail || !onboardedExpertEmails.has(candidateEmail))
+                  );
+                }) || [];
+                const getPendingInviteLabel = (status: string) => {
+                  if (status === "sent" || status === "pending") return "Invite Sent";
+                  if (status === "opened") return "Invite Opened";
+                  if (status === "in_progress") return "In Progress";
+                  return "Awaiting Submission";
+                };
                 
                 const hasExperts = projectDetail.raSourcedExperts && projectDetail.raSourcedExperts.length > 0;
                 const hasPending = pendingInvites.length > 0;
@@ -2914,7 +2931,7 @@ export default function ProjectDetail() {
                                   <TableCell>
                                     <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400">
                                       <Clock className="h-3 w-3 mr-1" />
-                                      {invite.status === "pending_onboarding" ? "Awaiting Onboarding" : "Awaiting Decision"}
+                                      {getPendingInviteLabel(invite.status)}
                                     </Badge>
                                   </TableCell>
                                   <TableCell className="font-mono text-xs text-muted-foreground">

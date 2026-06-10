@@ -570,7 +570,7 @@ export interface IStorage {
   getExpertInvitationLinksByRa(raId: number): Promise<ExpertInvitationLink[]>;
   createExpertInvitationLink(link: InsertExpertInvitationLink): Promise<ExpertInvitationLink>;
   updateExpertInvitationLink(id: number, link: Partial<InsertExpertInvitationLink>): Promise<ExpertInvitationLink | undefined>;
-  markInvitationLinkUsed(token: string): Promise<ExpertInvitationLink | undefined>;
+  markInvitationLinkUsed(token: string, expertId?: number, status?: string): Promise<ExpertInvitationLink | undefined>;
   updateInvitationLinkStatus(token: string, status: string): Promise<ExpertInvitationLink | undefined>;
 
   // Project Activities
@@ -3689,10 +3689,16 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
-  async markInvitationLinkUsed(token: string): Promise<ExpertInvitationLink | undefined> {
+  async markInvitationLinkUsed(token: string, expertId?: number, status = "onboarded"): Promise<ExpertInvitationLink | undefined> {
     const [updated] = await db
       .update(expertInvitationLinks)
-      .set({ usedAt: new Date(), isActive: false })
+      .set({
+        usedAt: new Date(),
+        isActive: false,
+        status,
+        expertId: expertId || undefined,
+        updatedAt: new Date(),
+      } as any)
       .where(eq(expertInvitationLinks.token, token))
       .returning();
     return updated || undefined;
