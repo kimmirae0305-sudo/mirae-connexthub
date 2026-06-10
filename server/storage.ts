@@ -3919,6 +3919,15 @@ export class DatabaseStorage implements IStorage {
 
     // Get all experts attributed to this sourcing owner, independent of completed-call activity.
     const recruitedExperts = await this.getExpertsByRecruiterId(sourcerId);
+    const isWithinReportPeriod = (value: Date | null | undefined) => {
+      if (!value) return false;
+      if (periodFromDate && value < periodFromDate) return false;
+      if (periodToDate && value > periodToDate) return false;
+      return true;
+    };
+    const periodRegisteredExperts = periodFromDate || periodToDate
+      ? recruitedExperts.filter((expert) => isWithinReportPeriod(expert.resolvedSourcedAt))
+      : recruitedExperts;
 
     let totalEligibleCalls = 0;
     let expertsWithCompletedCalls = 0;
@@ -3935,7 +3944,7 @@ export class DatabaseStorage implements IStorage {
       if (!expert.resolvedSourcedAt) continue;
 
       const recruitedAt = new Date(expert.resolvedSourcedAt);
-      if (!lastActivityAt || recruitedAt > lastActivityAt) {
+      if (isWithinReportPeriod(recruitedAt) && (!lastActivityAt || recruitedAt > lastActivityAt)) {
         lastActivityAt = recruitedAt;
       }
       const eligibilityEndDate = new Date(recruitedAt);
@@ -3997,7 +4006,7 @@ export class DatabaseStorage implements IStorage {
       raName: sourcer.fullName,
       raEmail: sourcer.email,
       raRole: sourcer.role,
-      totalRecruitedExperts: recruitedExperts.length,
+      totalRecruitedExperts: periodRegisteredExperts.length,
       expertsWithCompletedCalls,
       totalEligibleCalls,
       totalIncentiveBRL: calculatePayable(totalEligibleCalls),
@@ -4081,6 +4090,9 @@ export class DatabaseStorage implements IStorage {
         periodFromDate,
         periodToDate
       );
+      if ((periodFromDate || periodToDate) && incentiveData.totalRecruitedExperts === 0 && incentiveData.totalEligibleCalls === 0) {
+        continue;
+      }
       summaries.push({
         raId: incentiveData.raId,
         raName: incentiveData.raName,
