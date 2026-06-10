@@ -3806,6 +3806,25 @@ export class DatabaseStorage implements IStorage {
       ownedInvites.forEach((link) => addExpert(link.expertId ? linkedExpertsById.get(link.expertId) : null, link.createdAt || link.usedAt));
     }
 
+    const ownedInviteTokens = Array.from(
+      new Set(ownedInvites.map((link) => link.token).filter(Boolean))
+    );
+    if (ownedInviteTokens.length > 0) {
+      const inviteTokenMatchedExperts = await db
+        .select({
+          expert: experts,
+          assignedAt: projectExperts.assignedAt,
+          respondedAt: projectExperts.respondedAt,
+          lastActivityAt: projectExperts.lastActivityAt,
+        })
+        .from(projectExperts)
+        .innerJoin(experts, eq(projectExperts.expertId, experts.id))
+        .where(inArray(projectExperts.invitationToken, ownedInviteTokens));
+      inviteTokenMatchedExperts.forEach((row) =>
+        addExpert(row.expert, row.assignedAt || row.respondedAt || row.lastActivityAt || row.expert.sourcedAt || row.expert.createdAt)
+      );
+    }
+
     const candidateEmails = Array.from(
       new Set(
         ownedInvites
@@ -3886,6 +3905,7 @@ export class DatabaseStorage implements IStorage {
         .where(
           or(
             call.expertId ? eq(expertInvitationLinks.expertId, call.expertId) : sql`false`,
+            projectExpert?.invitationToken ? eq(expertInvitationLinks.token, projectExpert.invitationToken) : sql`false`,
             normalizedExpertEmail
               ? sql`lower(trim(${expertInvitationLinks.candidateEmail})) = ${normalizedExpertEmail}`
               : sql`false`
