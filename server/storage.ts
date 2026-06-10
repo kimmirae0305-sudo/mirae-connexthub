@@ -3736,13 +3736,13 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
-  // RA Incentive Calculations
-  // Get experts recruited by a specific RA
-  async getExpertsByRecruiterId(raId: number): Promise<Expert[]> {
+  // Sourcing incentive calculations
+  // Get experts recruited by a specific sourcing owner
+  async getExpertsByRecruiterId(sourcerId: number): Promise<Expert[]> {
     return db
       .select()
       .from(experts)
-      .where(eq(experts.sourcedByRaId, raId))
+      .where(eq(experts.sourcedByRaId, sourcerId))
       .orderBy(desc(experts.sourcedAt));
   }
 
@@ -3765,20 +3765,22 @@ export class DatabaseStorage implements IStorage {
       );
   }
 
-  // Calculate RA incentives for a specific period
-  // Business rule: R$250 per completed call for RA-sourced experts within 60 days of recruitment
+  // Calculate sourcing incentives for a specific period
+  // Business rule: R$250 per completed call for sourced experts within 60 days of recruitment
   async calculateRaIncentives(
-    raId: number,
+    sourcerId: number,
     periodFromDate?: Date,
     periodToDate?: Date
   ): Promise<{
     raId: number;
     raName: string;
     raEmail: string;
+    raRole: string;
     totalRecruitedExperts: number;
     expertsWithCompletedCalls: number;
     totalEligibleCalls: number;
     totalIncentiveBRL: number;
+    lastActivityAt: Date | null;
     eligibleExperts: Array<{
       expertId: number;
       expertName: string;
@@ -3790,17 +3792,18 @@ export class DatabaseStorage implements IStorage {
     const INCENTIVE_PER_CALL_BRL = 250;
     const ELIGIBILITY_DAYS = 60;
 
-    // Get RA info
-    const [ra] = await db.select().from(users).where(eq(users.id, raId));
-    if (!ra) {
-      throw new Error("RA not found");
+    // Get sourcing owner info
+    const [sourcer] = await db.select().from(users).where(eq(users.id, sourcerId));
+    if (!sourcer) {
+      throw new Error("Sourcing owner not found");
     }
 
-    // Get all experts recruited by this RA
-    const recruitedExperts = await this.getExpertsByRecruiterId(raId);
+    // Get all experts recruited by this sourcing owner
+    const recruitedExperts = await this.getExpertsByRecruiterId(sourcerId);
 
     let totalEligibleCalls = 0;
     let expertsWithCompletedCalls = 0;
+    let lastActivityAt: Date | null = null;
     const eligibleExperts: Array<{
       expertId: number;
       expertName: string;
@@ -3813,6 +3816,9 @@ export class DatabaseStorage implements IStorage {
       if (!expert.sourcedAt) continue;
 
       const recruitedAt = new Date(expert.sourcedAt);
+      if (!lastActivityAt || recruitedAt > lastActivityAt) {
+        lastActivityAt = recruitedAt;
+      }
       const eligibilityEndDate = new Date(recruitedAt);
       eligibilityEndDate.setDate(eligibilityEndDate.getDate() + ELIGIBILITY_DAYS);
 
@@ -3841,6 +3847,12 @@ export class DatabaseStorage implements IStorage {
         expertsWithCompletedCalls++;
         totalEligibleCalls += completedCalls.length;
         const incentiveBRL = completedCalls.length * INCENTIVE_PER_CALL_BRL;
+        for (const call of completedCalls) {
+          const callActivityDate = call.completedAt || call.callDate || null;
+          if (callActivityDate && (!lastActivityAt || new Date(callActivityDate) > lastActivityAt)) {
+            lastActivityAt = new Date(callActivityDate);
+          }
+        }
 
         eligibleExperts.push({
           expertId: expert.id,
@@ -3853,18 +3865,20 @@ export class DatabaseStorage implements IStorage {
     }
 
     return {
-      raId,
-      raName: ra.fullName,
-      raEmail: ra.email,
+      raId: sourcer.id,
+      raName: sourcer.fullName,
+      raEmail: sourcer.email,
+      raRole: sourcer.role,
       totalRecruitedExperts: recruitedExperts.length,
       expertsWithCompletedCalls,
       totalEligibleCalls,
       totalIncentiveBRL: totalEligibleCalls * INCENTIVE_PER_CALL_BRL,
+      lastActivityAt,
       eligibleExperts,
     };
   }
 
-  // Get all RAs with their incentive summary
+  // Get all users with sourcing-attributed experts and their incentive summary
   async getAllRaIncentiveSummary(
     periodFromDate?: Date,
     periodToDate?: Date
@@ -3872,22 +3886,31 @@ export class DatabaseStorage implements IStorage {
     raId: number;
     raName: string;
     raEmail: string;
+    raRole: string;
     totalRecruitedExperts: number;
     expertsWithCompletedCalls: number;
     totalEligibleCalls: number;
     totalIncentiveBRL: number;
+    lastActivityAt: Date | null;
   }>> {
-    // Get all RAs
-    const ras = await db
+    const sourcingOwnerRows = await db
+      .select({ sourcerId: experts.sourcedByRaId })
+      .from(experts)
+      .where(sql`${experts.sourcedByRaId} IS NOT NULL`);
+    const sourcerIds = Array.from(new Set(sourcingOwnerRows.map((row) => row.sourcerId).filter((id): id is number => Number.isInteger(id))));
+
+    if (sourcerIds.length === 0) return [];
+
+    const sourcers = await db
       .select()
       .from(users)
-      .where(eq(users.role, "ra"));
+      .where(inArray(users.id, sourcerIds));
 
     const summaries = [];
 
-    for (const ra of ras) {
+    for (const sourcer of sourcers) {
       const incentiveData = await this.calculateRaIncentives(
-        ra.id,
+        sourcer.id,
         periodFromDate,
         periodToDate
       );
@@ -3895,10 +3918,12 @@ export class DatabaseStorage implements IStorage {
         raId: incentiveData.raId,
         raName: incentiveData.raName,
         raEmail: incentiveData.raEmail,
+        raRole: incentiveData.raRole,
         totalRecruitedExperts: incentiveData.totalRecruitedExperts,
         expertsWithCompletedCalls: incentiveData.expertsWithCompletedCalls,
         totalEligibleCalls: incentiveData.totalEligibleCalls,
         totalIncentiveBRL: incentiveData.totalIncentiveBRL,
+        lastActivityAt: incentiveData.lastActivityAt,
       });
     }
 

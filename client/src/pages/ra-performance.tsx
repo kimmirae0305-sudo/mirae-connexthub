@@ -19,20 +19,24 @@ interface RaIncentiveSummary {
   raId: number;
   raName: string;
   raEmail: string;
+  raRole?: string;
   totalRecruitedExperts: number;
   expertsWithCompletedCalls: number;
   totalEligibleCalls: number;
   totalIncentiveBRL: number;
+  lastActivityAt?: string | null;
 }
 
 interface RaIncentiveDetail {
   raId: number;
   raName: string;
   raEmail: string;
+  raRole?: string;
   totalRecruitedExperts: number;
   expertsWithCompletedCalls: number;
   totalEligibleCalls: number;
   totalIncentiveBRL: number;
+  lastActivityAt?: string | null;
   eligibleExperts: Array<{
     expertId: number;
     expertName: string;
@@ -100,7 +104,7 @@ function formatDate(value?: string | Date | null) {
 }
 
 function formatPeriodLabel(period: string, fromDate?: Date, toDate?: Date) {
-  if (!fromDate || !toDate) return "All available RA sourcing activity";
+  if (!fromDate || !toDate) return "All available sourcing activity";
   return `${format(fromDate, "MMM d, yyyy")} - ${format(toDate, "MMM d, yyyy")}`;
 }
 
@@ -110,6 +114,17 @@ function formatNumber(value: number) {
 
 function formatBRL(value: number) {
   return `R$ ${value.toLocaleString("pt-BR")}`;
+}
+
+function formatRole(value?: string | null) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "ra" || normalized === "research associate") return "Research Associate";
+  if (normalized === "pm" || normalized === "project manager") return "Project Manager";
+  if (normalized === "admin" || normalized === "administrator") return "Admin";
+  if (normalized === "ceo") return "CEO";
+  if (normalized === "coo") return "COO";
+  if (normalized === "finance") return "Finance";
+  return value || "-";
 }
 
 export default function RaPerformance() {
@@ -157,7 +172,7 @@ export default function RaPerformance() {
       if (sortBy === "eligibleCompletedCalls") return row.totalEligibleCalls;
       if (sortBy === "expertsSourced") return row.totalRecruitedExperts;
       if (sortBy === "acceptedExperts") return row.expertsWithCompletedCalls;
-      if (sortBy === "latestActivity") return row.totalEligibleCalls > 0 || row.totalRecruitedExperts > 0 ? 1 : 0;
+      if (sortBy === "latestActivity") return row.lastActivityAt ? new Date(row.lastActivityAt).getTime() : 0;
       return row.totalIncentiveBRL;
     };
 
@@ -191,7 +206,7 @@ export default function RaPerformance() {
           </Link>
           <div>
             <h1 className="text-3xl font-semibold text-foreground">{raDetail.raName}</h1>
-            <p className="text-sm text-muted-foreground">{raDetail.raEmail}</p>
+            <p className="text-sm text-muted-foreground">{raDetail.raEmail} · {formatRole(raDetail.raRole)}</p>
           </div>
         </div>
 
@@ -218,7 +233,7 @@ export default function RaPerformance() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{raDetail.totalRecruitedExperts}</div>
-              <p className="text-xs text-muted-foreground">experts sourced</p>
+              <p className="text-xs text-muted-foreground">newly sourced experts</p>
             </CardContent>
           </Card>
 
@@ -262,7 +277,7 @@ export default function RaPerformance() {
           <CardHeader>
             <CardTitle>Eligible Experts</CardTitle>
             <CardDescription>
-              Experts who completed calls within {raDetail.eligibilityWindowDays} days of recruitment
+              Newly sourced experts who completed consultations within {raDetail.eligibilityWindowDays} days of sourcing
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -307,9 +322,9 @@ export default function RaPerformance() {
   return (
     <div className="space-y-6 p-8">
       <div>
-        <h1 className="text-3xl font-semibold text-foreground">RA Performance</h1>
+        <h1 className="text-3xl font-semibold text-foreground">Sourcing Performance</h1>
         <p className="text-sm text-muted-foreground">
-          Track RA recruitment incentives and expert sourcing metrics
+          Track expert sourcing incentives and eligible completed consultations.
         </p>
       </div>
 
@@ -369,7 +384,7 @@ export default function RaPerformance() {
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search RA name or email..."
+                  placeholder="Search sourcer name or email..."
                   className="pl-9"
                   data-testid="input-search-ra"
                 />
@@ -386,15 +401,15 @@ export default function RaPerformance() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          title="RAs"
+          title="Sourcers"
           value={formatNumber(summary.totalRAs)}
-          subtitle="Matching Research Associates in this report"
+          subtitle="Team members with sourcing activity in this report"
           icon={Users}
         />
         <MetricCard
           title="Experts Sourced"
           value={formatNumber(summary.expertsSourced)}
-          subtitle="RA-sourced expert profiles"
+          subtitle="Newly sourced expert profiles"
           icon={UserCheck}
         />
         <MetricCard
@@ -404,18 +419,18 @@ export default function RaPerformance() {
           icon={Calendar}
         />
         <MetricCard
-          title="Incentive Payable"
+          title="Sourcing Incentive Payable"
           value={formatBRL(summary.incentivePayable)}
-          subtitle="Eligible calls x R$250"
+          subtitle="Based on eligible calls × R$250"
           icon={DollarSign}
         />
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>RA Operations Table</CardTitle>
+          <CardTitle>Sourcing Operations Table</CardTitle>
           <CardDescription>
-            RA incentives are calculated when an RA-sourced expert completes a consultation within the eligibility window.
+            Sourcing incentives are calculated based on newly sourced experts who complete eligible consultations within the selected period.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -424,18 +439,19 @@ export default function RaPerformance() {
           ) : rows.length === 0 ? (
             <EmptyState
               icon={Users}
-              title="No RA performance data yet"
-              description="No Research Associates with eligible sourced experts or completed calls were found for the selected period."
+              title="No sourcing performance data yet"
+              description="No team members with eligible sourced experts or completed calls were found for the selected period."
             />
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>RA</TableHead>
+                  <TableHead>Sourcer</TableHead>
+                  <TableHead>Role</TableHead>
                   <TableHead className="text-right">Experts Sourced</TableHead>
                   <TableHead className="text-right">Accepted Experts</TableHead>
                   <TableHead className="text-right">Eligible Completed Calls</TableHead>
-                  <TableHead className="text-right">Incentive Payable</TableHead>
+                  <TableHead className="text-right">Sourcing Incentive Payable</TableHead>
                   <TableHead>Last Activity</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
@@ -449,11 +465,12 @@ export default function RaPerformance() {
                       </Link>
                       <div className="text-xs text-muted-foreground">{ra.raEmail}</div>
                     </TableCell>
+                    <TableCell>{formatRole(ra.raRole)}</TableCell>
                     <TableCell className="text-right">{formatNumber(ra.totalRecruitedExperts)}</TableCell>
                     <TableCell className="text-right">{formatNumber(ra.expertsWithCompletedCalls)}</TableCell>
                     <TableCell className="text-right">{formatNumber(ra.totalEligibleCalls)}</TableCell>
                     <TableCell className="text-right font-medium text-green-600">{formatBRL(ra.totalIncentiveBRL)}</TableCell>
-                    <TableCell>{formatDate(null)}</TableCell>
+                    <TableCell>{formatDate(ra.lastActivityAt || null)}</TableCell>
                     <TableCell>
                       <Badge variant={ra.totalEligibleCalls > 0 ? "default" : ra.totalRecruitedExperts > 0 ? "secondary" : "outline"}>
                         {ra.totalEligibleCalls > 0 ? "Eligible Activity" : ra.totalRecruitedExperts > 0 ? "Sourcing" : "No Activity"}
@@ -463,6 +480,11 @@ export default function RaPerformance() {
                 ))}
               </TableBody>
             </Table>
+          )}
+          {!isLoadingAll && rows.length === 0 && (
+            <p className="mt-4 text-sm text-muted-foreground">
+              Sourcing incentives are paid based on expert sourcing contribution, not employee role.
+            </p>
           )}
         </CardContent>
       </Card>
