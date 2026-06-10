@@ -3856,6 +3856,152 @@ export class DatabaseStorage implements IStorage {
       );
   }
 
+  async getSourcingPerformanceCallDiagnostics(fromDate: Date, toDate: Date): Promise<Array<Record<string, unknown>>> {
+    const operationalStatuses = new Set(["completed", "done", "billable", "invoiced", "invoice_issued"]);
+    const effectiveCompletionDate = sql<Date>`coalesce(${callRecords.completedAt}, ${callRecords.callDate})`;
+    const calls = await db
+      .select()
+      .from(callRecords)
+      .where(and(gte(effectiveCompletionDate, fromDate), lte(effectiveCompletionDate, toDate)))
+      .orderBy(effectiveCompletionDate);
+
+    const diagnostics: Array<Record<string, unknown>> = [];
+    const seenCallIds = new Set<number>();
+
+    for (const call of calls) {
+      const expert = call.expertId ? await this.getExpert(call.expertId) : null;
+      const projectExpertRows = call.projectExpertId
+        ? await db.select().from(projectExperts).where(eq(projectExperts.id, call.projectExpertId))
+        : call.projectId && call.expertId
+        ? await db
+            .select()
+            .from(projectExperts)
+            .where(and(eq(projectExperts.projectId, call.projectId), eq(projectExperts.expertId, call.expertId)))
+        : [];
+      const projectExpert = projectExpertRows[0] || null;
+      const normalizedExpertEmail = String(expert?.email || "").trim().toLowerCase();
+      const inviteLinks = await db
+        .select()
+        .from(expertInvitationLinks)
+        .where(
+          or(
+            call.expertId ? eq(expertInvitationLinks.expertId, call.expertId) : sql`false`,
+            normalizedExpertEmail
+              ? sql`lower(trim(${expertInvitationLinks.candidateEmail})) = ${normalizedExpertEmail}`
+              : sql`false`
+          )
+        );
+
+      const sourcingCandidates: Array<{
+        sourcerId: number | null;
+        sourcingDate: Date | null;
+        source: string;
+      }> = [];
+
+      if (expert?.sourcedByRaId) {
+        sourcingCandidates.push({
+          sourcerId: expert.sourcedByRaId,
+          sourcingDate: expert.sourcedAt ? new Date(expert.sourcedAt) : expert.createdAt ? new Date(expert.createdAt) : null,
+          source: "expert.sourcedByRaId",
+        });
+      }
+      if (projectExpert?.sourcedByRaId) {
+        sourcingCandidates.push({
+          sourcerId: projectExpert.sourcedByRaId,
+          sourcingDate: projectExpert.assignedAt ? new Date(projectExpert.assignedAt) : null,
+          source: "projectExperts.sourcedByRaId",
+        });
+      }
+      for (const link of inviteLinks) {
+        let sourcerId = link.raId || null;
+        if (!sourcerId && link.recruitedBy) {
+          const recruitedByUser = await this.getUserByEmail(String(link.recruitedBy).trim().toLowerCase());
+          sourcerId = recruitedByUser?.id || null;
+        }
+        sourcingCandidates.push({
+          sourcerId,
+          sourcingDate: link.createdAt ? new Date(link.createdAt) : link.usedAt ? new Date(link.usedAt) : null,
+          source: link.expertId === call.expertId ? "invite.expertId" : "invite.candidateEmail",
+        });
+      }
+      if (expert?.createdAt) {
+        sourcingCandidates.push({
+          sourcerId: null,
+          sourcingDate: new Date(expert.createdAt),
+          source: "expert.createdAt_fallback",
+        });
+      }
+
+      const resolvedCandidate =
+        sourcingCandidates
+          .filter((candidate) => candidate.sourcerId)
+          .sort((a, b) => (a.sourcingDate?.getTime() || 0) - (b.sourcingDate?.getTime() || 0))[0] ||
+        sourcingCandidates.sort((a, b) => (a.sourcingDate?.getTime() || 0) - (b.sourcingDate?.getTime() || 0))[0] ||
+        null;
+
+      const resolvedSourcer = resolvedCandidate?.sourcerId
+        ? await this.getUser(resolvedCandidate.sourcerId)
+        : null;
+      const completedAt = call.completedAt ? new Date(call.completedAt) : null;
+      const callDate = call.callDate ? new Date(call.callDate) : null;
+      const effectiveDate = completedAt || callDate;
+      const isInsideSelectedPeriod = Boolean(effectiveDate && effectiveDate >= fromDate && effectiveDate <= toDate);
+      const isOperationallyCompleted = operationalStatuses.has(String(call.status || "").trim().toLowerCase());
+      const sourcingDate = resolvedCandidate?.sourcingDate || null;
+      const daysBetweenSourcingAndCompletion =
+        sourcingDate && effectiveDate
+          ? (effectiveDate.getTime() - sourcingDate.getTime()) / (1000 * 60 * 60 * 24)
+          : null;
+      const isWithin60DayWindow =
+        daysBetweenSourcingAndCompletion !== null &&
+        daysBetweenSourcingAndCompletion >= 0 &&
+        daysBetweenSourcingAndCompletion <= 60;
+
+      let exclusionReason = "unknown";
+      if (seenCallIds.has(call.id)) exclusionReason = "duplicate_call_record";
+      else if (!isInsideSelectedPeriod) exclusionReason = "outside_selected_period";
+      else if (!isOperationallyCompleted) exclusionReason = "status_not_completed";
+      else if (!effectiveDate) exclusionReason = "missing_effective_completion_date";
+      else if (!call.expertId || !expert) exclusionReason = "missing_expert_link";
+      else if (sourcingCandidates.length === 0) exclusionReason = "expert_not_sourced";
+      else if (!resolvedCandidate?.sourcerId || !resolvedSourcer) exclusionReason = "missing_sourcer";
+      else if (!sourcingDate) exclusionReason = "missing_sourcing_date";
+      else if (daysBetweenSourcingAndCompletion !== null && daysBetweenSourcingAndCompletion < 0)
+        exclusionReason = "completed_before_sourcing_date";
+      else if (!isWithin60DayWindow) exclusionReason = "outside_60_day_window";
+      else exclusionReason = "";
+
+      const countedAsEligible = exclusionReason === "";
+      seenCallIds.add(call.id);
+
+      diagnostics.push({
+        callRecordId: call.id,
+        projectId: call.projectId,
+        expertId: call.expertId,
+        projectExpertId: call.projectExpertId,
+        status: call.status,
+        completedAt: call.completedAt,
+        callDate: call.callDate,
+        effectiveCompletionDate: effectiveDate,
+        isInsideSelectedPeriod,
+        isOperationallyCompleted,
+        matchedExpertId: expert?.id || null,
+        matchedExpertEmail: expert?.email || null,
+        resolvedSourcerId: resolvedSourcer?.id || null,
+        resolvedSourcerName: resolvedSourcer?.fullName || null,
+        resolvedSourcerEmail: resolvedSourcer?.email || null,
+        sourcingDateUsed: sourcingDate,
+        sourcingAttributionSource: resolvedCandidate?.source || null,
+        daysBetweenSourcingAndCompletion,
+        isWithin60DayWindow,
+        countedAsEligible,
+        exclusionReason: countedAsEligible ? null : exclusionReason,
+      });
+    }
+
+    return diagnostics;
+  }
+
   // Calculate sourcing incentives for a specific period.
   // Business rule: sourced experts must complete consultations within 60 days.
   // First 4 eligible completed calls are unpaid, then R$250 per call up to R$4,000/month.
