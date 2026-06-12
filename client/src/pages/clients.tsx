@@ -56,7 +56,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
-import type { ClientOrganization, InsertClientOrganization, ClientPoc, InsertClientPoc } from "@shared/schema";
+import type { ClientOrganization, InsertClientOrganization, ClientPoc, InsertClientPoc, Project } from "@shared/schema";
 
 const orgFormSchema = z.object({
   name: z.string().min(1, "Organization name is required"),
@@ -212,6 +212,11 @@ export default function Clients() {
 
   const { data: cuSummary } = useQuery<ClientCuSummary>({
     queryKey: ["/api/client-organizations", selectedOrg?.id, "cu-summary"],
+    enabled: !!selectedOrg,
+  });
+
+  const { data: clientProjects, isLoading: isLoadingClientProjects } = useQuery<Project[]>({
+    queryKey: ["/api/client-organizations", selectedOrg?.id, "projects"],
     enabled: !!selectedOrg,
   });
 
@@ -625,11 +630,58 @@ export default function Clients() {
                     )}
                   </TabsContent>
                   <TabsContent value="projects" className="mt-4">
-                    <EmptyState
-                      icon={Briefcase}
-                      title="No projects yet"
-                      description="Projects linked to this organization will appear here."
-                    />
+                    <div className="flex items-center justify-between pb-4">
+                      <p className="text-sm text-muted-foreground">
+                        {clientProjects?.length || 0} project(s)
+                      </p>
+                    </div>
+                    {isLoadingClientProjects ? (
+                      <DataTableSkeleton columns={5} rows={3} />
+                    ) : clientProjects?.length === 0 ? (
+                      <EmptyState
+                        icon={Briefcase}
+                        title="No projects yet"
+                        description="Projects linked to this organization will appear here."
+                      />
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs font-semibold uppercase">Project</TableHead>
+                            <TableHead className="text-xs font-semibold uppercase">Industry</TableHead>
+                            <TableHead className="text-xs font-semibold uppercase">Status</TableHead>
+                            <TableHead className="text-xs font-semibold uppercase">CU Used</TableHead>
+                            <TableHead className="text-xs font-semibold uppercase">Created</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {clientProjects?.map((project) => (
+                            <TableRow key={project.id} data-testid={`row-client-project-${project.id}`}>
+                              <TableCell>
+                                <div>
+                                  <p className="font-medium">{project.name}</p>
+                                  {project.clientOrganizationId ? (
+                                    <p className="text-xs text-muted-foreground">Linked by client organization</p>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground">Matched by client name</p>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">{project.industry}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline">{project.status}</Badge>
+                              </TableCell>
+                              <TableCell className="font-mono text-sm">
+                                {parseFloat(project.totalCuUsed || "0").toFixed(1)}
+                              </TableCell>
+                              <TableCell className="font-mono text-xs text-muted-foreground">
+                                {formatDate(project.createdAt)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
                   </TabsContent>
                 </Tabs>
               </CardContent>

@@ -333,6 +333,17 @@ export default function ProjectDetail() {
     queryKey: ["/api/client-organizations"],
   });
 
+  const resolveProjectClientOrganizationId = (project: ProjectDetailData) => {
+    if (project.clientOrganizationId) return String(project.clientOrganizationId);
+    const normalizedClientName = project.clientName?.trim().toLowerCase();
+    const normalizedClientCompany = project.clientCompany?.trim().toLowerCase();
+    const matchedOrg = clientOrganizations?.find((org) => {
+      const normalizedOrgName = org.name.trim().toLowerCase();
+      return normalizedOrgName === normalizedClientName || normalizedOrgName === normalizedClientCompany;
+    });
+    return matchedOrg ? String(matchedOrg.id) : "";
+  };
+
   const projectEditForm = useForm<ProjectEditFormData>({
     resolver: zodResolver(projectEditSchema),
     defaultValues: {
@@ -353,7 +364,7 @@ export default function ProjectDetail() {
     if (!projectDetail || isProjectEditMode) return;
     projectEditForm.reset({
       name: projectDetail.name || "",
-      clientOrganizationId: projectDetail.clientOrganizationId ? String(projectDetail.clientOrganizationId) : "",
+      clientOrganizationId: resolveProjectClientOrganizationId(projectDetail),
       clientName: projectDetail.clientName || "",
       industry: projectDetail.industry || "",
       status: projectDetail.status || "new",
@@ -363,7 +374,7 @@ export default function ProjectDetail() {
       projectOverview: projectDetail.projectOverview || "",
       description: projectDetail.description || "",
     });
-  }, [projectDetail, isProjectEditMode, projectEditForm]);
+  }, [projectDetail, isProjectEditMode, projectEditForm, clientOrganizations]);
 
   const { data: allRAs } = useQuery<RAUser[]>({
     queryKey: ["/api/users/ras"],
@@ -568,6 +579,7 @@ export default function ProjectDetail() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/client-organizations"] });
       await refetchProject();
       setIsProjectEditMode(false);
       toast({ title: "Project updated successfully" });
@@ -1670,7 +1682,7 @@ export default function ProjectDetail() {
   const startProjectEdit = () => {
     projectEditForm.reset({
       name: projectDetail.name || "",
-      clientOrganizationId: projectDetail.clientOrganizationId ? String(projectDetail.clientOrganizationId) : "",
+      clientOrganizationId: resolveProjectClientOrganizationId(projectDetail),
       clientName: projectDetail.clientName || "",
       industry: projectDetail.industry || "",
       status: projectDetail.status || "new",
@@ -1686,7 +1698,7 @@ export default function ProjectDetail() {
   const cancelProjectEdit = () => {
     projectEditForm.reset({
       name: projectDetail.name || "",
-      clientOrganizationId: projectDetail.clientOrganizationId ? String(projectDetail.clientOrganizationId) : "",
+      clientOrganizationId: resolveProjectClientOrganizationId(projectDetail),
       clientName: projectDetail.clientName || "",
       industry: projectDetail.industry || "",
       status: projectDetail.status || "new",

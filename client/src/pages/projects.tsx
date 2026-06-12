@@ -173,10 +173,12 @@ export default function Projects() {
   const updateMutation = useMutation({
     mutationFn: async (data: ProjectFormData & { id: number }) => {
       const { vettingQuestions, id, ...projectData } = data;
+      const selectedClientOrg = clientOrganizations?.find((org) => org.id === projectData.clientOrganizationId);
       const projectPayload: Partial<InsertProject> = {
         ...projectData,
         projectOverview: projectData.projectOverview || null,
         clientOrganizationId: projectData.clientOrganizationId || null,
+        clientName: selectedClientOrg?.name || projectData.clientName,
         clientPocName: projectData.clientPocName || null,
         clientPocEmail: projectData.clientPocEmail || null,
         description: projectData.description || null,
@@ -208,6 +210,7 @@ export default function Projects() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
       queryClient.invalidateQueries({ queryKey: ["/api/vetting-questions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client-organizations"] });
       setIsDialogOpen(false);
       setEditingProject(null);
       form.reset();
