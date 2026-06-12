@@ -1,14 +1,16 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import {
+  ArrowRight,
   BarChart,
   Bot,
   CheckCircle2,
   FileSearch,
+  FileText,
   Layers3,
   Pencil,
   Plus,
@@ -38,7 +40,6 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -418,14 +419,22 @@ export default function InsightHub() {
   };
 
   return (
-    <div className="space-y-6 p-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="max-w-4xl space-y-2">
-          <h1 className="text-3xl font-semibold text-foreground">Insight Hub</h1>
-          <p className="text-sm leading-6 text-muted-foreground">
-            Insight Hub converts expert consultation outputs into structured, validated, and reusable market intelligence.
-            Today, PMs capture and review insights manually, but the workflow is designed to become AI-assisted over time.
-          </p>
+    <div className="space-y-5 p-8">
+      <div className="flex flex-col gap-4 rounded-lg border bg-card p-6 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-4xl space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="border-primary/30 text-primary">Insight Hub</Badge>
+            <Badge variant="secondary">Internal intelligence layer</Badge>
+          </div>
+          <div className="space-y-2">
+            <h1 className="max-w-3xl text-3xl font-semibold leading-tight text-foreground">
+              Turning expert consultations into validated, reusable, report-ready market intelligence.
+            </h1>
+            <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+              PMs review structured drafts today; the workflow is built so automated insight capture can be connected later
+              without changing the operating model.
+            </p>
+          </div>
         </div>
         <Button variant="outline" onClick={openManualCreate} className="gap-2" data-testid="button-add-manual-insight">
           <Plus className="h-4 w-4" />
@@ -434,28 +443,40 @@ export default function InsightHub() {
       </div>
 
       <Card className="overflow-hidden border-primary/20">
-        <CardContent className="space-y-6 p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-1">
-              <p className="text-sm font-medium uppercase tracking-wide text-primary">Structured intelligence pipeline</p>
-              <h2 className="text-2xl font-semibold">From consultation output to report-ready intelligence</h2>
+        <CardContent className="space-y-5 p-5">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary">Structured intelligence pipeline</p>
+              <h2 className="mt-1 text-xl font-semibold">From completed calls to reusable intelligence assets</h2>
             </div>
-            <Badge variant="secondary" className="w-fit">AI-ready workflow, deterministic placeholder generation</Badge>
+            <p className="max-w-md text-xs leading-5 text-muted-foreground">
+              Each step adds review discipline, traceability, and report readiness while keeping confidential expert details internal.
+            </p>
           </div>
-          <div className="grid gap-3 md:grid-cols-5">
-            {["Consultation Completed", "Insight Draft Generated", "PM Reviewed", "Management Approved", "Report-Ready Intelligence"].map((step, index) => (
-              <div key={step} className="rounded-md border bg-muted/20 p-4">
-                <div className="mb-3 flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                  {index + 1}
-                </div>
-                <p className="text-sm font-medium">{step}</p>
-              </div>
-            ))}
+          <div className="rounded-md border bg-muted/20 p-3">
+            <div className="grid gap-2 lg:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr] lg:items-center">
+              {[
+                ["Consultation Completed", "Operational source"],
+                ["Insight Draft Generated", "Structured first pass"],
+                ["PM Reviewed", "Context validated"],
+                ["Management Approved", "Quality gate"],
+                ["Report-Ready Intelligence", "Reusable asset"],
+              ].map(([title, description], index, steps) => (
+                <Fragment key={title}>
+                  <PipelineStep index={index + 1} title={title} description={description} />
+                  {index < steps.length - 1 && (
+                    <div className="hidden justify-center text-muted-foreground lg:flex">
+                      <ArrowRight className="h-4 w-4" />
+                    </div>
+                  )}
+                </Fragment>
+              ))}
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <Metric title="Total Insight Drafts" value={summary.totalDrafts} />
         <Metric title="Pending PM Review" value={summary.pendingPmReview} />
         <Metric title="PM Reviewed" value={summary.pmReviewed} />
@@ -464,7 +485,7 @@ export default function InsightHub() {
         <Metric title="Published Insights" value={summary.published} />
       </div>
 
-      <Card>
+      <Card className="border-primary/10">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Sparkles className="h-4 w-4" />
@@ -474,20 +495,47 @@ export default function InsightHub() {
         </CardHeader>
         <CardContent>
           {reportReadyInsights.length === 0 ? (
-            <EmptyState
-              icon={FileSearch}
-              title="No report-ready intelligence yet"
-              description="Approved and published insights will appear here as reusable intelligence assets."
-            />
+            <div className="rounded-lg border bg-muted/20 p-5">
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center">
+                <div className="space-y-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold">Report-ready preview will appear after approval</h3>
+                    <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+                      Approved insights become reusable intelligence assets with observation, evidence, implication,
+                      confidence, and follow-up questions ready for future report assembly.
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-md border bg-background p-4 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview format</p>
+                  <div className="mt-3 space-y-3">
+                    <PreviewLine label="Core Observation" />
+                    <PreviewLine label="Evidence Summary" />
+                    <PreviewLine label="Business Implication" />
+                    <PreviewLine label="Confidence" />
+                  </div>
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="grid gap-4 xl:grid-cols-3">
               {reportReadyInsights.slice(0, 3).map((insight) => (
-                <Card key={insight.id} className="bg-muted/20">
-                  <CardHeader>
-                    <CardTitle className="text-base">{getInsightTitle(insight)}</CardTitle>
-                    <CardDescription>{[insight.industry, insight.market, insight.geography].filter(Boolean).join(" / ")}</CardDescription>
+                <Card key={insight.id} className="border-primary/20 bg-background shadow-sm">
+                  <CardHeader className="border-b pb-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <CardTitle className="text-base">{getInsightTitle(insight)}</CardTitle>
+                        <CardDescription>{[insight.industry, insight.market, insight.geography].filter(Boolean).join(" / ")}</CardDescription>
+                      </div>
+                      <Badge className="shrink-0 border-emerald-500/30 bg-emerald-500/10 text-emerald-700" variant="outline">
+                        Report-ready
+                      </Badge>
+                    </div>
                   </CardHeader>
-                  <CardContent className="space-y-3 text-sm">
+                  <CardContent className="space-y-4 pt-4 text-sm">
                     <InsightBlock label="Core Observation" value={getCoreObservation(insight)} />
                     <InsightBlock label="Evidence Summary" value={getEvidenceSummary(insight)} />
                     <InsightBlock label="Business Implication" value={getBusinessImplication(insight)} />
@@ -513,10 +561,10 @@ export default function InsightHub() {
         </CardHeader>
         <CardContent>
           {completedCallsWithoutInsights.length === 0 ? (
-            <EmptyState
+            <CompactEmpty
               icon={CheckCircle2}
               title="No completed consultations awaiting drafts"
-              description="Completed consultations that do not yet have insight drafts will appear here."
+              description="New completed consultations without insight drafts will appear here."
             />
           ) : (
             <div className="grid gap-3">
@@ -566,13 +614,15 @@ export default function InsightHub() {
               {reviewTabs.map((tab) => (
                 <TabsContent key={tab.value} value={tab.value} className="mt-4 space-y-4">
                   {(queueByStatus[tab.value]?.length || 0) === 0 ? (
-                    <EmptyState
+                    <CompactEmpty
                       icon={FileSearch}
                       title={`No ${tab.label.toLowerCase()} yet`}
-                      description="Insights will appear here as the review workflow progresses."
+                      description="This queue will fill as insight drafts move through review."
                     />
                   ) : (
-                    queueByStatus[tab.value].map(renderInsightCard)
+                    <div className="grid gap-4 2xl:grid-cols-2">
+                      {queueByStatus[tab.value].map(renderInsightCard)}
+                    </div>
                   )}
                 </TabsContent>
               ))}
@@ -591,7 +641,7 @@ export default function InsightHub() {
         </CardHeader>
         <CardContent>
           {reportReadyInsights.length < 5 ? (
-            <EmptyState
+            <CompactEmpty
               icon={BarChart}
               title="Analytics will unlock after more validated insights"
               description="Capture and approve at least five insights before relying on trend analytics."
@@ -679,14 +729,54 @@ export default function InsightHub() {
 
 function Metric({ title, value }: { title: string; value: number }) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+    <Card className="border-border/80">
+      <CardHeader className="pb-1">
+        <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-semibold">{value}</p>
+        <p className="text-2xl font-semibold tabular-nums">{value}</p>
       </CardContent>
     </Card>
+  );
+}
+
+function PipelineStep({ index, title, description }: { index: number; title: string; description: string }) {
+  return (
+    <div className="rounded-md border bg-background p-3 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+          {index}
+        </div>
+        <div>
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PreviewLine({ label }: { label: string }) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+      <div className="mt-1 h-2 w-full rounded-full bg-muted" />
+      <div className="mt-1 h-2 w-2/3 rounded-full bg-muted" />
+    </div>
+  );
+}
+
+function CompactEmpty({ icon: Icon, title, description }: { icon: any; title: string; description: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-dashed bg-muted/20 p-4">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      </div>
+    </div>
   );
 }
 
