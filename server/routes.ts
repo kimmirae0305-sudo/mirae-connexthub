@@ -40,9 +40,27 @@ import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
 import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
-const getPublicInviteBaseUrl = () =>
-  (process.env.PUBLIC_INVITE_BASE_URL || "https://invite.miraeconnext.com").replace(/\/+$/, "");
-const buildPublicRecruitmentUrl = (token: string) => `${getPublicInviteBaseUrl()}/r/${token}`;
+const trimTrailingSlashes = (value: string) => value.replace(/\/+$/, "");
+const getRequestBaseUrl = (req: AuthRequest) => {
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const protocol =
+    (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)?.split(",")[0]?.trim() ||
+    req.protocol ||
+    "https";
+  const host = req.get("host");
+
+  return host ? `${protocol}://${host}` : "";
+};
+const getInviteBaseUrl = (req: AuthRequest) => {
+  const publicInviteBaseUrl = process.env.PUBLIC_INVITE_BASE_URL?.trim();
+  if (publicInviteBaseUrl) return trimTrailingSlashes(publicInviteBaseUrl);
+
+  const appBaseUrl = process.env.APP_BASE_URL?.trim();
+  if (appBaseUrl) return trimTrailingSlashes(appBaseUrl);
+
+  return trimTrailingSlashes(getRequestBaseUrl(req));
+};
+const buildPublicRecruitmentUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/r/${token}`;
 const expenseReceiptUpload = raw({
   type: ["application/pdf", "image/png", "image/jpeg"],
   limit: "5mb",
@@ -1013,7 +1031,7 @@ export async function registerRoutes(
         expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
       });
 
-      const inviteUrl = buildPublicRecruitmentUrl(link.token);
+      const inviteUrl = buildPublicRecruitmentUrl(link.token, req as AuthRequest);
       res.json({ link, inviteUrl });
     } catch (error) {
       console.error("Error generating RA invite link:", error);
@@ -1630,7 +1648,7 @@ export async function registerRoutes(
         description: `Generated quick invite link for ${candidateName} (Contact: ${candidateContact})`,
       });
 
-      const inviteUrl = buildPublicRecruitmentUrl(token);
+      const inviteUrl = buildPublicRecruitmentUrl(token, req as AuthRequest);
       res.status(201).json({
         link,
         inviteUrl,
