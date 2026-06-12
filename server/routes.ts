@@ -5187,9 +5187,112 @@ export async function registerRoutes(
         .limit(pageSize)
         .offset((page - 1) * pageSize);
 
+      const resolveExpertRecruiter = async (expert: typeof expertsWithRecruiter[number]) => {
+        const candidates: Array<{
+          userId: number | null;
+          email: string | null;
+          recruitedAt: Date | null;
+          source: string;
+        }> = [];
+
+        if (expert.sourcedByRaId) {
+          candidates.push({
+            userId: expert.sourcedByRaId,
+            email: null,
+            recruitedAt: expert.sourcedAt ? new Date(expert.sourcedAt) : expert.createdAt ? new Date(expert.createdAt) : null,
+            source: "expert.sourcedByRaId",
+          });
+        }
+
+        const expertAssignments = await db
+          .select()
+          .from(projectExperts)
+          .where(eq(projectExperts.expertId, expert.id));
+        for (const assignment of expertAssignments) {
+          if (assignment.sourcedByRaId) {
+            candidates.push({
+              userId: assignment.sourcedByRaId,
+              email: null,
+              recruitedAt: assignment.assignedAt ? new Date(assignment.assignedAt) : assignment.respondedAt ? new Date(assignment.respondedAt) : null,
+              source: "projectExperts.sourcedByRaId",
+            });
+          }
+          if (assignment.invitationToken) {
+            const [link] = await db
+              .select()
+              .from(expertInvitationLinks)
+              .where(eq(expertInvitationLinks.token, assignment.invitationToken));
+            if (link) {
+              candidates.push({
+                userId: link.raId || null,
+                email: link.recruitedBy || null,
+                recruitedAt: link.usedAt ? new Date(link.usedAt) : link.createdAt ? new Date(link.createdAt) : null,
+                source: "projectExperts.invitationToken",
+              });
+            }
+          }
+        }
+
+        const normalizedExpertEmail = String(expert.email || "").trim().toLowerCase();
+        const inviteLinks = await db
+          .select()
+          .from(expertInvitationLinks)
+          .where(
+            or(
+              eq(expertInvitationLinks.expertId, expert.id),
+              normalizedExpertEmail
+                ? sql`lower(trim(${expertInvitationLinks.candidateEmail})) = ${normalizedExpertEmail}`
+                : sql`false`
+            )
+          );
+        for (const link of inviteLinks) {
+          candidates.push({
+            userId: link.raId || null,
+            email: link.recruitedBy || null,
+            recruitedAt: link.usedAt ? new Date(link.usedAt) : link.createdAt ? new Date(link.createdAt) : null,
+            source: link.expertId === expert.id ? "expertInvitationLinks.expertId" : "expertInvitationLinks.candidateEmail",
+          });
+        }
+
+        const resolvedCandidates = await Promise.all(
+          candidates.map(async (candidate) => {
+            const user = candidate.userId
+              ? await storage.getUser(candidate.userId)
+              : candidate.email
+              ? await storage.getUserByEmail(candidate.email.trim().toLowerCase())
+              : null;
+            return { ...candidate, user };
+          })
+        );
+
+        const resolved = resolvedCandidates
+          .filter((candidate) => candidate.user)
+          .sort((a, b) => (a.recruitedAt?.getTime() || 0) - (b.recruitedAt?.getTime() || 0))[0];
+
+        if (!resolved?.user) {
+          return {
+            ...expert,
+            recruitedAt: expert.sourcedAt || null,
+            recruiterName: expert.recruiterName || null,
+            recruiterEmail: expert.recruiterEmail || null,
+          };
+        }
+
+        return {
+          ...expert,
+          recruitedAt: resolved.recruitedAt || expert.sourcedAt || expert.createdAt || null,
+          recruiterName: resolved.user.fullName,
+          recruiterEmail: resolved.user.email,
+        };
+      };
+
+      const enrichedExpertsWithRecruiter = await Promise.all(
+        expertsWithRecruiter.map((expert) => resolveExpertRecruiter(expert))
+      );
+
       const total = Number(totalCount || 0);
       res.json({
-        data: expertsWithRecruiter,
+        data: enrichedExpertsWithRecruiter,
         totalCount: total,
         page,
         pageSize,
