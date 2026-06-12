@@ -82,6 +82,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { resolveApiUrl } from "@/lib/apiUrl";
+import { buildPublicRecruitmentUrl, resolveInviteUrl } from "@/lib/inviteLinks";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
@@ -546,9 +547,9 @@ export default function ProjectDetail() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
-      const fullUrl = `${window.location.origin}${data.inviteUrl}`;
+      const fullUrl = resolveInviteUrl(data.inviteUrl);
       navigator.clipboard.writeText(fullUrl);
-      setCopiedLink(data.inviteUrl);
+      setCopiedLink(fullUrl);
       toast({ title: "Invite link copied to clipboard" });
       setTimeout(() => setCopiedLink(null), 3000);
     },
@@ -596,9 +597,7 @@ export default function ProjectDetail() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
-      const fullUrl = data.inviteUrl?.startsWith("http")
-        ? data.inviteUrl
-        : `${window.location.origin}${data.inviteUrl}`;
+      const fullUrl = resolveInviteUrl(data.inviteUrl);
       navigator.clipboard.writeText(fullUrl);
       toast({ title: "Recruitment link regenerated and copied" });
     },
@@ -2815,7 +2814,7 @@ export default function ProjectDetail() {
                     const raInviteLink = projectDetail.raInviteLinks?.find(
                       (link: any) => link.inviteType === "ra" && link.raId === ra.id
                     );
-                    const recruitmentUrl = raInviteLink ? `/r/${raInviteLink.token}` : null;
+                    const recruitmentUrl = raInviteLink ? buildPublicRecruitmentUrl(raInviteLink.token) : null;
 
                     return (
                     <div key={ra.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border">
@@ -2838,7 +2837,7 @@ export default function ProjectDetail() {
                             size="sm"
                             className="gap-1"
                             onClick={async () => {
-                              await navigator.clipboard.writeText(`${window.location.origin}${recruitmentUrl}`);
+                              await navigator.clipboard.writeText(recruitmentUrl);
                               toast({
                                 title: "Link copied",
                                 description: "Recruitment link copied to clipboard",
@@ -2977,7 +2976,7 @@ export default function ProjectDetail() {
                                       size="sm"
                                       className="gap-1"
                                       onClick={async () => {
-                                        const fullUrl = `${window.location.origin}/r/${invite.token}`;
+                                        const fullUrl = buildPublicRecruitmentUrl(invite.token);
                                         await navigator.clipboard.writeText(fullUrl);
                                         toast({
                                           title: "Link copied",

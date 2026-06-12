@@ -14,7 +14,9 @@ const allowedOrigins = [
   "https://www.miraeconnexthub.com",
   "https://miraeconnextconnexthub-frontend.onrender.com",
   "https://mirae-connexthub-server.onrender.com",
-  "https://api.miraeconnexthub.com"
+  "https://api.miraeconnexthub.com",
+  "https://invite.miraeconnext.com",
+  "https://www.invite.miraeconnext.com"
 ];
 
 app.use((req, res, next) => {
@@ -53,6 +55,31 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+const publicInviteHosts = new Set(["invite.miraeconnext.com", "www.invite.miraeconnext.com"]);
+
+function isAllowedPublicInvitePath(pathname: string) {
+  return (
+    /^\/r\/[^/]+\/?$/.test(pathname) ||
+    pathname.startsWith("/api/quick-invite/") ||
+    pathname.startsWith("/assets/") ||
+    pathname.startsWith("/attached_assets/") ||
+    pathname === "/favicon.png" ||
+    pathname === "/robots.txt" ||
+    pathname === "/terms" ||
+    pathname === "/privacy"
+  );
+}
+
+app.use((req, res, next) => {
+  const hostname = req.hostname.toLowerCase();
+
+  if (publicInviteHosts.has(hostname) && !isAllowedPublicInvitePath(req.path)) {
+    return res.status(404).send("Not found");
+  }
+
+  next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
