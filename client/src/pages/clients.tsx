@@ -385,7 +385,7 @@ export default function Clients() {
       : null;
   const prepaidUsageRatio =
     cuSummary && cuSummary.purchasedCu > 0
-      ? `${formatCu(cuSummary.completedCu)} / ${formatCu(cuSummary.purchasedCu)} CU`
+      ? `${formatCu(cuSummary.completedCu)} / ${formatCu(cuSummary.purchasedCu)}`
       : "-";
   const prepaidStatusHint =
     prepaidUsagePercent === null
@@ -455,7 +455,7 @@ export default function Clients() {
                         <p className="text-xs text-muted-foreground">{org.industry}</p>
                       </div>
                       <Badge variant="default" className="shrink-0">
-                        {parseFloat(org.totalCuUsed || "0").toFixed(1)} CU
+                        {formatCu(org.totalCuUsed)}
                       </Badge>
                     </div>
                   </div>
@@ -672,7 +672,7 @@ export default function Clients() {
                                 <Badge variant="outline">{project.status}</Badge>
                               </TableCell>
                               <TableCell className="font-mono text-sm">
-                                {parseFloat(project.totalCuUsed || "0").toFixed(1)}
+                                {formatCu(project.totalCuUsed)}
                               </TableCell>
                               <TableCell className="font-mono text-xs text-muted-foreground">
                                 {formatDate(project.createdAt)}

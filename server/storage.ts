@@ -762,7 +762,18 @@ export class DatabaseStorage implements IStorage {
 
   // Client Organizations
   async getClientOrganizations(): Promise<ClientOrganization[]> {
-    return db.select().from(clientOrganizations).orderBy(clientOrganizations.name);
+    const orgs = await db.select().from(clientOrganizations).orderBy(clientOrganizations.name);
+    const orgsWithCalculatedCu = await Promise.all(
+      orgs.map(async (org) => {
+        const orgProjects = await this.getProjectsForOrganization(org);
+        const totalCuUsed = orgProjects.reduce((sum, project) => sum + Number(project.totalCuUsed || 0), 0);
+        return {
+          ...org,
+          totalCuUsed: String(Math.round(totalCuUsed * 100) / 100),
+        };
+      })
+    );
+    return orgsWithCalculatedCu;
   }
 
   async getClientOrganization(id: number): Promise<ClientOrganization | undefined> {
@@ -783,6 +794,48 @@ export class DatabaseStorage implements IStorage {
   async deleteClientOrganization(id: number): Promise<boolean> {
     const result = await db.delete(clientOrganizations).where(eq(clientOrganizations.id, id)).returning();
     return result.length > 0;
+  }
+
+  private async getCompletedCuByProjectIds(projectIds: number[]): Promise<Map<number, number>> {
+    if (projectIds.length === 0) return new Map();
+
+    const rows = await db
+      .select({
+        projectId: callRecords.projectId,
+        totalCuUsed: sql<string>`COALESCE(SUM(CAST(${callRecords.cuUsed} AS numeric)), 0)`,
+      })
+      .from(callRecords)
+      .where(and(inArray(callRecords.projectId, projectIds), eq(callRecords.status, "completed")))
+      .groupBy(callRecords.projectId);
+
+    return new Map(rows.map((row) => [row.projectId, Number(row.totalCuUsed || 0)]));
+  }
+
+  private async getProjectsForOrganization(org: ClientOrganization): Promise<Project[]> {
+    const normalizedOrgName = org.name.trim().toLowerCase();
+    const orgProjects = await db
+      .select()
+      .from(projects)
+      .where(
+        or(
+          eq(projects.clientOrganizationId, org.id),
+          and(
+            sql`${projects.clientOrganizationId} IS NULL`,
+            sql`lower(trim(${projects.clientName})) = ${normalizedOrgName}`
+          ),
+          and(
+            sql`${projects.clientOrganizationId} IS NULL`,
+            sql`lower(trim(coalesce(${projects.clientCompany}, ''))) = ${normalizedOrgName}`
+          )
+        )
+      )
+      .orderBy(desc(projects.createdAt));
+
+    const completedCuByProjectId = await this.getCompletedCuByProjectIds(orgProjects.map((project) => project.id));
+    return orgProjects.map((project) => ({
+      ...project,
+      totalCuUsed: String(Math.round((completedCuByProjectId.get(project.id) || 0) * 100) / 100),
+    }));
   }
 
   private async getLinkedExpertsByCompanyId(companyId?: number): Promise<Map<number, CompanyLinkedExpertRow[]>> {
@@ -1111,25 +1164,7 @@ export class DatabaseStorage implements IStorage {
   async getProjectsByOrganization(organizationId: number): Promise<Project[]> {
     const org = await this.getClientOrganization(organizationId);
     if (!org) return [];
-
-    const normalizedOrgName = org.name.trim().toLowerCase();
-    return db
-      .select()
-      .from(projects)
-      .where(
-        or(
-          eq(projects.clientOrganizationId, organizationId),
-          and(
-            sql`${projects.clientOrganizationId} IS NULL`,
-            sql`lower(trim(${projects.clientName})) = ${normalizedOrgName}`
-          ),
-          and(
-            sql`${projects.clientOrganizationId} IS NULL`,
-            sql`lower(trim(coalesce(${projects.clientCompany}, ''))) = ${normalizedOrgName}`
-          )
-        )
-      )
-      .orderBy(desc(projects.createdAt));
+    return this.getProjectsForOrganization(org);
   }
 
   async getProjectsByPm(pmId: number): Promise<Project[]> {
