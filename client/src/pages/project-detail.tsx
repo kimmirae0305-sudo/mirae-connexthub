@@ -981,6 +981,26 @@ export default function ProjectDetail() {
     },
   });
 
+  const generateInsightDraftMutation = useMutation({
+    mutationFn: async (callRecordId: number) => {
+      const res = await apiRequest("POST", "/api/insights/generate-draft", { callRecordId });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/insights", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      toast({ title: "Insight draft generated" });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to generate insight draft",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   /**
    * Calculate CU from duration
    * CU formula: ceil(durationMinutes / 15) * 0.25
@@ -3404,13 +3424,13 @@ export default function ProjectDetail() {
                                     Mark Completed
                                   </DropdownMenuItem>
                                 )}
-                                {record.status === "completed" && !getInsightForCall(record) && canCreateProjectInsight && (
+                              {record.status === "completed" && !getInsightForCall(record) && canCreateProjectInsight && (
                                   <DropdownMenuItem
-                                    onClick={() => openCreateInsightModal(record)}
+                                    onClick={() => generateInsightDraftMutation.mutate(record.id)}
                                     data-testid={`button-create-insight-${record.id}`}
                                   >
                                     <FileSearch className="h-4 w-4 mr-2" />
-                                    Capture Signal
+                                    Generate Insight Draft
                                   </DropdownMenuItem>
                                 )}
                                 {(record.status === "pending" || record.status === "scheduled") && !isRA && (
