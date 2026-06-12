@@ -560,6 +560,7 @@ export interface IStorage {
   getInsightsByProjectId(projectId: number): Promise<Insight[]>;
   getInsightByCallRecordId(callRecordId: number): Promise<Insight | undefined>;
   createInsight(insight: InsertInsight): Promise<Insight>;
+  updateInsight(id: number, insight: Partial<InsertInsight>): Promise<Insight | undefined>;
 
   // Expert Invitation Links
   getExpertInvitationLinks(): Promise<ExpertInvitationLink[]>;
@@ -3672,6 +3673,15 @@ export class DatabaseStorage implements IStorage {
   async createInsight(insight: InsertInsight): Promise<Insight> {
     const [newInsight] = await db.insert(insights).values(insight as any).returning();
     return newInsight;
+  }
+
+  async updateInsight(id: number, insight: Partial<InsertInsight>): Promise<Insight | undefined> {
+    const [updatedInsight] = await db
+      .update(insights)
+      .set({ ...(insight as any), updatedAt: new Date() })
+      .where(eq(insights.id, id))
+      .returning();
+    return updatedInsight || undefined;
   }
 
   // Expert Invitation Links

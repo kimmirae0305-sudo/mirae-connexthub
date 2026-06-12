@@ -3056,6 +3056,85 @@ export async function registerRoutes(
   });
 
   // ==================== INSIGHT HUB ====================
+  const normalizeInsightRole = (role?: string | null) => String(role || "").trim().toLowerCase();
+  const hasInsightManagementAccess = (role?: string | null) =>
+    ["admin", "ceo", "coo"].includes(normalizeInsightRole(role));
+  const canReviewInsightProject = (user: NonNullable<AuthRequest["user"]>, project: any) =>
+    hasInsightManagementAccess(user.role) || (normalizeInsightRole(user.role) === "pm" && project.createdByPmId === user.id);
+  const buildClientQuestionFromProject = async (project: any) => {
+    const questions = await storage.getVettingQuestionsByProject(project.id);
+    const insightQuestions = questions
+      .filter((question) => question.question?.trim())
+      .sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0))
+      .map((question, index) => `${index + 1}. ${question.question.trim()}`)
+      .join("\n");
+    return insightQuestions || project.clientRequestNotes || project.projectOverview || project.description || "Client consultation question not recorded.";
+  };
+  const buildPlaceholderInsightDraft = async (callRecord: any, project: any, userId: number) => {
+    const expert = await storage.getExpert(callRecord.expertId);
+    const clientOrg = project.clientOrganizationId ? await storage.getClientOrganization(project.clientOrganizationId) : undefined;
+    const callDate = new Date(callRecord.completedAt || callRecord.callDate);
+    const safeCallDate = Number.isNaN(callDate.getTime()) ? new Date() : callDate;
+    const duration = callRecord.actualDurationMinutes || callRecord.durationMinutes || undefined;
+    const clientQuestion = await buildClientQuestionFromProject(project);
+    const industry = project.industry || expert?.industry || "Market";
+    const market = project.name || industry;
+    const geography = project.region || expert?.country || "Not specified";
+    const expertContext = [
+      expert?.jobTitle,
+      expert?.industry,
+      expert?.yearsOfExperience ? `${expert.yearsOfExperience} years of experience` : null,
+    ].filter(Boolean).join(", ") || "consultation expert";
+    const pmNotes = callRecord.notes || "PM notes were not provided for this consultation.";
+    const insightTitle = `${industry} signal from ${project.name}`;
+    const coreObservation = `The completed consultation surfaced a structured ${industry.toLowerCase()} signal for ${market}. ${pmNotes}`;
+    const evidenceSummary = `Evidence is based on a ${duration ? `${duration}-minute` : "completed"} expert consultation with a ${expertContext}.`;
+    const businessImplication = `This signal should be reviewed for relevance to the client's question and may inform market sizing, competitive positioning, or diligence follow-up.`;
+
+    return {
+      projectId: project.id,
+      consultationId: `CALL-${callRecord.id}`,
+      callRecordId: callRecord.id,
+      month: format(safeCallDate, "yyyy-MM"),
+      callDate: safeCallDate,
+      clientType: clientOrg?.clientType || "Client",
+      industry,
+      market,
+      geography,
+      clientQuestion,
+      observedTrend: coreObservation,
+      keyTags: [industry, geography, "Generated Draft"].filter(Boolean),
+      signalStrength: "Emerging",
+      companyMentioned: null,
+      expertSeniority: expert?.jobTitle || expert?.yearsOfExperience ? `${expert?.jobTitle || "Expert"}${expert?.yearsOfExperience ? `, ${expert.yearsOfExperience} yrs` : ""}` : null,
+      callDurationMin: duration,
+      recordingLink: callRecord.recordingUrl || null,
+      transcriptLink: null,
+      pmNotes,
+      insightTitle,
+      coreObservation,
+      evidenceSummary,
+      businessImplication,
+      signalType: "Market Signal",
+      confidenceLevel: "Medium",
+      confidenceReason: "Deterministic placeholder draft generated from CRM consultation metadata and PM notes. Requires PM validation before approval.",
+      recommendedFollowUpQuestions: [
+        "Which customer segments are most affected by this signal?",
+        "What evidence would strengthen or weaken this observation?",
+        "Which follow-up experts should be consulted to validate this pattern?",
+      ],
+      reportVisibility: "internal",
+      reviewStatus: "ai_draft",
+      sourceType: "placeholder_generated",
+      generatedAt: new Date(),
+      reviewedBy: null,
+      reviewedAt: null,
+      approvedBy: null,
+      approvedAt: null,
+      internalNotes: `Generated placeholder draft by user ${userId}. Review before using in any client-facing report.`,
+    } as InsertInsight;
+  };
+
   app.get("/api/insights", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const user = req.user!;
@@ -3064,8 +3143,8 @@ export async function registerRoutes(
       const projectIdParam = hasProjectScope ? Number(projectIdQuery) : null;
 
       if (!hasProjectScope) {
-        if (user.role !== "admin") {
-          return res.status(403).json({ error: "Global Insight Hub access is restricted to admin users" });
+        if (!hasInsightManagementAccess(user.role)) {
+          return res.status(403).json({ error: "Global Insight Hub access is restricted to admin, CEO, and COO users" });
         }
         const insights = await storage.getInsights();
         return res.json(insights);
@@ -3081,11 +3160,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Project not found" });
       }
 
-      if (user.role === "pm" && project.createdByPmId !== user.id) {
-        return res.status(403).json({ error: "Access denied for this project" });
-      }
-
-      if (!["admin", "pm"].includes(user.role)) {
+      if (!canReviewInsightProject(user, project)) {
         return res.status(403).json({ error: "Project insight access is restricted to admin and owning PM users" });
       }
 
@@ -3097,12 +3172,58 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/insights/:id", authMiddleware, async (req, res) => {
+  app.post("/api/insights/generate-draft", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const user = req.user!;
+      const callRecordId = Number(req.body?.callRecordId);
+      if (!Number.isInteger(callRecordId) || callRecordId <= 0) {
+        return res.status(400).json({ error: "callRecordId is required" });
+      }
+
+      const callRecord = await storage.getCallRecord(callRecordId);
+      if (!callRecord) {
+        return res.status(404).json({ error: "Call record not found" });
+      }
+      if (callRecord.status !== "completed") {
+        return res.status(400).json({ error: "Insight drafts can only be generated from completed consultations" });
+      }
+
+      const project = await storage.getProject(callRecord.projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+      if (!canReviewInsightProject(user, project)) {
+        return res.status(403).json({ error: "Access denied for this project" });
+      }
+
+      const existingInsight = await storage.getInsightByCallRecordId(callRecordId);
+      if (existingInsight) {
+        return res.status(409).json({ error: "An insight already exists for this call record" });
+      }
+
+      const draft = await buildPlaceholderInsightDraft(callRecord, project, user.id);
+      const insight = await storage.createInsight(draft);
+      res.status(201).json(insight);
+    } catch (error) {
+      console.error("Failed to generate insight draft:", error);
+      res.status(500).json({ error: "Failed to generate insight draft" });
+    }
+  });
+
+  app.get("/api/insights/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const id = parseInt(req.params.id);
       const insight = await storage.getInsight(id);
       if (!insight) {
         return res.status(404).json({ error: "Insight not found" });
+      }
+      const project = insight.projectId
+        ? await storage.getProject(insight.projectId)
+        : insight.callRecordId
+          ? await storage.getCallRecord(insight.callRecordId).then((call) => call ? storage.getProject(call.projectId) : undefined)
+          : undefined;
+      if (project && !canReviewInsightProject(req.user!, project)) {
+        return res.status(403).json({ error: "Access denied for this insight" });
       }
       res.json(insight);
     } catch (error) {
@@ -3113,7 +3234,7 @@ export async function registerRoutes(
   app.post("/api/insights", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const user = req.user!;
-      if (!["admin", "pm"].includes(user.role)) {
+      if (!hasInsightManagementAccess(user.role) && normalizeInsightRole(user.role) !== "pm") {
         return res.status(403).json({ error: "Insight creation is restricted to admin and PM users" });
       }
 
@@ -3124,8 +3245,14 @@ export async function registerRoutes(
 
       const callRecordId = result.data.callRecordId;
       if (!callRecordId) {
-        if (user.role === "admin") {
-          const insight = await storage.createInsight(result.data);
+        if (hasInsightManagementAccess(user.role)) {
+          const insight = await storage.createInsight({
+            ...result.data,
+            sourceType: result.data.sourceType || "manual",
+            reviewStatus: result.data.reviewStatus || "pm_reviewed",
+            reviewedBy: result.data.reviewedBy || user.id,
+            reviewedAt: result.data.reviewedAt || new Date(),
+          } as InsertInsight);
           return res.status(201).json(insight);
         }
         return res.status(400).json({ error: "callRecordId is required to create a project insight" });
@@ -3145,7 +3272,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Project not found" });
       }
 
-      if (user.role === "pm" && project.createdByPmId !== user.id) {
+      if (!canReviewInsightProject(user, project)) {
         return res.status(403).json({ error: "Access denied for this project" });
       }
 
@@ -3154,11 +3281,102 @@ export async function registerRoutes(
         return res.status(409).json({ error: "An insight already exists for this call record" });
       }
 
-      const insight = await storage.createInsight(result.data);
+      const insight = await storage.createInsight({
+        ...result.data,
+        projectId: result.data.projectId || project.id,
+        sourceType: result.data.sourceType || "manual",
+        reviewStatus: result.data.reviewStatus || "pm_reviewed",
+        reviewedBy: result.data.reviewedBy || user.id,
+        reviewedAt: result.data.reviewedAt || new Date(),
+      } as InsertInsight);
       res.status(201).json(insight);
     } catch (error) {
       console.error("Failed to create insight:", error);
       res.status(500).json({ error: "Failed to create insight" });
+    }
+  });
+
+  app.patch("/api/insights/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const user = req.user!;
+      const id = parseInt(req.params.id);
+      const existingInsight = await storage.getInsight(id);
+      if (!existingInsight) {
+        return res.status(404).json({ error: "Insight not found" });
+      }
+
+      const project = existingInsight.projectId
+        ? await storage.getProject(existingInsight.projectId)
+        : existingInsight.callRecordId
+          ? await storage.getCallRecord(existingInsight.callRecordId).then((call) => call ? storage.getProject(call.projectId) : undefined)
+          : undefined;
+      if (project && !canReviewInsightProject(user, project)) {
+        return res.status(403).json({ error: "Access denied for this insight" });
+      }
+      if (!project && !hasInsightManagementAccess(user.role)) {
+        return res.status(403).json({ error: "Only management users can edit global insights" });
+      }
+
+      const result = insertInsightSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: fromZodError(result.error).message });
+      }
+
+      const updatedInsight = await storage.updateInsight(id, result.data);
+      res.json(updatedInsight);
+    } catch (error) {
+      console.error("Failed to update insight:", error);
+      res.status(500).json({ error: "Failed to update insight" });
+    }
+  });
+
+  app.post("/api/insights/:id/review", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const user = req.user!;
+      const id = parseInt(req.params.id);
+      const nextStatus = String(req.body?.reviewStatus || "").trim();
+      if (!["pm_reviewed", "approved", "rejected", "published"].includes(nextStatus)) {
+        return res.status(400).json({ error: "Invalid review status" });
+      }
+
+      const existingInsight = await storage.getInsight(id);
+      if (!existingInsight) {
+        return res.status(404).json({ error: "Insight not found" });
+      }
+
+      const project = existingInsight.projectId
+        ? await storage.getProject(existingInsight.projectId)
+        : existingInsight.callRecordId
+          ? await storage.getCallRecord(existingInsight.callRecordId).then((call) => call ? storage.getProject(call.projectId) : undefined)
+          : undefined;
+      if (nextStatus === "approved" || nextStatus === "published") {
+        if (!hasInsightManagementAccess(user.role)) {
+          return res.status(403).json({ error: "Only admin, CEO, and COO users can approve or publish insights" });
+        }
+      } else if (project && !canReviewInsightProject(user, project)) {
+        return res.status(403).json({ error: "Access denied for this insight" });
+      } else if (!project && !hasInsightManagementAccess(user.role)) {
+        return res.status(403).json({ error: "Only management users can review global insights" });
+      }
+
+      const updates: Partial<InsertInsight> = {
+        reviewStatus: nextStatus,
+        internalNotes: req.body?.internalNotes ?? existingInsight.internalNotes ?? undefined,
+      };
+      if (nextStatus === "pm_reviewed" || nextStatus === "rejected") {
+        updates.reviewedBy = user.id;
+        updates.reviewedAt = new Date();
+      }
+      if (nextStatus === "approved" || nextStatus === "published") {
+        updates.approvedBy = user.id;
+        updates.approvedAt = new Date();
+      }
+
+      const updatedInsight = await storage.updateInsight(id, updates);
+      res.json(updatedInsight);
+    } catch (error) {
+      console.error("Failed to update insight review status:", error);
+      res.status(500).json({ error: "Failed to update insight review status" });
     }
   });
 

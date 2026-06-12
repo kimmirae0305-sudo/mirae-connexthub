@@ -262,6 +262,7 @@ export const callRecords = pgTable("call_records", {
 // Insight Hub table (structured market signals from consultations)
 export const insights = pgTable("insights", {
   id: serial("id").primaryKey(),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
   consultationId: text("consultation_id").notNull(),
   callRecordId: integer("call_record_id").references(() => callRecords.id, { onDelete: "set null" }),
   month: text("month").notNull(),
@@ -279,6 +280,23 @@ export const insights = pgTable("insights", {
   callDurationMin: integer("call_duration_min"),
   recordingLink: text("recording_link"),
   transcriptLink: text("transcript_link"),
+  pmNotes: text("pm_notes"),
+  insightTitle: text("insight_title"),
+  coreObservation: text("core_observation"),
+  evidenceSummary: text("evidence_summary"),
+  businessImplication: text("business_implication"),
+  signalType: text("signal_type"),
+  confidenceLevel: text("confidence_level"),
+  confidenceReason: text("confidence_reason"),
+  recommendedFollowUpQuestions: text("recommended_follow_up_questions").array(),
+  reportVisibility: text("report_visibility").default("internal"),
+  reviewStatus: text("review_status").notNull().default("pm_reviewed"),
+  reviewedBy: integer("reviewed_by").references(() => users.id),
+  reviewedAt: timestamp("reviewed_at"),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  sourceType: text("source_type").notNull().default("manual"),
+  generatedAt: timestamp("generated_at"),
   internalNotes: text("internal_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -772,6 +790,10 @@ export const insertInsightSchema = createInsertSchema(insights).omit({
 }).extend({
   callDate: coerceDateRequired,
   keyTags: z.array(z.string()).optional(),
+  recommendedFollowUpQuestions: z.array(z.string()).optional(),
+  reviewedAt: coerceDate.optional(),
+  approvedAt: coerceDate.optional(),
+  generatedAt: coerceDate.optional(),
 });
 
 export const insertExpertInvitationLinkSchema = createInsertSchema(expertInvitationLinks).omit({
