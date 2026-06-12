@@ -23,7 +23,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { InsertProject, User } from "@shared/schema";
+import type { ClientOrganization, InsertProject, User } from "@shared/schema";
 
 type DraftQuestion = {
   question: string;
@@ -59,6 +59,7 @@ export default function ProjectCreate() {
   const { toast } = useToast();
 
   const [name, setName] = useState("");
+  const [clientOrganizationId, setClientOrganizationId] = useState<string>("");
   const [clientName, setClientName] = useState("");
   const [industry, setIndustry] = useState("");
   const [region, setRegion] = useState("");
@@ -72,6 +73,10 @@ export default function ProjectCreate() {
 
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
+  });
+
+  const { data: clientOrganizations = [] } = useQuery<ClientOrganization[]>({
+    queryKey: ["/api/client-organizations"],
   });
 
   const pms = users.filter((user) => {
@@ -112,6 +117,7 @@ export default function ProjectCreate() {
 
       const projectPayload: InsertProject = {
         name: name.trim(),
+        clientOrganizationId: clientOrganizationId ? Number(clientOrganizationId) : null,
         clientName: clientName.trim(),
         industry: industry.trim(),
         region: region.trim() || null,
@@ -166,6 +172,7 @@ export default function ProjectCreate() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/client-organizations"] });
       toast({ title: "Project created successfully" });
       setLocation(window.location.pathname.startsWith("/app/") ? "/app/projects" : "/projects");
     },
@@ -229,6 +236,30 @@ export default function ProjectCreate() {
                     placeholder="Digital payments market scan"
                     data-testid="input-new-project-title"
                   />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Client organization</label>
+                  <Select
+                    value={clientOrganizationId}
+                    onValueChange={(value) => {
+                      const selectedOrg = clientOrganizations.find((org) => String(org.id) === value);
+                      setClientOrganizationId(value);
+                      if (selectedOrg) {
+                        setClientName(selectedOrg.name);
+                      }
+                    }}
+                  >
+                    <SelectTrigger data-testid="select-new-project-client-organization">
+                      <SelectValue placeholder="Select client organization" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clientOrganizations.map((org) => (
+                        <SelectItem key={org.id} value={String(org.id)}>
+                          {org.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium" htmlFor="client-name">Client name</label>

@@ -471,6 +471,8 @@ export async function registerRoutes(
       if (contractStart && periodStart && periodStart < contractStart) periodStart = contractStart;
       if (contractEnd && periodEnd && periodEnd > contractEnd) periodEnd = contractEnd;
 
+      const organizationProjects = await storage.getProjectsByOrganization(id);
+      const organizationProjectIds = organizationProjects.map((project) => project.id);
       const completedCalls = await db
         .select({
           id: callRecords.id,
@@ -483,7 +485,7 @@ export async function registerRoutes(
         .innerJoin(projects, eq(callRecords.projectId, projects.id))
         .where(
           and(
-            eq(projects.clientOrganizationId, id),
+            organizationProjectIds.length > 0 ? inArray(projects.id, organizationProjectIds) : sql`false`,
             eq(callRecords.status, "completed"),
             sql`${callRecords.completedAt} IS NOT NULL`
           )

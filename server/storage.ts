@@ -1109,7 +1109,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getProjectsByOrganization(organizationId: number): Promise<Project[]> {
-    return db.select().from(projects).where(eq(projects.clientOrganizationId, organizationId)).orderBy(desc(projects.createdAt));
+    const org = await this.getClientOrganization(organizationId);
+    if (!org) return [];
+
+    const normalizedOrgName = org.name.trim().toLowerCase();
+    return db
+      .select()
+      .from(projects)
+      .where(
+        or(
+          eq(projects.clientOrganizationId, organizationId),
+          and(
+            sql`${projects.clientOrganizationId} IS NULL`,
+            sql`lower(trim(${projects.clientName})) = ${normalizedOrgName}`
+          ),
+          and(
+            sql`${projects.clientOrganizationId} IS NULL`,
+            sql`lower(trim(coalesce(${projects.clientCompany}, ''))) = ${normalizedOrgName}`
+          )
+        )
+      )
+      .orderBy(desc(projects.createdAt));
   }
 
   async getProjectsByPm(pmId: number): Promise<Project[]> {
