@@ -528,7 +528,7 @@ export async function registerRoutes(
         retainerPeriodStart: periodStart,
         retainerPeriodEnd: periodEnd,
         retainerCompletedCu: Math.round(retainerCompletedCu * 100) / 100,
-        remainingRetainerCu: Math.round((retainerCuAllowance - retainerCompletedCu) * 100) / 100,
+        remainingRetainerCu: Math.max(0, Math.round((retainerCuAllowance - retainerCompletedCu) * 100) / 100),
         payAsYouGoBillableCu: Math.round(payAsYouGoBillableCu * 100) / 100,
         estimatedRevenue: Math.round(estimatedRevenue * 100) / 100,
         completedCallCount: completedCalls.length,
