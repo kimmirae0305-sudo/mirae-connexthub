@@ -55,6 +55,7 @@ import { format } from "date-fns";
 interface ExpertWithRecruiter extends Expert {
   recruiterName: string | null;
   recruiterEmail: string | null;
+  recruitedAt?: string | Date | null;
 }
 
 interface PaginatedExpertsResponse {
@@ -478,7 +479,7 @@ export default function Experts() {
                     <TableHead className="text-xs font-semibold uppercase">Expertise / Industry</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Hourly Rate</TableHead>
                     <TableHead className="text-center text-xs font-semibold uppercase">Availability Status</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase">Recruiter</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Recruited by</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -510,8 +511,10 @@ export default function Experts() {
                       </TableCell>
                       <TableCell>
                         <div className="text-sm">{expert.recruiterName || "-"}</div>
-                        {expert.sourcedAt && (
-                          <div className="text-xs text-muted-foreground">{format(new Date(expert.sourcedAt), "MMM d, yyyy")}</div>
+                        {(expert.recruitedAt || expert.sourcedAt) && (
+                          <div className="text-xs text-muted-foreground">
+                            {format(new Date(expert.recruitedAt || expert.sourcedAt), "MMM d, yyyy")}
+                          </div>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
