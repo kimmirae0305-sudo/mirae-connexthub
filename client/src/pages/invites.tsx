@@ -49,6 +49,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { normalizeRole } from "@/lib/permissions";
+import { buildPublicRecruitmentUrl } from "@/lib/inviteLinks";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { ExpertInvitationLink, Project, Expert } from "@shared/schema";
 
@@ -211,17 +212,16 @@ export default function Invites() {
   };
 
   const copyInviteLink = async (invite: InviteWithDetails) => {
-    const baseUrl = window.location.origin;
     let inviteUrl: string;
     
     if (invite.inviteType === "quick") {
-      inviteUrl = `${baseUrl}/r/${invite.token}`;
+      inviteUrl = buildPublicRecruitmentUrl(invite.token);
     } else if (invite.inviteType === "existing" && invite.expertId) {
-      inviteUrl = `${baseUrl}/expert/project-invite/${invite.token}`;
+      inviteUrl = `${window.location.origin}/expert/project-invite/${invite.token}`;
     } else if (invite.projectId) {
-      inviteUrl = `${baseUrl}/invite/${invite.projectId}/${invite.inviteType}/${invite.token}`;
+      inviteUrl = `${window.location.origin}/invite/${invite.projectId}/${invite.inviteType}/${invite.token}`;
     } else {
-      inviteUrl = `${baseUrl}/expert-invite/${invite.token}`;
+      inviteUrl = `${window.location.origin}/expert-invite/${invite.token}`;
     }
     
     try {
@@ -522,7 +522,7 @@ export default function Invites() {
                             <DropdownMenuItem asChild>
                               <a 
                                 href={invite.inviteType === "quick"
-                                  ? `/r/${invite.token}`
+                                  ? buildPublicRecruitmentUrl(invite.token)
                                   : invite.inviteType === "existing" && invite.expertId 
                                     ? `/expert/project-invite/${invite.token}`
                                     : invite.projectId 

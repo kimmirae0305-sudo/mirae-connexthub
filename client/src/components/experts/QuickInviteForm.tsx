@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { resolveInviteUrl } from "@/lib/inviteLinks";
 
 interface QuickInviteFormProps {
   projectId: number;
@@ -90,7 +91,7 @@ export function QuickInviteForm({ projectId, onSuccess, onCancel }: QuickInviteF
 
   const copyInviteLink = async () => {
     if (inviteUrl) {
-      const fullUrl = `${window.location.origin}${inviteUrl}`;
+      const fullUrl = resolveInviteUrl(inviteUrl);
       await navigator.clipboard.writeText(fullUrl);
       setCopiedLink(true);
       toast({ 
@@ -113,7 +114,7 @@ export function QuickInviteForm({ projectId, onSuccess, onCancel }: QuickInviteF
         </div>
         <div className="flex items-center gap-2 p-3 bg-muted rounded-lg w-full max-w-md">
           <code className="flex-1 text-sm truncate">
-            {`${window.location.origin}${inviteUrl}`}
+            {resolveInviteUrl(inviteUrl)}
           </code>
           <Button
             variant="outline"
@@ -130,7 +131,7 @@ export function QuickInviteForm({ projectId, onSuccess, onCancel }: QuickInviteF
           <Button
             variant="outline"
             size="sm"
-            onClick={() => window.open(inviteUrl, "_blank")}
+            onClick={() => window.open(resolveInviteUrl(inviteUrl), "_blank")}
             data-testid="button-open-invite-url"
           >
             <ExternalLink className="h-4 w-4" />
