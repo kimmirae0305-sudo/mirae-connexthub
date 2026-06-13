@@ -100,14 +100,61 @@ const normalizeStatus = (insight: Insight) => insight.reviewStatus || "pm_review
 const getInsightTitle = (insight: Insight) =>
   insight.insightTitle || `${insight.industry || "Market"} insight from ${formatDate(insight.callDate)}`;
 
+const reportQualityPlaceholderPatterns = [
+  /requires?\s+pm\s+review/i,
+  /has\s+not\s+been\s+structured/i,
+  /pending\s+review/i,
+  /\btbd\b/i,
+  /to\s+be\s+determined/i,
+  /not\s+recorded/i,
+  /not\s+provided/i,
+  /requires?\s+validation/i,
+  /review\s+before\s+using/i,
+];
+
+const isReportQualityTextComplete = (value?: string | null) => {
+  const normalized = (value || "").trim();
+  return normalized.length > 0 && !reportQualityPlaceholderPatterns.some((pattern) => pattern.test(normalized));
+};
+
 const getCoreObservation = (insight: Insight) => insight.coreObservation || insight.observedTrend || "-";
-const getEvidenceSummary = (insight: Insight) =>
-  insight.evidenceSummary || `Captured from consultation ${insight.consultationId || insight.callRecordId || ""}`.trim();
-const getBusinessImplication = (insight: Insight) =>
-  insight.businessImplication || "Business implication requires PM review before report use.";
-const getConfidenceLevel = (insight: Insight) => insight.confidenceLevel || insight.signalStrength || "Medium";
-const getConfidenceReason = (insight: Insight) =>
-  insight.confidenceReason || "Confidence assessment has not been structured yet.";
+const getEvidenceSummary = (insight: Insight) => insight.evidenceSummary || "-";
+const getBusinessImplication = (insight: Insight) => insight.businessImplication || "-";
+const getConfidenceLevel = (insight: Insight) => {
+  if (insight.confidenceLevel) return insight.confidenceLevel;
+  if (insight.signalStrength && isReportQualityTextComplete(insight.confidenceReason)) return insight.signalStrength;
+  return "Preliminary";
+};
+const getConfidenceReason = (insight: Insight) => insight.confidenceReason || "-";
+
+const getReportQualityIssues = (insight: Insight) => {
+  const issues: string[] = [];
+  if (!isReportQualityTextComplete(insight.coreObservation || insight.observedTrend)) issues.push("core observation");
+  if (!isReportQualityTextComplete(insight.evidenceSummary)) issues.push("evidence summary");
+  if (!isReportQualityTextComplete(insight.businessImplication)) issues.push("business implication");
+  if (!getConfidenceLevel(insight).trim()) issues.push("confidence level");
+  if (!isReportQualityTextComplete(insight.confidenceReason)) issues.push("confidence reason");
+  if (getConfidenceLevel(insight).toLowerCase() === "strong" && !isReportQualityTextComplete(insight.confidenceReason)) {
+    issues.push("strong confidence justification");
+  }
+  return issues;
+};
+
+const isReportReadyInsight = (insight: Insight) =>
+  ["approved", "published"].includes(normalizeStatus(insight)) && getReportQualityIssues(insight).length === 0;
+
+const getErrorMessage = (error: Error) => {
+  const jsonStart = error.message.indexOf("{");
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(error.message.slice(jsonStart));
+      if (parsed?.error) return parsed.error;
+    } catch {
+      // Fall through to the original error message.
+    }
+  }
+  return error.message;
+};
 
 const statusBadgeClass = (status: string) => {
   if (status === "approved" || status === "published") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700";
@@ -137,7 +184,7 @@ const defaultFormValues = (): InsightFormData => ({
   evidenceSummary: "",
   businessImplication: "",
   signalType: "Market Signal",
-  confidenceLevel: "Medium",
+  confidenceLevel: "Preliminary",
   confidenceReason: "",
   recommendedFollowUpQuestionsText: "",
   keyTagsText: "",
@@ -184,15 +231,23 @@ export default function InsightHub() {
     [callRecords, insightByCallRecordId]
   );
 
-  const reportReadyInsights = useMemo(
+  const approvedOrPublishedInsights = useMemo(
     () => insights.filter((insight) => ["approved", "published"].includes(normalizeStatus(insight))),
     [insights]
+  );
+  const reportReadyInsights = useMemo(
+    () => approvedOrPublishedInsights.filter(isReportReadyInsight),
+    [approvedOrPublishedInsights]
+  );
+  const incompleteApprovedInsights = useMemo(
+    () => approvedOrPublishedInsights.filter((insight) => !isReportReadyInsight(insight)),
+    [approvedOrPublishedInsights]
   );
 
   const summary = useMemo(() => {
     const countByStatus = (status: string) => insights.filter((insight) => normalizeStatus(insight) === status).length;
     return {
-      totalDrafts: insights.filter((insight) => ["ai_draft", "pm_reviewed"].includes(normalizeStatus(insight))).length,
+      totalDrafts: insights.length,
       pendingPmReview: countByStatus("ai_draft"),
       pmReviewed: countByStatus("pm_reviewed"),
       approved: countByStatus("approved"),
@@ -253,7 +308,7 @@ export default function InsightHub() {
       toast({ title: "Insight status updated" });
     },
     onError: (error: Error) => {
-      toast({ title: "Failed to update status", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to update status", description: getErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -277,8 +332,8 @@ export default function InsightHub() {
       clientQuestion: insight.clientQuestion || "",
       insightTitle: getInsightTitle(insight),
       coreObservation: getCoreObservation(insight),
-      evidenceSummary: getEvidenceSummary(insight),
-      businessImplication: getBusinessImplication(insight),
+      evidenceSummary: insight.evidenceSummary || "",
+      businessImplication: insight.businessImplication || "",
       signalType: insight.signalType || "Market Signal",
       confidenceLevel: getConfidenceLevel(insight),
       confidenceReason: insight.confidenceReason || "",
@@ -335,6 +390,10 @@ export default function InsightHub() {
   const renderInsightCard = (insight: Insight) => {
     const status = normalizeStatus(insight);
     const followUps = insight.recommendedFollowUpQuestions || [];
+    const isCurrentReviewActionPending = reviewMutation.isPending && reviewMutation.variables?.id === insight.id;
+    const isApproving = isCurrentReviewActionPending && reviewMutation.variables?.reviewStatus === "approved";
+    const qualityIssues = getReportQualityIssues(insight);
+    const needsReportQualityCompletion = ["approved", "published"].includes(status) && qualityIssues.length > 0;
     return (
       <Card key={insight.id} className="border-border/80">
         <CardHeader className="space-y-3">
@@ -358,6 +417,13 @@ export default function InsightHub() {
             <InsightBlock label="Core Observation" value={getCoreObservation(insight)} />
             <InsightBlock label="Business Implication" value={getBusinessImplication(insight)} />
           </div>
+          {needsReportQualityCompletion && (
+            <div className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900">
+              This approved insight needs report-quality completion before it can appear in the report-ready preview:
+              {" "}
+              {qualityIssues.join(", ")}.
+            </div>
+          )}
           <div className="grid gap-3 text-sm md:grid-cols-4">
             <Meta label="Project" value={insight.market || "-"} />
             <Meta label="Client" value={insight.clientType || "Internal"} />
@@ -384,6 +450,7 @@ export default function InsightHub() {
                 variant="outline"
                 size="sm"
                 onClick={() => reviewMutation.mutate({ id: insight.id, reviewStatus: "pm_reviewed" })}
+                disabled={reviewMutation.isPending}
                 className="gap-1"
               >
                 <CheckCircle2 className="h-3 w-3" />
@@ -395,10 +462,11 @@ export default function InsightHub() {
                 variant="outline"
                 size="sm"
                 onClick={() => reviewMutation.mutate({ id: insight.id, reviewStatus: "approved" })}
+                disabled={reviewMutation.isPending}
                 className="gap-1"
               >
                 <CheckCircle2 className="h-3 w-3" />
-                Approve
+                {isApproving ? "Approving..." : "Approve"}
               </Button>
             )}
             {status !== "rejected" && (
@@ -406,6 +474,7 @@ export default function InsightHub() {
                 variant="outline"
                 size="sm"
                 onClick={() => reviewMutation.mutate({ id: insight.id, reviewStatus: "rejected" })}
+                disabled={reviewMutation.isPending}
                 className="gap-1 text-destructive"
               >
                 <XCircle className="h-3 w-3" />
@@ -484,6 +553,9 @@ export default function InsightHub() {
         <Metric title="Report-Ready Insights" value={summary.reportReady} />
         <Metric title="Published Insights" value={summary.published} />
       </div>
+      <p className="text-xs text-muted-foreground">
+        Report-ready requires approval plus complete evidence, implication, and confidence fields.
+      </p>
 
       <Card className="border-primary/10">
         <CardHeader>
@@ -494,6 +566,11 @@ export default function InsightHub() {
           <CardDescription>Approved or published insights shown in a lightweight client-report-like format.</CardDescription>
         </CardHeader>
         <CardContent>
+          {incompleteApprovedInsights.length > 0 && (
+            <div className="mb-4 rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900">
+              Approved insights exist, but some require report-quality completion before they can appear in the report-ready preview.
+            </div>
+          )}
           {reportReadyInsights.length === 0 ? (
             <div className="rounded-lg border bg-muted/20 p-5">
               <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center">
@@ -698,6 +775,8 @@ export default function InsightHub() {
                           <SelectTrigger><SelectValue /></SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="Preliminary">Preliminary</SelectItem>
+                          <SelectItem value="Strong">Strong</SelectItem>
                           <SelectItem value="High">High</SelectItem>
                           <SelectItem value="Medium">Medium</SelectItem>
                           <SelectItem value="Low">Low</SelectItem>

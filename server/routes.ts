@@ -3081,6 +3081,36 @@ export async function registerRoutes(
     ["admin", "ceo", "coo"].includes(normalizeInsightRole(role));
   const canReviewInsightProject = (user: NonNullable<AuthRequest["user"]>, project: any) =>
     hasInsightManagementAccess(user.role) || (normalizeInsightRole(user.role) === "pm" && project.createdByPmId === user.id);
+  const reportQualityPlaceholderPatterns = [
+    /requires?\s+pm\s+review/i,
+    /has\s+not\s+been\s+structured/i,
+    /pending\s+review/i,
+    /\btbd\b/i,
+    /to\s+be\s+determined/i,
+    /not\s+recorded/i,
+    /not\s+provided/i,
+    /requires?\s+validation/i,
+    /review\s+before\s+using/i,
+  ];
+  const isReportQualityTextComplete = (value?: string | null) => {
+    const normalized = String(value || "").trim();
+    return normalized.length > 0 && !reportQualityPlaceholderPatterns.some((pattern) => pattern.test(normalized));
+  };
+  const getInsightReportQualityIssues = (insight: Partial<InsertInsight> & Record<string, any>) => {
+    const issues: string[] = [];
+    if (!isReportQualityTextComplete(insight.coreObservation || insight.observedTrend)) issues.push("core observation");
+    if (!isReportQualityTextComplete(insight.evidenceSummary)) issues.push("evidence summary");
+    if (!isReportQualityTextComplete(insight.businessImplication)) issues.push("business implication");
+    if (!String(insight.confidenceLevel || "").trim()) issues.push("confidence level");
+    if (!isReportQualityTextComplete(insight.confidenceReason)) issues.push("confidence reason");
+    if (
+      String(insight.confidenceLevel || "").trim().toLowerCase() === "strong" &&
+      !isReportQualityTextComplete(insight.confidenceReason)
+    ) {
+      issues.push("strong confidence justification");
+    }
+    return issues;
+  };
   const buildClientQuestionFromProject = async (project: any) => {
     const questions = await storage.getVettingQuestionsByProject(project.id);
     const insightQuestions = questions
@@ -3136,7 +3166,7 @@ export async function registerRoutes(
       evidenceSummary,
       businessImplication,
       signalType: "Market Signal",
-      confidenceLevel: "Medium",
+      confidenceLevel: "Preliminary",
       confidenceReason: "Deterministic placeholder draft generated from CRM consultation metadata and PM notes. Requires PM validation before approval.",
       recommendedFollowUpQuestions: [
         "Which customer segments are most affected by this signal?",
@@ -3262,6 +3292,15 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
+      if (["approved", "published"].includes(String(result.data.reviewStatus || "").trim())) {
+        const qualityIssues = getInsightReportQualityIssues(result.data as any);
+        if (qualityIssues.length > 0) {
+          return res.status(400).json({
+            error: "This insight needs a completed business implication, evidence summary, and confidence reason before it can be approved.",
+            qualityIssues,
+          });
+        }
+      }
 
       const callRecordId = result.data.callRecordId;
       if (!callRecordId) {
@@ -3341,6 +3380,16 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
+      const nextReviewStatus = String(result.data.reviewStatus || existingInsight.reviewStatus || "").trim();
+      if (["approved", "published"].includes(nextReviewStatus)) {
+        const qualityIssues = getInsightReportQualityIssues({ ...existingInsight, ...result.data } as any);
+        if (qualityIssues.length > 0) {
+          return res.status(400).json({
+            error: "This insight needs a completed business implication, evidence summary, and confidence reason before it can be approved.",
+            qualityIssues,
+          });
+        }
+      }
 
       const updatedInsight = await storage.updateInsight(id, result.data);
       res.json(updatedInsight);
@@ -3372,6 +3421,13 @@ export async function registerRoutes(
       if (nextStatus === "approved" || nextStatus === "published") {
         if (!hasInsightManagementAccess(user.role)) {
           return res.status(403).json({ error: "Only admin, CEO, and COO users can approve or publish insights" });
+        }
+        const qualityIssues = getInsightReportQualityIssues(existingInsight);
+        if (qualityIssues.length > 0) {
+          return res.status(400).json({
+            error: "This insight needs a completed business implication, evidence summary, and confidence reason before it can be approved.",
+            qualityIssues,
+          });
         }
       } else if (project && !canReviewInsightProject(user, project)) {
         return res.status(403).json({ error: "Access denied for this insight" });
