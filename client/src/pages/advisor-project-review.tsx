@@ -1,9 +1,11 @@
+import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { AlertCircle, CalendarClock, ClipboardList, Loader2, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { resolveApiUrl } from "@/lib/apiUrl";
 import logoPath from "@assets/Logo_1764384177823.png";
 
 type AdvisorProjectReviewData = {
@@ -38,13 +40,54 @@ const formatDate = (value?: string | null) => {
   }).format(date);
 };
 
-export default function AdvisorProjectReview() {
+function SafeReviewLinkError() {
+  return (
+    <div className="min-h-screen bg-muted/30 px-4 py-10">
+      <div className="mx-auto flex min-h-[70vh] max-w-3xl items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+              <AlertCircle className="h-6 w-6 text-destructive" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold">Review Link Unavailable</h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                This review link could not be loaded. Please contact Mirae Connext.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+class AdvisorProjectReviewErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <SafeReviewLinkError />;
+    }
+
+    return this.props.children;
+  }
+}
+
+function AdvisorProjectReviewContent() {
   const { token } = useParams<{ token: string }>();
 
   const { data, isLoading, error } = useQuery<AdvisorProjectReviewData>({
     queryKey: ["/api/public/advisor-project-review", token],
     queryFn: async () => {
-      const res = await fetch(`/api/public/advisor-project-review/${token}`);
+      const res = await fetch(resolveApiUrl(`/api/public/advisor-project-review/${token}`));
       if (!res.ok) {
         throw new Error("Invalid or expired review link");
       }
@@ -53,6 +96,18 @@ export default function AdvisorProjectReview() {
     enabled: Boolean(token),
     retry: false,
   });
+
+  const project = data?.project ?? { id: null, advisorBrief: "" };
+  const invitation = data?.invitation ?? { id: null, expiresAt: null };
+  const advisor = data?.advisor ?? { name: "Advisor" };
+  const screeningQuestions = Array.isArray(data?.screeningQuestions)
+    ? data.screeningQuestions
+    : Array.isArray((data as any)?.vettingQuestions)
+      ? (data as any).vettingQuestions
+      : [];
+  const advisorBrief =
+    String(project.advisorBrief || (project as any).externalAdvisorBrief || "").trim() ||
+    "Project details will be shared by the Mirae Connext team.";
 
   if (isLoading) {
     return (
@@ -70,25 +125,7 @@ export default function AdvisorProjectReview() {
   }
 
   if (error || !data) {
-    return (
-      <div className="min-h-screen bg-muted/30 px-4 py-10">
-        <div className="mx-auto flex min-h-[70vh] max-w-3xl items-center justify-center">
-          <Card className="w-full max-w-md">
-            <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-                <AlertCircle className="h-6 w-6 text-destructive" />
-              </div>
-              <div>
-                <h1 className="text-xl font-semibold">Review Link Unavailable</h1>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  This project review link is invalid or has expired. Please contact the Mirae Connext team for a new link.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
+    return <SafeReviewLinkError />;
   }
 
   return (
@@ -105,7 +142,7 @@ export default function AdvisorProjectReview() {
             </div>
           </div>
           <Badge variant="outline" className="w-fit">
-            Project #{data.project.id}
+            {project.id ? `Project #${project.id}` : "Project Review"}
           </Badge>
         </header>
 
@@ -120,18 +157,18 @@ export default function AdvisorProjectReview() {
               </div>
               <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
                 <CalendarClock className="h-4 w-4" />
-                Expires {formatDate(data.invitation.expiresAt)}
+                Expires {formatDate(invitation.expiresAt)}
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="rounded-md border bg-muted/20 p-4">
               <p className="text-sm font-medium text-muted-foreground">Advisor</p>
-              <p className="mt-1 text-base font-semibold">{data.advisor.name}</p>
+              <p className="mt-1 text-base font-semibold">{advisor.name || "Advisor"}</p>
             </div>
             <div>
               <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
-                {data.project.advisorBrief}
+                {advisorBrief}
               </p>
             </div>
           </CardContent>
@@ -148,20 +185,20 @@ export default function AdvisorProjectReview() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {data.screeningQuestions.length === 0 ? (
+            {screeningQuestions.length === 0 ? (
               <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
                 No screening questions have been added yet.
               </div>
             ) : (
               <ol className="space-y-4">
-                {data.screeningQuestions.map((question, index) => (
-                  <li key={question.id} className="rounded-md border bg-background p-4">
+                {screeningQuestions.map((question, index) => (
+                  <li key={question.id ?? index} className="rounded-md border bg-background p-4">
                     <div className="flex items-start gap-3">
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
                         {index + 1}
                       </span>
                       <div className="space-y-2">
-                        <p className="text-sm leading-6">{question.question}</p>
+                        <p className="text-sm leading-6">{question.question || "Screening question pending."}</p>
                         {question.isRequired && (
                           <Badge variant="secondary" className="text-xs">
                             Required
@@ -194,5 +231,13 @@ export default function AdvisorProjectReview() {
         </p>
       </main>
     </div>
+  );
+}
+
+export default function AdvisorProjectReview() {
+  return (
+    <AdvisorProjectReviewErrorBoundary>
+      <AdvisorProjectReviewContent />
+    </AdvisorProjectReviewErrorBoundary>
   );
 }
