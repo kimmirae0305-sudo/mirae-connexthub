@@ -228,40 +228,31 @@ function Router() {
 }
 
 function isPublicAdvisorProjectReviewPath(pathname: string) {
-  return /^\/public\/advisor-project-review\/[^/]+\/?$/.test(pathname);
-}
-
-function PublicAdvisorProjectReviewRouter() {
-  return (
-    <Switch>
-      <Route path="/public/advisor-project-review/:token">
-        <AdvisorProjectReview />
-      </Route>
-      <Route>
-        <AdvisorProjectReview />
-      </Route>
-    </Switch>
-  );
+  return pathname === "/public/advisor-project-review" || pathname.startsWith("/public/advisor-project-review/");
 }
 
 function App() {
   const isPublicAdvisorReview =
     typeof window !== "undefined" && isPublicAdvisorProjectReviewPath(window.location.pathname);
 
+  if (isPublicAdvisorReview) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <AdvisorProjectReview />
+          <Toaster />
+        </TooltipProvider>
+      </QueryClientProvider>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        {isPublicAdvisorReview ? (
-          <>
-            <PublicAdvisorProjectReviewRouter />
-            <Toaster />
-          </>
-        ) : (
-          <AuthProvider>
-            <Router />
-            <Toaster />
-          </AuthProvider>
-        )}
+        <AuthProvider>
+          <Router />
+          <Toaster />
+        </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

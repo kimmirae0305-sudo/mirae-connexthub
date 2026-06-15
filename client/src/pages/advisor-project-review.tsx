@@ -82,7 +82,12 @@ class AdvisorProjectReviewErrorBoundary extends React.Component<
 }
 
 function AdvisorProjectReviewContent() {
-  const { token } = useParams<{ token: string }>();
+  const params = useParams<{ token: string }>();
+  const token =
+    params.token ||
+    (typeof window !== "undefined"
+      ? decodeURIComponent(window.location.pathname.split("/public/advisor-project-review/")[1]?.split("/")[0] || "")
+      : "");
 
   const { data, isLoading, error } = useQuery<AdvisorProjectReviewData>({
     queryKey: ["/api/public/advisor-project-review", token],
