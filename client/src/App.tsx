@@ -227,14 +227,41 @@ function Router() {
   );
 }
 
+function isPublicAdvisorProjectReviewPath(pathname: string) {
+  return /^\/public\/advisor-project-review\/[^/]+\/?$/.test(pathname);
+}
+
+function PublicAdvisorProjectReviewRouter() {
+  return (
+    <Switch>
+      <Route path="/public/advisor-project-review/:token">
+        <AdvisorProjectReview />
+      </Route>
+      <Route>
+        <AdvisorProjectReview />
+      </Route>
+    </Switch>
+  );
+}
+
 function App() {
+  const isPublicAdvisorReview =
+    typeof window !== "undefined" && isPublicAdvisorProjectReviewPath(window.location.pathname);
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <AuthProvider>
-          <Router />
-          <Toaster />
-        </AuthProvider>
+        {isPublicAdvisorReview ? (
+          <>
+            <PublicAdvisorProjectReviewRouter />
+            <Toaster />
+          </>
+        ) : (
+          <AuthProvider>
+            <Router />
+            <Toaster />
+          </AuthProvider>
+        )}
       </TooltipProvider>
     </QueryClientProvider>
   );
