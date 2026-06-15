@@ -3082,32 +3082,49 @@ export async function registerRoutes(
   const canReviewInsightProject = (user: NonNullable<AuthRequest["user"]>, project: any) =>
     hasInsightManagementAccess(user.role) || (normalizeInsightRole(user.role) === "pm" && project.createdByPmId === user.id);
   const reportQualityPlaceholderPatterns = [
-    /requires?\s+pm\s+review/i,
-    /has\s+not\s+been\s+structured/i,
-    /pending\s+review/i,
-    /\btbd\b/i,
-    /to\s+be\s+determined/i,
-    /not\s+recorded/i,
-    /not\s+provided/i,
-    /requires?\s+validation/i,
-    /review\s+before\s+using/i,
+    /requires?\s+pm\s+review(?:\s+before\s+report\s+use)?\.?$/i,
+    /requires?\s+pm\s+validation(?:\s+before\s+approval)?\.?$/i,
+    /business\s+implication\s+requires?\s+pm\s+review/i,
+    /confidence\s+assessment\s+has\s+not\s+been\s+structured\s+yet\.?$/i,
+    /has\s+not\s+been\s+structured\s+yet\.?$/i,
+    /^pending\s+review\.?$/i,
+    /^tbd\.?$/i,
+    /^to\s+be\s+completed\.?$/i,
+    /^to\s+be\s+determined\.?$/i,
+    /^not\s+provided\.?$/i,
+    /^not\s+available\.?$/i,
   ];
-  const isReportQualityTextComplete = (value?: string | null) => {
+  const getReportQualityTextIssue = (field: string, value?: string | null) => {
     const normalized = String(value || "").trim();
-    return normalized.length > 0 && !reportQualityPlaceholderPatterns.some((pattern) => pattern.test(normalized));
+    if (!normalized) return { field, reason: "Required report-quality field is empty" };
+
+    const matchedPattern = reportQualityPlaceholderPatterns.find((pattern) => pattern.test(normalized));
+    if (matchedPattern) {
+      return { field, reason: `Contains internal placeholder phrase: ${normalized}` };
+    }
+
+    return null;
+  };
+  const isReportQualityTextComplete = (value?: string | null) => {
+    return !getReportQualityTextIssue("field", value);
   };
   const getInsightReportQualityIssues = (insight: Partial<InsertInsight> & Record<string, any>) => {
-    const issues: string[] = [];
-    if (!isReportQualityTextComplete(insight.coreObservation || insight.observedTrend)) issues.push("core observation");
-    if (!isReportQualityTextComplete(insight.evidenceSummary)) issues.push("evidence summary");
-    if (!isReportQualityTextComplete(insight.businessImplication)) issues.push("business implication");
-    if (!String(insight.confidenceLevel || "").trim()) issues.push("confidence level");
-    if (!isReportQualityTextComplete(insight.confidenceReason)) issues.push("confidence reason");
+    const issues: Array<{ field: string; reason: string }> = [];
+    const coreObservationIssue = getReportQualityTextIssue("coreObservation", insight.coreObservation || insight.observedTrend);
+    const evidenceSummaryIssue = getReportQualityTextIssue("evidenceSummary", insight.evidenceSummary);
+    const businessImplicationIssue = getReportQualityTextIssue("businessImplication", insight.businessImplication);
+    const confidenceReasonIssue = getReportQualityTextIssue("confidenceReason", insight.confidenceReason);
+
+    if (coreObservationIssue) issues.push(coreObservationIssue);
+    if (evidenceSummaryIssue) issues.push(evidenceSummaryIssue);
+    if (businessImplicationIssue) issues.push(businessImplicationIssue);
+    if (!String(insight.confidenceLevel || "").trim()) issues.push({ field: "confidenceLevel", reason: "Confidence level is required" });
+    if (confidenceReasonIssue) issues.push(confidenceReasonIssue);
     if (
       String(insight.confidenceLevel || "").trim().toLowerCase() === "strong" &&
-      !isReportQualityTextComplete(insight.confidenceReason)
+      confidenceReasonIssue
     ) {
-      issues.push("strong confidence justification");
+      issues.push({ field: "confidenceReason", reason: "Strong confidence requires a meaningful confidence reason" });
     }
     return issues;
   };

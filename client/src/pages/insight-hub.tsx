@@ -101,20 +101,35 @@ const getInsightTitle = (insight: Insight) =>
   insight.insightTitle || `${insight.industry || "Market"} insight from ${formatDate(insight.callDate)}`;
 
 const reportQualityPlaceholderPatterns = [
-  /requires?\s+pm\s+review/i,
-  /has\s+not\s+been\s+structured/i,
-  /pending\s+review/i,
-  /\btbd\b/i,
-  /to\s+be\s+determined/i,
-  /not\s+recorded/i,
-  /not\s+provided/i,
-  /requires?\s+validation/i,
-  /review\s+before\s+using/i,
+  /requires?\s+pm\s+review(?:\s+before\s+report\s+use)?\.?$/i,
+  /requires?\s+pm\s+validation(?:\s+before\s+approval)?\.?$/i,
+  /business\s+implication\s+requires?\s+pm\s+review/i,
+  /confidence\s+assessment\s+has\s+not\s+been\s+structured\s+yet\.?$/i,
+  /has\s+not\s+been\s+structured\s+yet\.?$/i,
+  /^pending\s+review\.?$/i,
+  /^tbd\.?$/i,
+  /^to\s+be\s+completed\.?$/i,
+  /^to\s+be\s+determined\.?$/i,
+  /^not\s+provided\.?$/i,
+  /^not\s+available\.?$/i,
 ];
 
-const isReportQualityTextComplete = (value?: string | null) => {
+type ReportQualityIssue = { field: string; reason: string };
+
+const getReportQualityTextIssue = (field: string, value?: string | null): ReportQualityIssue | null => {
   const normalized = (value || "").trim();
-  return normalized.length > 0 && !reportQualityPlaceholderPatterns.some((pattern) => pattern.test(normalized));
+  if (!normalized) return { field, reason: "Required report-quality field is empty" };
+
+  const matchedPattern = reportQualityPlaceholderPatterns.find((pattern) => pattern.test(normalized));
+  if (matchedPattern) {
+    return { field, reason: `Contains internal placeholder phrase: ${normalized}` };
+  }
+
+  return null;
+};
+
+const isReportQualityTextComplete = (value?: string | null) => {
+  return !getReportQualityTextIssue("field", value);
 };
 
 const getCoreObservation = (insight: Insight) => insight.coreObservation || insight.observedTrend || "-";
@@ -128,14 +143,19 @@ const getConfidenceLevel = (insight: Insight) => {
 const getConfidenceReason = (insight: Insight) => insight.confidenceReason || "-";
 
 const getReportQualityIssues = (insight: Insight) => {
-  const issues: string[] = [];
-  if (!isReportQualityTextComplete(insight.coreObservation || insight.observedTrend)) issues.push("core observation");
-  if (!isReportQualityTextComplete(insight.evidenceSummary)) issues.push("evidence summary");
-  if (!isReportQualityTextComplete(insight.businessImplication)) issues.push("business implication");
-  if (!getConfidenceLevel(insight).trim()) issues.push("confidence level");
-  if (!isReportQualityTextComplete(insight.confidenceReason)) issues.push("confidence reason");
-  if (getConfidenceLevel(insight).toLowerCase() === "strong" && !isReportQualityTextComplete(insight.confidenceReason)) {
-    issues.push("strong confidence justification");
+  const issues: ReportQualityIssue[] = [];
+  const coreObservationIssue = getReportQualityTextIssue("coreObservation", insight.coreObservation || insight.observedTrend);
+  const evidenceSummaryIssue = getReportQualityTextIssue("evidenceSummary", insight.evidenceSummary);
+  const businessImplicationIssue = getReportQualityTextIssue("businessImplication", insight.businessImplication);
+  const confidenceReasonIssue = getReportQualityTextIssue("confidenceReason", insight.confidenceReason);
+
+  if (coreObservationIssue) issues.push(coreObservationIssue);
+  if (evidenceSummaryIssue) issues.push(evidenceSummaryIssue);
+  if (businessImplicationIssue) issues.push(businessImplicationIssue);
+  if (!getConfidenceLevel(insight).trim()) issues.push({ field: "confidenceLevel", reason: "Confidence level is required" });
+  if (confidenceReasonIssue) issues.push(confidenceReasonIssue);
+  if (getConfidenceLevel(insight).toLowerCase() === "strong" && confidenceReasonIssue) {
+    issues.push({ field: "confidenceReason", reason: "Strong confidence requires a meaningful confidence reason" });
   }
   return issues;
 };
@@ -149,7 +169,12 @@ const getErrorMessage = (error: Error) => {
     try {
       const parsed = JSON.parse(error.message.slice(jsonStart));
       if (parsed?.error && Array.isArray(parsed.qualityIssues) && parsed.qualityIssues.length > 0) {
-        return `${parsed.error} Missing or incomplete: ${parsed.qualityIssues.join(", ")}.`;
+        const details = parsed.qualityIssues
+          .map((issue: string | ReportQualityIssue) =>
+            typeof issue === "string" ? issue : `${issue.field}: ${issue.reason}`
+          )
+          .join("; ");
+        return `${parsed.error} ${details}`;
       }
       if (parsed?.error) return parsed.error;
     } catch {
@@ -424,7 +449,7 @@ export default function InsightHub() {
             <div className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900">
               This approved insight needs report-quality completion before it can appear in the report-ready preview:
               {" "}
-              {qualityIssues.join(", ")}.
+              {qualityIssues.map((issue) => issue.field).join(", ")}.
             </div>
           )}
           <div className="grid gap-3 text-sm md:grid-cols-4">
