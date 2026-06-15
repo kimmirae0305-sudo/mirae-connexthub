@@ -14,9 +14,20 @@ function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+function isPublicAdvisorReviewPath() {
+  return (
+    typeof window !== "undefined" &&
+    (window.location.pathname === "/public/advisor-project-review" ||
+      window.location.pathname.startsWith("/public/advisor-project-review/"))
+  );
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     if (res.status === 401) {
+      if (isPublicAdvisorReviewPath()) {
+        throw new Error("Unauthorized");
+      }
       localStorage.removeItem("authToken");
       window.location.href = "/login";
       throw new Error("Unauthorized");
@@ -65,6 +76,9 @@ export const getQueryFn: <T>(options: {
     }
 
     if (res.status === 401) {
+      if (isPublicAdvisorReviewPath()) {
+        throw new Error("Unauthorized");
+      }
       localStorage.removeItem("authToken");
       window.location.href = "/login";
       throw new Error("Unauthorized");
