@@ -148,6 +148,9 @@ const getErrorMessage = (error: Error) => {
   if (jsonStart >= 0) {
     try {
       const parsed = JSON.parse(error.message.slice(jsonStart));
+      if (parsed?.error && Array.isArray(parsed.qualityIssues) && parsed.qualityIssues.length > 0) {
+        return `${parsed.error} Missing or incomplete: ${parsed.qualityIssues.join(", ")}.`;
+      }
       if (parsed?.error) return parsed.error;
     } catch {
       // Fall through to the original error message.
