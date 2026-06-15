@@ -40,6 +40,7 @@ import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
 import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
+const generateAdvisorProjectReviewToken = () => `apr_${crypto.randomBytes(32).toString("hex")}`;
 const trimTrailingSlashes = (value: string) => value.replace(/\/+$/, "");
 const getRequestBaseUrl = (req: AuthRequest) => {
   const forwardedProto = req.headers["x-forwarded-proto"];
@@ -61,6 +62,8 @@ const getInviteBaseUrl = (req: AuthRequest) => {
   return trimTrailingSlashes(getRequestBaseUrl(req));
 };
 const buildPublicRecruitmentUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/r/${token}`;
+const buildPublicAdvisorProjectReviewUrl = (token: string, req: AuthRequest) =>
+  `${getInviteBaseUrl(req)}/public/advisor-project-review/${token}`;
 const expenseReceiptUpload = raw({
   type: ["application/pdf", "image/png", "image/jpeg"],
   limit: "5mb",
@@ -1025,6 +1028,141 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error creating advisor project invitation drafts:", error);
       res.status(500).json({ error: "Failed to create advisor project invitation drafts" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/advisor-invitations/:invitationId/generate-link", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const invitationId = parseInt(req.params.invitationId);
+      const user = req.user!;
+      const project = await storage.getProject(projectId);
+
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      if (!canManageProjectAdvisorInvitations(project, user)) {
+        return res.status(403).json({ error: "Access denied: You cannot generate advisor review links for this project" });
+      }
+
+      const invitation = await storage.getAdvisorProjectInvitation(invitationId);
+      if (!invitation || invitation.projectId !== projectId) {
+        return res.status(404).json({ error: "Advisor invitation not found" });
+      }
+
+      const now = new Date();
+      const currentExpiration = invitation.expiresAt ? new Date(invitation.expiresAt) : null;
+      const hasValidToken = Boolean(
+        invitation.token &&
+        currentExpiration &&
+        !Number.isNaN(currentExpiration.getTime()) &&
+        currentExpiration > now
+      );
+
+      let token = invitation.token;
+      let expiresAt = currentExpiration;
+
+      if (!hasValidToken) {
+        if (token && (!currentExpiration || Number.isNaN(currentExpiration.getTime()))) {
+          expiresAt = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+        } else {
+          token = null;
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            const candidate = generateAdvisorProjectReviewToken();
+            const existing = await storage.getAdvisorProjectInvitationByToken(candidate);
+            if (!existing) {
+              token = candidate;
+              break;
+            }
+          }
+          expiresAt = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+        }
+
+        if (!token) {
+          return res.status(500).json({ error: "Failed to generate advisor review token" });
+        }
+
+        await storage.updateAdvisorProjectInvitation(invitation.id, {
+          token,
+          expiresAt,
+          status: invitation.status === "not_sent" ? "draft" : invitation.status || "draft",
+        });
+      } else if (invitation.status === "not_sent") {
+        await storage.updateAdvisorProjectInvitation(invitation.id, {
+          status: "draft",
+        });
+      }
+
+      res.json({
+        invitationId: invitation.id,
+        projectId,
+        expertId: invitation.expertId,
+        publicReviewUrl: buildPublicAdvisorProjectReviewUrl(token!, req),
+        expiresAt,
+      });
+    } catch (error) {
+      console.error("Error generating advisor project review link:", error);
+      res.status(500).json({ error: "Failed to generate advisor project review link" });
+    }
+  });
+
+  app.get("/api/public/advisor-project-review/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      if (!token) {
+        return res.status(404).json({ error: "Invalid or expired review link" });
+      }
+
+      const invitation = await storage.getAdvisorProjectInvitationByToken(token);
+      const expiresAt = invitation?.expiresAt ? new Date(invitation.expiresAt) : null;
+      if (
+        !invitation ||
+        !expiresAt ||
+        Number.isNaN(expiresAt.getTime()) ||
+        expiresAt <= new Date()
+      ) {
+        return res.status(404).json({ error: "Invalid or expired review link" });
+      }
+
+      const [project, expert, vettingQuestions] = await Promise.all([
+        storage.getProject(invitation.projectId),
+        storage.getExpert(invitation.expertId),
+        storage.getVettingQuestionsByProject(invitation.projectId),
+      ]);
+
+      if (!project || !expert) {
+        return res.status(404).json({ error: "Invalid or expired review link" });
+      }
+
+      const safeBrief = String((project as any).externalAdvisorBrief || "").trim() ||
+        "Project details will be shared by the Mirae Connext team.";
+
+      res.json({
+        project: {
+          id: project.id,
+          advisorBrief: safeBrief,
+        },
+        invitation: {
+          id: invitation.id,
+          expiresAt: invitation.expiresAt,
+        },
+        advisor: {
+          name: expert.name,
+        },
+        screeningQuestions: vettingQuestions
+          .sort((a, b) => a.orderIndex - b.orderIndex)
+          .map((question) => ({
+            id: question.id,
+            question: question.question,
+            questionType: question.questionType,
+            isRequired: question.isRequired,
+            orderIndex: question.orderIndex,
+          })),
+      });
+    } catch (error) {
+      console.error("Error fetching public advisor project review:", error);
+      res.status(500).json({ error: "Unable to load this review link" });
     }
   });
 

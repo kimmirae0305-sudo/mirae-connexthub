@@ -579,6 +579,12 @@ export interface IStorage {
 
   // Advisor Project Invitations
   getAdvisorProjectInvitationsByProject(projectId: number): Promise<AdvisorProjectInvitation[]>;
+  getAdvisorProjectInvitation(id: number): Promise<AdvisorProjectInvitation | undefined>;
+  getAdvisorProjectInvitationByToken(token: string): Promise<AdvisorProjectInvitation | undefined>;
+  updateAdvisorProjectInvitation(
+    id: number,
+    invitation: Partial<InsertAdvisorProjectInvitation>
+  ): Promise<AdvisorProjectInvitation | undefined>;
   createAdvisorProjectInvitationPlaceholders(
     projectId: number,
     expertIds: number[],
@@ -3796,6 +3802,34 @@ export class DatabaseStorage implements IStorage {
       .from(advisorProjectInvitations)
       .where(eq(advisorProjectInvitations.projectId, projectId))
       .orderBy(desc(advisorProjectInvitations.updatedAt));
+  }
+
+  async getAdvisorProjectInvitation(id: number): Promise<AdvisorProjectInvitation | undefined> {
+    const [invitation] = await db
+      .select()
+      .from(advisorProjectInvitations)
+      .where(eq(advisorProjectInvitations.id, id));
+    return invitation || undefined;
+  }
+
+  async getAdvisorProjectInvitationByToken(token: string): Promise<AdvisorProjectInvitation | undefined> {
+    const [invitation] = await db
+      .select()
+      .from(advisorProjectInvitations)
+      .where(eq(advisorProjectInvitations.token, token));
+    return invitation || undefined;
+  }
+
+  async updateAdvisorProjectInvitation(
+    id: number,
+    invitation: Partial<InsertAdvisorProjectInvitation>
+  ): Promise<AdvisorProjectInvitation | undefined> {
+    const [updated] = await db
+      .update(advisorProjectInvitations)
+      .set({ ...(invitation as any), updatedAt: new Date() })
+      .where(eq(advisorProjectInvitations.id, id))
+      .returning();
+    return updated || undefined;
   }
 
   async createAdvisorProjectInvitationPlaceholders(

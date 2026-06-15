@@ -104,6 +104,7 @@ export const projects = pgTable("projects", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   projectOverview: text("project_overview"),
+  externalAdvisorBrief: text("external_advisor_brief"),
   clientOrganizationId: integer("client_organization_id").references(() => clientOrganizations.id),
   clientName: text("client_name").notNull(),
   clientCompany: text("client_company"),
