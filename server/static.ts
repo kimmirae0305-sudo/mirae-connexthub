@@ -8,7 +8,7 @@ const PUBLIC_INVITE_DESCRIPTION =
   "You have been invited to review a confidential expert consultation opportunity and complete your advisor profile securely.";
 
 function isPublicInviteRoute(pathname: string) {
-  return /^\/r\/[^/]+\/?$/.test(pathname);
+  return /^\/r\/[^/]+\/?$/.test(pathname) || /^\/public\/advisor-project-review\/[^/]+\/?$/.test(pathname);
 }
 
 function replaceOrInsertMeta(html: string, pattern: RegExp, replacement: string) {
