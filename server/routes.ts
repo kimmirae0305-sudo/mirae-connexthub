@@ -3381,14 +3381,28 @@ export async function registerRoutes(
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
       const nextReviewStatus = String(result.data.reviewStatus || existingInsight.reviewStatus || "").trim();
-      if (["approved", "published"].includes(nextReviewStatus)) {
-        const qualityIssues = getInsightReportQualityIssues({ ...existingInsight, ...result.data } as any);
-        if (qualityIssues.length > 0) {
-          return res.status(400).json({
-            error: "This insight needs a completed business implication, evidence summary, and confidence reason before it can be approved.",
-            qualityIssues,
-          });
-        }
+      const reviewStatusIsChanging = Object.prototype.hasOwnProperty.call(result.data, "reviewStatus");
+      const existingQualityIssues = getInsightReportQualityIssues(existingInsight);
+      const candidateInsight = { ...existingInsight, ...result.data } as any;
+      const candidateQualityIssues = getInsightReportQualityIssues(candidateInsight);
+
+      if (reviewStatusIsChanging && ["approved", "published"].includes(nextReviewStatus) && candidateQualityIssues.length > 0) {
+        return res.status(400).json({
+          error: "This insight needs a completed business implication, evidence summary, and confidence reason before it can be approved.",
+          qualityIssues: candidateQualityIssues,
+        });
+      }
+
+      if (
+        !reviewStatusIsChanging &&
+        ["approved", "published"].includes(String(existingInsight.reviewStatus || "").trim()) &&
+        existingQualityIssues.length === 0 &&
+        candidateQualityIssues.length > 0
+      ) {
+        return res.status(400).json({
+          error: "This edit would remove report-quality fields from an approved insight. Move it back to PM Reviewed before saving incomplete report content.",
+          qualityIssues: candidateQualityIssues,
+        });
       }
 
       const updatedInsight = await storage.updateInsight(id, result.data);
