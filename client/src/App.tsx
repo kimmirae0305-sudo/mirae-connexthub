@@ -29,6 +29,7 @@ import ExpertRegister from "@/pages/expert-register";
 import ExpertInvite from "@/pages/expert-invite";
 import ExpertOnboarding from "@/pages/expert-onboarding";
 import ExpertProjectInvite from "@/pages/expert-project-invite";
+import AdvisorProjectReview from "@/pages/advisor-project-review";
 import QuickInviteOnboarding from "@/pages/quick-invite-onboarding";
 import QuickInviteDecision from "@/pages/quick-invite-decision";
 import ExpertProfile from "@/pages/expert-profile";
@@ -95,6 +96,9 @@ function Router() {
       </Route>
       <Route path="/expert/project-invite/:token">
         {(params) => <ExpertProjectInvite />}
+      </Route>
+      <Route path="/public/advisor-project-review/:token">
+        {(params) => <AdvisorProjectReview />}
       </Route>
       <Route path="/invite/onboarding/:token">
         {(params) => <QuickInviteOnboarding />}

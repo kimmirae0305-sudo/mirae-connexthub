@@ -153,6 +153,7 @@ const projectEditSchema = z.object({
   dueDate: z.string().optional(),
   cuRatePerCU: z.string().optional(),
   projectOverview: z.string().optional(),
+  externalAdvisorBrief: z.string().optional(),
   description: z.string().optional(),
 });
 
@@ -215,6 +216,11 @@ export default function ProjectDetail() {
   // Bulk invite modal state
   const [isBulkInviteModalOpen, setIsBulkInviteModalOpen] = useState(false);
   const [isAdvisorInviteDraftModalOpen, setIsAdvisorInviteDraftModalOpen] = useState(false);
+  const [generatedAdvisorReviewLink, setGeneratedAdvisorReviewLink] = useState<{
+    advisorName: string;
+    publicReviewUrl: string;
+    expiresAt: string | null;
+  } | null>(null);
   const [selectedInternalExpertIds, setSelectedInternalExpertIds] = useState<Set<number>>(new Set());
   const [bulkInviteAngleIds, setBulkInviteAngleIds] = useState<number[]>([]);
   
@@ -367,6 +373,7 @@ export default function ProjectDetail() {
       dueDate: "",
       cuRatePerCU: "",
       projectOverview: "",
+      externalAdvisorBrief: "",
       description: "",
     },
   });
@@ -383,6 +390,7 @@ export default function ProjectDetail() {
       dueDate: toDateInput(projectDetail.dueDate || projectDetail.endDate),
       cuRatePerCU: projectDetail.cuRatePerCU || "",
       projectOverview: projectDetail.projectOverview || "",
+      externalAdvisorBrief: projectDetail.externalAdvisorBrief || "",
       description: projectDetail.description || "",
     });
   }, [projectDetail, isProjectEditMode, projectEditForm, clientOrganizations]);
@@ -583,6 +591,7 @@ export default function ProjectDetail() {
         dueDate: data.dueDate ? new Date(`${data.dueDate}T00:00:00`) : null,
         cuRatePerCU: data.cuRatePerCU || null,
         projectOverview: data.projectOverview || null,
+        externalAdvisorBrief: data.externalAdvisorBrief || null,
         description: data.description || null,
       };
       return apiRequest("PATCH", `/api/projects/${projectId}`, payload);
@@ -680,6 +689,51 @@ export default function ProjectDetail() {
     onError: (error: any) => {
       toast({
         title: error?.message || "Failed to create project invitation drafts",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const generateAdvisorReviewLinkMutation = useMutation({
+    mutationFn: async (pe: EnrichedExpert) => {
+      let invitation = advisorInviteByExpertId.get(pe.expertId);
+
+      if (!invitation) {
+        const placeholderRes = await apiRequest("POST", `/api/projects/${projectId}/advisor-invitations/create-placeholder`, {
+          expertIds: [pe.expertId],
+        });
+        const placeholderData = await placeholderRes.json();
+        invitation = placeholderData?.invitations?.find(
+          (item: AdvisorProjectInvitation) => item.expertId === pe.expertId
+        );
+      }
+
+      if (!invitation) {
+        throw new Error("Could not create advisor invitation draft");
+      }
+
+      const res = await apiRequest(
+        "POST",
+        `/api/projects/${projectId}/advisor-invitations/${invitation.id}/generate-link`
+      );
+      const data = await res.json();
+      return {
+        ...data,
+        advisorName: pe.expert?.name || `Expert #${pe.expertId}`,
+      };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "advisor-invitations"] });
+      setGeneratedAdvisorReviewLink({
+        advisorName: data.advisorName,
+        publicReviewUrl: data.publicReviewUrl,
+        expiresAt: data.expiresAt || null,
+      });
+      toast({ title: "Review link generated" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: error?.message || "Failed to generate review link",
         variant: "destructive",
       });
     },
@@ -2221,6 +2275,28 @@ export default function ProjectDetail() {
             </Card>
           )}
 
+          {(isProjectEditMode || projectDetail.externalAdvisorBrief) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Advisor-Facing Brief</CardTitle>
+                <CardDescription>
+                  Safe external brief shown on advisor project review links. Do not include confidential client names or internal CRM notes.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isProjectEditMode ? (
+                  <Textarea
+                    rows={5}
+                    placeholder="Add the project context that is safe for advisors to review externally..."
+                    {...projectEditForm.register("externalAdvisorBrief")}
+                  />
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap">{projectDetail.externalAdvisorBrief}</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {(isProjectEditMode || projectDetail.description) && (
             <Card>
               <CardHeader>
@@ -2762,6 +2838,13 @@ export default function ProjectDetail() {
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={() => generateAdvisorReviewLinkMutation.mutate(pe)}
+                                      disabled={generateAdvisorReviewLinkMutation.isPending}
+                                    >
+                                      <Link2 className="h-4 w-4 mr-2" />
+                                      Generate Review Link
+                                    </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() => removeExpertMutation.mutate(pe.id)}
                                       className="text-destructive"
@@ -3743,6 +3826,54 @@ export default function ProjectDetail() {
               data-testid="button-save-vq"
             >
               {createVQMutation.isPending || updateVQMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Generated Advisor Review Link Modal */}
+      <Dialog open={!!generatedAdvisorReviewLink} onOpenChange={(open) => !open && setGeneratedAdvisorReviewLink(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Advisor Review Link</DialogTitle>
+            <DialogDescription>
+              Share this link manually with the advisor. No email has been sent from the CRM.
+            </DialogDescription>
+          </DialogHeader>
+          {generatedAdvisorReviewLink && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Advisor</p>
+                <p className="mt-1 font-medium">{generatedAdvisorReviewLink.advisorName}</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Public review link</label>
+                <div className="flex gap-2">
+                  <Input value={generatedAdvisorReviewLink.publicReviewUrl} readOnly />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(generatedAdvisorReviewLink.publicReviewUrl);
+                      toast({ title: "Review link copied" });
+                    }}
+                    data-testid="button-copy-advisor-review-link"
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy
+                  </Button>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Expires: {generatedAdvisorReviewLink.expiresAt
+                  ? format(new Date(generatedAdvisorReviewLink.expiresAt), "MMM dd, yyyy")
+                  : "No expiration date set"}
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setGeneratedAdvisorReviewLink(null)}>
+              Done
             </Button>
           </DialogFooter>
         </DialogContent>
