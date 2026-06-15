@@ -323,6 +323,22 @@ export const expertInvitationLinks = pgTable("expert_invitation_links", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Advisor Project Invitations table (internal draft/status foundation; no email sending yet)
+export const advisorProjectInvitations = pgTable("advisor_project_invitations", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  expertId: integer("expert_id").notNull().references(() => experts.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  token: text("token"),
+  status: text("status").notNull().default("not_sent"), // not_sent, draft, sent, submitted, failed, expired
+  sentAt: timestamp("sent_at"),
+  submittedAt: timestamp("submitted_at"),
+  expiresAt: timestamp("expires_at"),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Project Activities table (for activity log)
 export const projectActivities = pgTable("project_activities", {
   id: serial("id").primaryKey(),
@@ -496,6 +512,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   callRecords: many(callRecords),
   usageRecords: many(usageRecords),
   invitationLinks: many(expertInvitationLinks),
+  advisorProjectInvitations: many(advisorProjectInvitations),
 }));
 
 export const projectAnglesRelations = relations(projectAngles, ({ one, many }) => ({
@@ -515,6 +532,7 @@ export const expertsRelations = relations(experts, ({ one, many }) => ({
   projectExperts: many(projectExperts),
   callRecords: many(callRecords),
   usageRecords: many(usageRecords),
+  advisorProjectInvitations: many(advisorProjectInvitations),
 }));
 
 export const vettingQuestionsRelations = relations(vettingQuestions, ({ one }) => ({
@@ -590,6 +608,21 @@ export const expertInvitationLinksRelations = relations(expertInvitationLinks, (
   expert: one(experts, {
     fields: [expertInvitationLinks.expertId],
     references: [experts.id],
+  }),
+}));
+
+export const advisorProjectInvitationsRelations = relations(advisorProjectInvitations, ({ one }) => ({
+  project: one(projects, {
+    fields: [advisorProjectInvitations.projectId],
+    references: [projects.id],
+  }),
+  expert: one(experts, {
+    fields: [advisorProjectInvitations.expertId],
+    references: [experts.id],
+  }),
+  createdByUser: one(users, {
+    fields: [advisorProjectInvitations.createdBy],
+    references: [users.id],
   }),
 }));
 
@@ -805,6 +838,16 @@ export const insertExpertInvitationLinkSchema = createInsertSchema(expertInvitat
   expiresAt: coerceDate.optional(),
 });
 
+export const insertAdvisorProjectInvitationSchema = createInsertSchema(advisorProjectInvitations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  sentAt: coerceDate.optional(),
+  submittedAt: coerceDate.optional(),
+  expiresAt: coerceDate.optional(),
+});
+
 export const insertProjectActivitySchema = createInsertSchema(projectActivities).omit({
   id: true,
   createdAt: true,
@@ -899,6 +942,9 @@ export type InsertInsight = z.infer<typeof insertInsightSchema>;
 
 export type ExpertInvitationLink = typeof expertInvitationLinks.$inferSelect;
 export type InsertExpertInvitationLink = z.infer<typeof insertExpertInvitationLinkSchema>;
+
+export type AdvisorProjectInvitation = typeof advisorProjectInvitations.$inferSelect;
+export type InsertAdvisorProjectInvitation = z.infer<typeof insertAdvisorProjectInvitationSchema>;
 
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type InsertUsageRecord = z.infer<typeof insertUsageRecordSchema>;

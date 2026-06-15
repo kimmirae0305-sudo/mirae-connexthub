@@ -88,7 +88,7 @@ import { EmptyState } from "@/components/empty-state";
 import { DataTableSkeleton } from "@/components/data-table-skeleton";
 import { RegisterExpertForm } from "@/components/experts/RegisterExpertForm";
 import { QuickInviteForm } from "@/components/experts/QuickInviteForm";
-import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle, CallRecord, InsertCallRecord, InsertInsight, InsertProject, ClientOrganization, Insight } from "@shared/schema";
+import type { Project, Expert, VettingQuestion, ProjectExpert, ProjectActivity, ProjectAngle, CallRecord, InsertCallRecord, InsertInsight, InsertProject, ClientOrganization, Insight, AdvisorProjectInvitation } from "@shared/schema";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -214,6 +214,7 @@ export default function ProjectDetail() {
   
   // Bulk invite modal state
   const [isBulkInviteModalOpen, setIsBulkInviteModalOpen] = useState(false);
+  const [isAdvisorInviteDraftModalOpen, setIsAdvisorInviteDraftModalOpen] = useState(false);
   const [selectedInternalExpertIds, setSelectedInternalExpertIds] = useState<Set<number>>(new Set());
   const [bulkInviteAngleIds, setBulkInviteAngleIds] = useState<number[]>([]);
   
@@ -325,6 +326,15 @@ export default function ProjectDetail() {
         },
       });
       if (!res.ok) throw new Error("Failed to fetch project");
+      return res.json();
+    },
+    enabled: !!projectId,
+  });
+
+  const { data: advisorProjectInvitations = [] } = useQuery<AdvisorProjectInvitation[]>({
+    queryKey: ["/api/projects", projectId, "advisor-invitations"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/projects/${projectId}/advisor-invitations`);
       return res.json();
     },
     enabled: !!projectId,
@@ -649,6 +659,29 @@ export default function ProjectDetail() {
     },
     onError: () => {
       toast({ title: "Failed to update advisor invite status", variant: "destructive" });
+    },
+  });
+
+  const createAdvisorInvitationDraftsMutation = useMutation({
+    mutationFn: async (expertIds: number[]) => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/advisor-invitations/create-placeholder`, {
+        expertIds,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "advisor-invitations"] });
+      setSelectedInternalExpertIds(new Set());
+      setIsAdvisorInviteDraftModalOpen(false);
+      toast({
+        title: "Project invitation drafts created. Email sending will be implemented in the next step.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: error?.message || "Failed to create project invitation drafts",
+        variant: "destructive",
+      });
     },
   });
 
@@ -1115,7 +1148,7 @@ export default function ProjectDetail() {
   };
 
   const getRaNameById = (raId: number | null) => {
-    if (!raId) return "—";
+    if (!raId) return "-";
     return allRAs?.find((ra) => ra.id === raId)?.fullName || "Unknown";
   };
 
@@ -1338,6 +1371,24 @@ export default function ProjectDetail() {
     return experts.filter(pe => pe.angleIds?.includes(angleId));
   }, [projectAdvisors, internalExpertsAngleFilter]);
 
+  const advisorInviteByExpertId = useMemo(() => {
+    const byExpertId = new Map<number, AdvisorProjectInvitation>();
+    advisorProjectInvitations.forEach((invitation) => {
+      byExpertId.set(invitation.expertId, invitation);
+    });
+    return byExpertId;
+  }, [advisorProjectInvitations]);
+
+  const selectedAdvisorRows = useMemo(
+    () => filteredInternalExperts.filter((pe) => selectedInternalExpertIds.has(pe.id)),
+    [filteredInternalExperts, selectedInternalExpertIds]
+  );
+
+  const selectedAdvisorExpertIds = useMemo(
+    () => selectedAdvisorRows.map((pe) => pe.expertId),
+    [selectedAdvisorRows]
+  );
+
   const handleSelectExpert = (expertId: number, checked: boolean) => {
     const newSelected = new Set(selectedExperts);
     if (checked) {
@@ -1509,6 +1560,61 @@ export default function ProjectDetail() {
     if (pe.pipelineStatus === "assigned") return false;
     if (pe.pipelineStatus === "invited" && pe.invitationStatus === "invited") return false;
     return true;
+  };
+
+  const formatAdvisorPayoutRate = (pe: EnrichedExpert) => {
+    const rawRate = pe.expectedHourlyRateUsd || pe.expert?.hourlyRate;
+    const numericRate = Number(rawRate);
+
+    if (!rawRate || !Number.isFinite(numericRate) || numericRate <= 0) {
+      return "Not set";
+    }
+
+    return `USD ${numericRate.toLocaleString("en-US", { maximumFractionDigits: 0 })}/hr`;
+  };
+
+  const getProjectInviteIndicator = (invitation?: AdvisorProjectInvitation) => {
+    const status = String(invitation?.status || "not_sent").toLowerCase();
+
+    if (status === "submitted") {
+      return {
+        icon: <Check className="h-3 w-3 text-emerald-600" />,
+        label: "Submitted",
+      };
+    }
+
+    if (status === "draft") {
+      return {
+        icon: <Clock className="h-3 w-3 text-amber-600" />,
+        label: "Draft",
+      };
+    }
+
+    if (status === "sent") {
+      return {
+        icon: <Clock className="h-3 w-3 text-blue-600" />,
+        label: "Sent",
+      };
+    }
+
+    if (status === "failed") {
+      return {
+        icon: <AlertCircle className="h-3 w-3 text-destructive" />,
+        label: "Failed",
+      };
+    }
+
+    if (status === "expired") {
+      return {
+        icon: <XCircle className="h-3 w-3 text-muted-foreground" />,
+        label: "Expired",
+      };
+    }
+
+    return {
+      icon: null,
+      label: "Not sent",
+    };
   };
 
   const getActivityIcon = (type: string) => {
@@ -1773,11 +1879,11 @@ export default function ProjectDetail() {
                 <StatusBadge status={projectDetail.status} type="project" />
               )}
               <span className="text-sm text-muted-foreground">{projectDetail.clientName}</span>
-              <span className="text-sm text-muted-foreground">•</span>
+              <span className="text-sm text-muted-foreground">|</span>
               <span className="text-sm text-muted-foreground">{projectDetail.industry}</span>
               {projectDetail.createdByPm && (
                 <>
-                  <span className="text-sm text-muted-foreground">•</span>
+                  <span className="text-sm text-muted-foreground">|</span>
                   <span className="text-sm text-muted-foreground">PM: {projectDetail.createdByPm.fullName}</span>
                 </>
               )}
@@ -2550,119 +2656,53 @@ export default function ProjectDetail() {
                 />
               ) : (
                 <div className="space-y-3">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {filteredInternalExperts.map((pe) => {
-                      const angleNames = getAngleBadges(pe);
-                      const location = [pe.expert?.city, pe.expert?.country].filter(Boolean).join(", ");
-                      const inviteStatus = pe.invitationStatus || "not_invited";
-                      return (
-                        <Card key={pe.id} data-testid={`card-added-advisor-${pe.id}`}>
-                          <CardContent className="space-y-4 p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="font-medium truncate">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
-                                <p className="text-sm text-muted-foreground">
-                                  {pe.expert?.jobTitle || "Current title not set"}
-                                  {pe.expert?.company ? ` at ${pe.expert.company}` : ""}
-                                </p>
-                                <p className="text-xs text-muted-foreground">{location || "Location not set"}</p>
-                              </div>
-                              <div className="flex flex-col items-end gap-1">
-                                {getAdvisorStatusBadge(pe)}
-                                {shouldShowAdvisorInvitationStatus(pe) && getInvitationStatusBadge(inviteStatus)}
-                              </div>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              <Badge variant="outline">Source: {getAdvisorSourceLabel(pe)}</Badge>
-                              {pe.expert?.industry && <Badge variant="outline">{pe.expert.industry}</Badge>}
-                              {pe.expert?.expertise && <Badge variant="outline">{pe.expert.expertise}</Badge>}
-                              {shouldShowAdvisorPipelineStatus(pe) && getPipelineStatusBadge(pe.pipelineStatus)}
-                            </div>
-
-                            {angleNames && angleNames.length > 0 && (
-                              <div className="flex flex-wrap gap-1">
-                                {angleNames.map((name, idx) => (
-                                  <Badge key={idx} variant="outline" className="text-xs">
-                                    <Layers className="h-3 w-3 mr-1" />
-                                    {name}
-                                  </Badge>
-                                ))}
-                              </div>
-                            )}
-
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setViewingAdvisor(pe)}
-                                data-testid={`button-view-advisor-${pe.id}`}
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                View Profile
-                              </Button>
-                              {hasReviewableApplication(pe) && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => setReviewingApplication(pe)}
-                                  data-testid={`button-view-advisor-application-${pe.id}`}
-                                >
-                                  <ClipboardList className="h-4 w-4 mr-2" />
-                                  View Application
-                                </Button>
-                              )}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => markAdvisorInvitedMutation.mutate(pe.id)}
-                                disabled={markAdvisorInvitedMutation.isPending || inviteStatus === "invited"}
-                                data-testid={`button-invite-advisor-${pe.id}`}
-                              >
-                                <Send className="h-4 w-4 mr-2" />
-                                Invite to Project
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => removeExpertMutation.mutate(pe.id)}
-                                className="text-destructive"
-                                data-testid={`button-remove-advisor-${pe.id}`}
-                              >
-                                <X className="h-4 w-4 mr-2" />
-                                Remove from Project
-                              </Button>
-                            </div>
-
-                            {(pe.lastActivityAt || pe.invitedAt) && (
-                              <p className="text-xs text-muted-foreground">
-                                Last activity: {formatDistanceToNow(new Date(pe.lastActivityAt || pe.invitedAt!), { addSuffix: true })}
-                              </p>
-                            )}
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      {selectedInternalExpertIds.size} selected
+                    </p>
+                    <Button
+                      size="sm"
+                      disabled={selectedInternalExpertIds.size === 0}
+                      onClick={() => setIsAdvisorInviteDraftModalOpen(true)}
+                      data-testid="button-send-project-invite-selected"
+                    >
+                      <Mail className="h-4 w-4 mr-2" />
+                      Send Project Invite to Selected
+                    </Button>
                   </div>
-                  <div className="hidden">
+                  <div className="rounded-md border overflow-hidden">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-12"></TableHead>
-                          <TableHead className="text-xs font-semibold uppercase">Expert</TableHead>
-                          <TableHead className="text-xs font-semibold uppercase">Angles</TableHead>
-                          <TableHead className="text-xs font-semibold uppercase">Invitation Status</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Pipeline</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">VQ Answers</TableHead>
-                        <TableHead className="text-xs font-semibold uppercase">Last Activity</TableHead>
-                        <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
+                          <TableHead className="w-12">
+                            <Checkbox
+                              checked={
+                                filteredInternalExperts.length > 0 &&
+                                filteredInternalExperts.every((pe) => selectedInternalExpertIds.has(pe.id))
+                              }
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedInternalExpertIds(new Set(filteredInternalExperts.map((pe) => pe.id)));
+                                } else {
+                                  setSelectedInternalExpertIds(new Set());
+                                }
+                              }}
+                              aria-label="Select all advisors"
+                              data-testid="checkbox-select-all-existing-experts"
+                            />
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold uppercase">Name</TableHead>
+                          <TableHead className="w-40 text-xs font-semibold uppercase">Rate</TableHead>
+                          <TableHead className="w-40 text-xs font-semibold uppercase">Project Invite</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredInternalExperts.map((pe) => {
-                        const angleNames = getAngleBadges(pe);
+                        const advisorInvitation = advisorInviteByExpertId.get(pe.expertId);
+                        const inviteIndicator = getProjectInviteIndicator(advisorInvitation);
+                        const expertName = pe.expert?.name || `Expert #${pe.expertId}`;
                         return (
-                          <TableRow key={pe.id} data-testid={`row-internal-expert-${pe.id}`}>
+                          <TableRow key={pe.id} data-testid={`row-existing-expert-${pe.id}`}>
                             <TableCell>
                               <Checkbox
                                 checked={selectedInternalExpertIds.has(pe.id)}
@@ -2675,78 +2715,49 @@ export default function ProjectDetail() {
                                   }
                                   setSelectedInternalExpertIds(newSelected);
                                 }}
-                                data-testid={`checkbox-internal-expert-${pe.id}`}
+                                aria-label={`Select ${expertName}`}
+                                data-testid={`checkbox-existing-expert-${pe.id}`}
                               />
                             </TableCell>
                             <TableCell>
-                              <div>
-                                <p className="font-medium">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {pe.expert?.email} {pe.expert?.jobTitle ? `• ${pe.expert.jobTitle}` : ""}
-                                </p>
-                              </div>
+                              <Link href={`/experts/${pe.expertId}`}>
+                                <Button
+                                  variant="link"
+                                  className="h-auto p-0 text-left font-medium"
+                                  data-testid={`link-existing-expert-${pe.id}`}
+                                >
+                                  {expertName}
+                                </Button>
+                              </Link>
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">
+                              {formatAdvisorPayoutRate(pe)}
                             </TableCell>
                             <TableCell>
-                              {angleNames && angleNames.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {angleNames.map((name, idx) => (
-                                    <Badge key={idx} variant="outline" className="text-xs">
-                                      <Layers className="h-3 w-3 mr-1" />
-                                      {name}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                {getInvitationStatusIcon(pe.invitationStatus)}
-                                {getInvitationStatusBadge(pe.invitationStatus)}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              {getPipelineStatusBadge(pe.pipelineStatus)}
-                            </TableCell>
-                            <TableCell>
-                              {pe.vqAnswers && Array.isArray(pe.vqAnswers) && pe.vqAnswers.length > 0 ? (
-                                <Badge variant="outline" className="text-xs">
-                                  <Check className="h-3 w-3 mr-1" />
-                                  {pe.vqAnswers.length} answers
-                                </Badge>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs text-muted-foreground">
-                              {pe.lastActivityAt
-                                ? formatDistanceToNow(new Date(pe.lastActivityAt), { addSuffix: true })
-                                : pe.invitedAt
-                                ? formatDistanceToNow(new Date(pe.invitedAt), { addSuffix: true })
-                                : "-"}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                {pe.invitationStatus !== "accepted" && pe.invitationStatus !== "declined" && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => generateInviteLinkMutation.mutate({ expertId: pe.expertId })}
-                                    disabled={generateInviteLinkMutation.isPending}
-                                    title="Generate and copy invite link"
-                                    data-testid={`button-invite-link-${pe.id}`}
-                                  >
-                                    {copiedLink?.includes(String(pe.expertId)) ? (
-                                      <Check className="h-4 w-4 text-green-500" />
-                                    ) : (
-                                      <Link2 className="h-4 w-4" />
+                              <div className="flex items-center justify-between gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title={`Project invite: ${inviteIndicator.label}`}
+                                  onClick={() => {
+                                    toast({
+                                      title: "Project invitation sending will be implemented in the next step.",
+                                    });
+                                  }}
+                                  data-testid={`button-project-invite-placeholder-${pe.id}`}
+                                >
+                                  <span className="relative inline-flex">
+                                    <Mail className="h-4 w-4" />
+                                    {inviteIndicator.icon && (
+                                      <span className="absolute -right-2 -top-2 rounded-full bg-background">
+                                        {inviteIndicator.icon}
+                                      </span>
                                     )}
-                                  </Button>
-                                )}
+                                  </span>
+                                </Button>
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon">
+                                    <Button variant="ghost" size="icon" data-testid={`button-existing-expert-actions-${pe.id}`}>
                                       <MoreHorizontal className="h-4 w-4" />
                                     </Button>
                                   </DropdownMenuTrigger>
@@ -2766,7 +2777,7 @@ export default function ProjectDetail() {
                         );
                       })}
                     </TableBody>
-                  </Table>
+                    </Table>
                   </div>
                 </div>
               )}
@@ -3024,7 +3035,7 @@ export default function ProjectDetail() {
                                     <div>
                                       <p className="font-medium">{pe.expert?.name || `Expert #${pe.expertId}`}</p>
                                       <p className="text-xs text-muted-foreground">
-                                        {pe.expert?.email} {pe.expert?.jobTitle ? `• ${pe.expert.jobTitle}` : ""}
+                                        {pe.expert?.email} {pe.expert?.jobTitle ? `- ${pe.expert.jobTitle}` : ""}
                                       </p>
                                     </div>
                                   </TableCell>
@@ -3732,6 +3743,65 @@ export default function ProjectDetail() {
               data-testid="button-save-vq"
             >
               {createVQMutation.isPending || updateVQMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Advisor Project Invitation Draft Modal */}
+      <Dialog open={isAdvisorInviteDraftModalOpen} onOpenChange={setIsAdvisorInviteDraftModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Create Project Invitation Drafts</DialogTitle>
+            <DialogDescription>
+              This creates internal project invitation draft records for the selected advisors. No email will be sent yet.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {selectedAdvisorRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No advisors selected.</p>
+            ) : (
+              <div className="max-h-64 overflow-y-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Advisor</TableHead>
+                      <TableHead>Email</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedAdvisorRows.map((pe) => (
+                      <TableRow key={pe.id}>
+                        <TableCell className="font-medium">
+                          {pe.expert?.name || `Expert #${pe.expertId}`}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {pe.expert?.email || "No email on profile"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Email delivery, magic links, and advisor review pages will be implemented in a later step.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsAdvisorInviteDraftModalOpen(false)}
+              disabled={createAdvisorInvitationDraftsMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createAdvisorInvitationDraftsMutation.mutate(selectedAdvisorExpertIds)}
+              disabled={selectedAdvisorExpertIds.length === 0 || createAdvisorInvitationDraftsMutation.isPending}
+              data-testid="button-confirm-project-invite-drafts"
+            >
+              {createAdvisorInvitationDraftsMutation.isPending ? "Creating..." : "Create Drafts"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -4790,12 +4860,12 @@ export default function ProjectDetail() {
               <p className="text-muted-foreground">
                 Completed call #{selectedInsightCallRecord.id}
                 {selectedInsightCallRecord.completedAt
-                  ? ` • ${format(new Date(selectedInsightCallRecord.completedAt), "MMM dd, yyyy")}`
-                  : ` • ${format(new Date(selectedInsightCallRecord.callDate), "MMM dd, yyyy")}`}
+                  ? ` - ${format(new Date(selectedInsightCallRecord.completedAt), "MMM dd, yyyy")}`
+                  : ` - ${format(new Date(selectedInsightCallRecord.callDate), "MMM dd, yyyy")}`}
               </p>
               <p className="text-muted-foreground">
                 Duration: {selectedInsightCallRecord.actualDurationMinutes || selectedInsightCallRecord.durationMinutes} min
-                {selectedInsightCallRecord.recordingUrl ? " • Recording available" : ""}
+                {selectedInsightCallRecord.recordingUrl ? " - Recording available" : ""}
               </p>
               {selectedInsightCallRecord.recordingUrl && (
                 <button

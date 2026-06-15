@@ -17,6 +17,7 @@ import {
   callRecords,
   insights,
   expertInvitationLinks,
+  advisorProjectInvitations,
   projectActivities,
   projectAngles,
   type Project,
@@ -45,6 +46,8 @@ import {
   type InsertInsight,
   type ExpertInvitationLink,
   type InsertExpertInvitationLink,
+  type AdvisorProjectInvitation,
+  type InsertAdvisorProjectInvitation,
   type ProjectActivity,
   type InsertProjectActivity,
   type ProjectAngle,
@@ -573,6 +576,14 @@ export interface IStorage {
   updateExpertInvitationLink(id: number, link: Partial<InsertExpertInvitationLink>): Promise<ExpertInvitationLink | undefined>;
   markInvitationLinkUsed(token: string, expertId?: number, status?: string): Promise<ExpertInvitationLink | undefined>;
   updateInvitationLinkStatus(token: string, status: string): Promise<ExpertInvitationLink | undefined>;
+
+  // Advisor Project Invitations
+  getAdvisorProjectInvitationsByProject(projectId: number): Promise<AdvisorProjectInvitation[]>;
+  createAdvisorProjectInvitationPlaceholders(
+    projectId: number,
+    expertIds: number[],
+    createdBy?: number | null
+  ): Promise<AdvisorProjectInvitation[]>;
 
   // Project Activities
   getProjectActivities(projectId: number): Promise<ProjectActivity[]>;
@@ -3776,6 +3787,121 @@ export class DatabaseStorage implements IStorage {
       .where(eq(expertInvitationLinks.token, token))
       .returning();
     return updated || undefined;
+  }
+
+  // Advisor Project Invitations
+  async getAdvisorProjectInvitationsByProject(projectId: number): Promise<AdvisorProjectInvitation[]> {
+    return db
+      .select()
+      .from(advisorProjectInvitations)
+      .where(eq(advisorProjectInvitations.projectId, projectId))
+      .orderBy(desc(advisorProjectInvitations.updatedAt));
+  }
+
+  async createAdvisorProjectInvitationPlaceholders(
+    projectId: number,
+    expertIds: number[],
+    createdBy?: number | null
+  ): Promise<AdvisorProjectInvitation[]> {
+    const uniqueExpertIds = Array.from(
+      new Set(
+        expertIds
+          .map((expertId) => Number(expertId))
+          .filter((expertId) => Number.isInteger(expertId) && expertId > 0)
+      )
+    );
+
+    if (uniqueExpertIds.length === 0) {
+      return [];
+    }
+
+    const attachedAssignments = await db
+      .select({
+        expertId: projectExperts.expertId,
+      })
+      .from(projectExperts)
+      .where(
+        and(
+          eq(projectExperts.projectId, projectId),
+          inArray(projectExperts.expertId, uniqueExpertIds)
+        )
+      );
+
+    const attachedExpertIds = new Set(attachedAssignments.map((assignment) => assignment.expertId));
+    const eligibleExpertIds = uniqueExpertIds.filter((expertId) => attachedExpertIds.has(expertId));
+
+    if (eligibleExpertIds.length === 0) {
+      return [];
+    }
+
+    const expertRows = await db
+      .select({
+        id: experts.id,
+        email: experts.email,
+      })
+      .from(experts)
+      .where(inArray(experts.id, eligibleExpertIds));
+
+    const emailByExpertId = new Map(
+      expertRows.map((expert) => [expert.id, String(expert.email || "").trim()])
+    );
+
+    const existingInvitations = await db
+      .select()
+      .from(advisorProjectInvitations)
+      .where(
+        and(
+          eq(advisorProjectInvitations.projectId, projectId),
+          inArray(advisorProjectInvitations.expertId, eligibleExpertIds)
+        )
+      );
+
+    const existingByExpertId = new Map(
+      existingInvitations.map((invitation) => [invitation.expertId, invitation])
+    );
+
+    const results: AdvisorProjectInvitation[] = [];
+    const now = new Date();
+
+    for (const expertId of eligibleExpertIds) {
+      const email = emailByExpertId.get(expertId) || "";
+      const existing = existingByExpertId.get(expertId);
+
+      if (existing) {
+        const [updated] = await db
+          .update(advisorProjectInvitations)
+          .set({
+            email,
+            status: "draft",
+            createdBy: existing.createdBy ?? createdBy ?? null,
+            updatedAt: now,
+          } as Partial<InsertAdvisorProjectInvitation>)
+          .where(eq(advisorProjectInvitations.id, existing.id))
+          .returning();
+
+        if (updated) {
+          results.push(updated);
+        }
+        continue;
+      }
+
+      const [created] = await db
+        .insert(advisorProjectInvitations)
+        .values({
+          projectId,
+          expertId,
+          email,
+          status: "draft",
+          createdBy: createdBy ?? null,
+        } as InsertAdvisorProjectInvitation)
+        .returning();
+
+      if (created) {
+        results.push(created);
+      }
+    }
+
+    return results;
   }
 
   // Project Activities

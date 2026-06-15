@@ -693,6 +693,15 @@ export async function registerRoutes(
     return false;
   }
 
+  function canManageProjectAdvisorInvitations(project: any, user: any): boolean {
+    const role = String(user?.role || "").toLowerCase();
+    if (["admin", "ceo", "coo"].includes(role)) return true;
+    if (role === "pm") {
+      return !project.createdByPmId || project.createdByPmId === user.id;
+    }
+    return false;
+  }
+
   app.get("/api/projects/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -947,6 +956,75 @@ export async function registerRoutes(
       res.status(201).json(record);
     } catch (error) {
       res.status(500).json({ error: "Failed to create project consultation" });
+    }
+  });
+
+  app.get("/api/projects/:projectId/advisor-invitations", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const user = req.user!;
+      const project = await storage.getProject(projectId);
+
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      if (!canManageProjectAdvisorInvitations(project, user)) {
+        return res.status(403).json({ error: "Access denied: You cannot view advisor invitation records for this project" });
+      }
+
+      const invitations = await storage.getAdvisorProjectInvitationsByProject(projectId);
+      res.json(invitations);
+    } catch (error) {
+      console.error("Error fetching advisor project invitations:", error);
+      res.status(500).json({ error: "Failed to fetch advisor project invitations" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/advisor-invitations/create-placeholder", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const user = req.user!;
+      const { expertIds } = req.body;
+      const project = await storage.getProject(projectId);
+
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      if (!canManageProjectAdvisorInvitations(project, user)) {
+        return res.status(403).json({ error: "Access denied: You cannot create advisor invitation drafts for this project" });
+      }
+
+      if (!Array.isArray(expertIds) || expertIds.length === 0) {
+        return res.status(400).json({ error: "Select at least one advisor" });
+      }
+
+      const normalizedExpertIds = Array.from(
+        new Set(
+          expertIds
+            .map((expertId) => Number(expertId))
+            .filter((expertId) => Number.isInteger(expertId) && expertId > 0)
+        )
+      );
+
+      if (normalizedExpertIds.length === 0) {
+        return res.status(400).json({ error: "Select at least one valid advisor" });
+      }
+
+      const invitations = await storage.createAdvisorProjectInvitationPlaceholders(
+        projectId,
+        normalizedExpertIds,
+        user.id
+      );
+
+      res.status(201).json({
+        invitations,
+        createdCount: invitations.length,
+      });
+    } catch (error) {
+      console.error("Error creating advisor project invitation drafts:", error);
+      res.status(500).json({ error: "Failed to create advisor project invitation drafts" });
     }
   });
 
