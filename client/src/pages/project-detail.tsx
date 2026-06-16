@@ -121,6 +121,20 @@ type NormalizedAdvisorSubmittedAnswer = {
   answerText: string;
 };
 
+type AdvisorEmailLanguage = "en" | "pt" | "es";
+
+type AdvisorEmailPreviewState = {
+  advisorName: string;
+  advisorEmail: string;
+  publicReviewUrl: string;
+  expiresAt: string | null;
+  language: AdvisorEmailLanguage;
+  subject: string;
+  body: string;
+  isLoadingLink: boolean;
+  error: string | null;
+};
+
 type AdvisorSubmittedResponse = {
   expert: {
     id: number;
@@ -214,6 +228,86 @@ const toDateInput = (value?: Date | string | null) => {
   return Number.isNaN(date.getTime()) ? "" : format(date, "yyyy-MM-dd");
 };
 
+const advisorEmailLanguageOptions: Array<{ value: AdvisorEmailLanguage; label: string }> = [
+  { value: "en", label: "English" },
+  { value: "pt", label: "Português" },
+  { value: "es", label: "Español" },
+];
+
+function buildPublicAdvisorReviewUrl(token?: string | null) {
+  if (!token) return "";
+  const baseUrl = (import.meta.env.VITE_PUBLIC_INVITE_BASE_URL || window.location.origin).replace(/\/+$/, "");
+  return `${baseUrl}/public/advisor-project-review/${token}`;
+}
+
+function getAdvisorInviteEmailTemplate(language: AdvisorEmailLanguage, advisorName: string, reviewLink: string) {
+  const safeName = advisorName.trim() || "Advisor";
+
+  if (language === "pt") {
+    return {
+      subject: "Mirae Connext | Oportunidade de consulta especializada",
+      body: `Prezado(a) ${safeName},
+
+Espero que esteja bem.
+
+A Mirae Connext está avaliando uma possível oportunidade de consulta especializada que pode ser relevante para a sua experiência profissional.
+
+Você poderia, por gentileza, revisar o resumo e responder a algumas perguntas rápidas de qualificação por meio do link seguro abaixo?
+
+${reviewLink}
+
+Suas respostas nos ajudarão a confirmar se a consulta é adequada antes de avançarmos.
+
+Por favor, observe que esta é uma etapa inicial de avaliação e ainda não representa uma consulta confirmada.
+
+Atenciosamente,
+Equipe Mirae Connext`,
+    };
+  }
+
+  if (language === "es") {
+    return {
+      subject: "Mirae Connext | Oportunidad de consulta especializada",
+      body: `Estimado(a) ${safeName},
+
+Espero que se encuentre bien.
+
+Mirae Connext está evaluando una posible oportunidad de consulta especializada que podría ser relevante para su experiencia profesional.
+
+¿Podría revisar el resumen y responder algunas preguntas breves de evaluación a través del enlace seguro a continuación?
+
+${reviewLink}
+
+Sus respuestas nos ayudarán a confirmar si la consulta es adecuada antes de avanzar.
+
+Tenga en cuenta que esta es una etapa inicial de evaluación y aún no representa una consulta confirmada.
+
+Atentamente,
+Equipo de Mirae Connext`,
+    };
+  }
+
+  return {
+    subject: "Mirae Connext | Expert consultation opportunity",
+    body: `Dear ${safeName},
+
+I hope you are doing well.
+
+Mirae Connext is currently reviewing a potential expert consultation opportunity that may be relevant to your professional background.
+
+Could you please review the brief and answer a few short screening questions through the secure link below?
+
+${reviewLink}
+
+Your responses will help us confirm whether the consultation is a good fit before moving forward.
+
+Please note that this is an initial review step and does not yet represent a confirmed consultation.
+
+Best regards,
+Mirae Connext Team`,
+  };
+}
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
@@ -255,6 +349,7 @@ export default function ProjectDetail() {
     publicReviewUrl: string;
     expiresAt: string | null;
   } | null>(null);
+  const [advisorEmailPreview, setAdvisorEmailPreview] = useState<AdvisorEmailPreviewState | null>(null);
   const [selectedInternalExpertIds, setSelectedInternalExpertIds] = useState<Set<number>>(new Set());
   const [submittedResponseExpertId, setSubmittedResponseExpertId] = useState<number | null>(null);
   const [bulkInviteAngleIds, setBulkInviteAngleIds] = useState<number[]>([]);
@@ -743,33 +838,57 @@ export default function ProjectDetail() {
     },
   });
 
+  const ensureAdvisorReviewLink = async (pe: EnrichedExpert) => {
+    let invitation = advisorInviteByExpertId.get(pe.expertId);
+    const expiresAt = invitation?.expiresAt ? new Date(invitation.expiresAt) : null;
+    const hasValidToken = Boolean(
+      invitation?.token &&
+      expiresAt &&
+      !Number.isNaN(expiresAt.getTime()) &&
+      expiresAt > new Date()
+    );
+
+    if (hasValidToken) {
+      return {
+        advisorName: pe.expert?.name || `Expert #${pe.expertId}`,
+        advisorEmail: pe.expert?.email || "",
+        publicReviewUrl: buildPublicAdvisorReviewUrl(invitation!.token),
+        expiresAt: invitation?.expiresAt || null,
+      };
+    }
+
+    if (!invitation) {
+      const placeholderRes = await apiRequest("POST", `/api/projects/${projectId}/advisor-invitations/create-placeholder`, {
+        expertIds: [pe.expertId],
+      });
+      const placeholderData = await placeholderRes.json();
+      invitation = placeholderData?.invitations?.find(
+        (item: AdvisorProjectInvitation) => item.expertId === pe.expertId
+      );
+    }
+
+    if (!invitation) {
+      throw new Error("Could not create advisor invitation draft");
+    }
+
+    const res = await apiRequest(
+      "POST",
+      `/api/projects/${projectId}/advisor-invitations/${invitation.id}/generate-link`
+    );
+    const data = await res.json();
+    queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "advisor-invitations"] });
+
+    return {
+      advisorName: pe.expert?.name || `Expert #${pe.expertId}`,
+      advisorEmail: pe.expert?.email || "",
+      publicReviewUrl: data.publicReviewUrl,
+      expiresAt: data.expiresAt || null,
+    };
+  };
+
   const generateAdvisorReviewLinkMutation = useMutation({
     mutationFn: async (pe: EnrichedExpert) => {
-      let invitation = advisorInviteByExpertId.get(pe.expertId);
-
-      if (!invitation) {
-        const placeholderRes = await apiRequest("POST", `/api/projects/${projectId}/advisor-invitations/create-placeholder`, {
-          expertIds: [pe.expertId],
-        });
-        const placeholderData = await placeholderRes.json();
-        invitation = placeholderData?.invitations?.find(
-          (item: AdvisorProjectInvitation) => item.expertId === pe.expertId
-        );
-      }
-
-      if (!invitation) {
-        throw new Error("Could not create advisor invitation draft");
-      }
-
-      const res = await apiRequest(
-        "POST",
-        `/api/projects/${projectId}/advisor-invitations/${invitation.id}/generate-link`
-      );
-      const data = await res.json();
-      return {
-        ...data,
-        advisorName: pe.expert?.name || `Expert #${pe.expertId}`,
-      };
+      return ensureAdvisorReviewLink(pe);
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "advisor-invitations"] });
@@ -1772,6 +1891,110 @@ export default function ProjectDetail() {
       toast({
         title: "Unable to copy summary",
         description: "Select the text block manually and copy it.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const openAdvisorEmailPreview = async (pe: EnrichedExpert) => {
+    const advisorName = pe.expert?.name || `Expert #${pe.expertId}`;
+    const advisorEmail = pe.expert?.email || "";
+    const initialTemplate = getAdvisorInviteEmailTemplate("en", advisorName, "");
+
+    setAdvisorEmailPreview({
+      advisorName,
+      advisorEmail,
+      publicReviewUrl: "",
+      expiresAt: null,
+      language: "en",
+      subject: initialTemplate.subject,
+      body: initialTemplate.body,
+      isLoadingLink: true,
+      error: advisorEmail ? null : "Advisor email is missing from this expert profile.",
+    });
+
+    try {
+      const linkData = await ensureAdvisorReviewLink(pe);
+      setAdvisorEmailPreview((current) => {
+        const language = current?.language || "en";
+        const template = getAdvisorInviteEmailTemplate(language, advisorName, linkData.publicReviewUrl);
+        return {
+          advisorName,
+          advisorEmail,
+          publicReviewUrl: linkData.publicReviewUrl,
+          expiresAt: linkData.expiresAt,
+          language,
+          subject: template.subject,
+          body: template.body,
+          isLoadingLink: false,
+          error: advisorEmail ? null : "Advisor email is missing from this expert profile.",
+        };
+      });
+    } catch (error: any) {
+      setAdvisorEmailPreview((current) => current ? {
+        ...current,
+        isLoadingLink: false,
+        error: error?.message || "Failed to generate advisor review link.",
+      } : null);
+    }
+  };
+
+  const handleOpenSelectedAdvisorEmailPreview = () => {
+    if (selectedAdvisorRows.length !== 1) {
+      toast({
+        title: "Select one advisor to preview an email",
+        description: "Email preview is prepared one advisor at a time.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    openAdvisorEmailPreview(selectedAdvisorRows[0]);
+  };
+
+  const handleAdvisorEmailLanguageChange = (language: AdvisorEmailLanguage) => {
+    setAdvisorEmailPreview((current) => {
+      if (!current) return current;
+      const template = getAdvisorInviteEmailTemplate(language, current.advisorName, current.publicReviewUrl);
+      return {
+        ...current,
+        language,
+        subject: template.subject,
+        body: template.body,
+      };
+    });
+  };
+
+  const handleCopyAdvisorEmailBody = async () => {
+    if (!advisorEmailPreview?.body) {
+      toast({ title: "No email body available to copy", variant: "destructive" });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(advisorEmailPreview.body);
+      toast({ title: "Email body copied" });
+    } catch {
+      toast({
+        title: "Unable to copy email body",
+        description: "Select the body text manually and copy it.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCopyAdvisorReviewLink = async () => {
+    if (!advisorEmailPreview?.publicReviewUrl) {
+      toast({ title: "No review link available to copy", variant: "destructive" });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(advisorEmailPreview.publicReviewUrl);
+      toast({ title: "Review link copied" });
+    } catch {
+      toast({
+        title: "Unable to copy review link",
         variant: "destructive",
       });
     }
@@ -2901,7 +3124,7 @@ export default function ProjectDetail() {
                     <Button
                       size="sm"
                       disabled={selectedInternalExpertIds.size === 0}
-                      onClick={() => setIsAdvisorInviteDraftModalOpen(true)}
+                      onClick={handleOpenSelectedAdvisorEmailPreview}
                       data-testid="button-send-project-invite-selected"
                     >
                       <Mail className="h-4 w-4 mr-2" />
@@ -4032,6 +4255,137 @@ export default function ProjectDetail() {
           <DialogFooter>
             <Button onClick={() => setGeneratedAdvisorReviewLink(null)}>
               Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Advisor Email Preview Modal */}
+      <Dialog open={!!advisorEmailPreview} onOpenChange={(open) => !open && setAdvisorEmailPreview(null)}>
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Email Preview</DialogTitle>
+            <DialogDescription>
+              Preview advisor-facing invitation copy. No email will be sent from this modal.
+            </DialogDescription>
+          </DialogHeader>
+          {advisorEmailPreview ? (
+            <div className="space-y-4 py-2">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">To</label>
+                  <Input
+                    value={advisorEmailPreview.advisorEmail || "No email on profile"}
+                    readOnly
+                    className={!advisorEmailPreview.advisorEmail ? "text-destructive" : undefined}
+                    data-testid="input-advisor-email-preview-to"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Language</label>
+                  <Select
+                    value={advisorEmailPreview.language}
+                    onValueChange={(value) => {
+                      if (value === "en" || value === "pt" || value === "es") {
+                        handleAdvisorEmailLanguageChange(value);
+                      } else {
+                        toast({ title: "Unsupported language selected", variant: "destructive" });
+                      }
+                    }}
+                  >
+                    <SelectTrigger data-testid="select-advisor-email-language">
+                      <SelectValue placeholder="Select language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {advisorEmailLanguageOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {advisorEmailPreview.error && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                  {advisorEmailPreview.error}
+                </div>
+              )}
+
+              {advisorEmailPreview.isLoadingLink && (
+                <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                  Generating secure advisor review link...
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Subject</label>
+                <Input
+                  value={advisorEmailPreview.subject}
+                  onChange={(event) =>
+                    setAdvisorEmailPreview((current) => current ? { ...current, subject: event.target.value } : null)
+                  }
+                  data-testid="input-advisor-email-subject"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Body</label>
+                <Textarea
+                  value={advisorEmailPreview.body}
+                  onChange={(event) =>
+                    setAdvisorEmailPreview((current) => current ? { ...current, body: event.target.value } : null)
+                  }
+                  className="min-h-[320px] font-mono text-sm"
+                  data-testid="textarea-advisor-email-body"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Public advisor review link</label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={advisorEmailPreview.publicReviewUrl || "Review link unavailable"}
+                    readOnly
+                    className={!advisorEmailPreview.publicReviewUrl ? "text-destructive" : undefined}
+                    data-testid="input-advisor-email-review-link"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCopyAdvisorReviewLink}
+                    disabled={!advisorEmailPreview.publicReviewUrl || advisorEmailPreview.isLoadingLink}
+                    data-testid="button-copy-advisor-email-review-link"
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy review link
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                This is a preview only. Zoho SMTP delivery and email sending are not enabled in this step.
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              Select one advisor to preview an invitation email.
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCopyAdvisorEmailBody}
+              disabled={!advisorEmailPreview?.body}
+              data-testid="button-copy-advisor-email-body"
+            >
+              <Copy className="h-4 w-4 mr-2" />
+              Copy email body
+            </Button>
+            <Button type="button" onClick={() => setAdvisorEmailPreview(null)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
