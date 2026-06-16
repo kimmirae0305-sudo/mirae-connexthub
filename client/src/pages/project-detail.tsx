@@ -135,6 +135,13 @@ type AdvisorEmailPreviewState = {
   error: string | null;
 };
 
+type EmailSenderIdentity = {
+  fromName: string;
+  fromEmail: string;
+  isValid: boolean;
+  reason?: string;
+};
+
 type AdvisorSubmittedResponse = {
   expert: {
     id: number;
@@ -471,6 +478,15 @@ export default function ProjectDetail() {
     queryKey: ["/api/projects", projectId, "advisor-invitations"],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/projects/${projectId}/advisor-invitations`);
+      return res.json();
+    },
+    enabled: !!projectId,
+  });
+
+  const { data: senderIdentity, isLoading: senderIdentityLoading } = useQuery<EmailSenderIdentity>({
+    queryKey: ["/api/email/sender-identity"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/email/sender-identity");
       return res.json();
     },
     enabled: !!projectId,
@@ -1998,6 +2014,13 @@ export default function ProjectDetail() {
         variant: "destructive",
       });
     }
+  };
+
+  const formatSenderIdentityDisplay = (identity?: EmailSenderIdentity) => {
+    if (!identity) return "Loading sender identity...";
+    if (!identity.fromEmail) return "Sender identity unavailable";
+    const displayName = identity.fromName?.trim() || identity.fromEmail.split("@")[0] || "Mirae Connext";
+    return `${displayName} <${identity.fromEmail}>`;
   };
 
   const handleProjectInviteIndicatorClick = (pe: EnrichedExpert, invitation?: AdvisorProjectInvitation) => {
@@ -4271,6 +4294,23 @@ export default function ProjectDetail() {
           </DialogHeader>
           {advisorEmailPreview ? (
             <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">From</label>
+                <Input
+                  value={formatSenderIdentityDisplay(senderIdentity)}
+                  readOnly
+                  className={senderIdentity && !senderIdentity.isValid ? "text-destructive" : undefined}
+                  data-testid="input-advisor-email-preview-from"
+                />
+                {senderIdentityLoading && (
+                  <p className="text-xs text-muted-foreground">Loading sender identity...</p>
+                )}
+                {senderIdentity && !senderIdentity.isValid && (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                    {senderIdentity.reason || "Your sender identity is not configured for Mirae Connext email sending."}
+                  </div>
+                )}
+              </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">To</label>
