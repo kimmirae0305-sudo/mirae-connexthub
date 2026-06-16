@@ -984,6 +984,67 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/projects/:projectId/advisor-responses/:expertId", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const expertId = parseInt(req.params.expertId);
+      const user = req.user!;
+
+      if (!Number.isInteger(projectId) || !Number.isInteger(expertId)) {
+        return res.status(400).json({ error: "Invalid project or expert id" });
+      }
+
+      const project = await storage.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Submitted advisor response not found" });
+      }
+
+      if (!canManageProjectAdvisorInvitations(project, user)) {
+        return res.status(403).json({ error: "Access denied: You cannot view advisor responses for this project" });
+      }
+
+      const [response, expert, projectAssignments] = await Promise.all([
+        storage.getAdvisorProjectResponseByProjectExpert(projectId, expertId),
+        storage.getExpert(expertId),
+        storage.getProjectExpertsByProject(projectId),
+      ]);
+
+      const isAttachedExpert = projectAssignments.some((assignment) => assignment.expertId === expertId);
+      if (!response || !expert || !isAttachedExpert) {
+        return res.status(404).json({ error: "Submitted advisor response not found" });
+      }
+
+      const invitation = await storage.getAdvisorProjectInvitation(response.invitationId);
+      if (!invitation || invitation.projectId !== projectId || invitation.expertId !== expertId) {
+        return res.status(404).json({ error: "Submitted advisor response not found" });
+      }
+
+      res.json({
+        expert: {
+          id: expert.id,
+          name: expert.name,
+          title: expert.jobTitle,
+          company: expert.company,
+          location: [expert.city, expert.country].filter(Boolean).join(", ") || null,
+          bio: expert.bio || expert.biography || expert.expertise || null,
+          rate: expert.hourlyRate,
+        },
+        invitation: {
+          status: invitation.status,
+          submittedAt: invitation.submittedAt,
+        },
+        response: {
+          answers: Array.isArray(response.answers) ? response.answers : [],
+          consentAccepted: response.consentAccepted,
+          submittedAt: response.submittedAt,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching advisor project response:", error);
+      res.status(500).json({ error: "Failed to fetch advisor response" });
+    }
+  });
+
   app.post("/api/projects/:projectId/advisor-invitations/create-placeholder", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const projectId = parseInt(req.params.projectId);

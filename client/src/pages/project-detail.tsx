@@ -108,6 +108,40 @@ interface EnrichedExpert extends ProjectExpert {
   sourcedByRa?: { id: number; fullName: string; email?: string } | null;
 }
 
+type AdvisorSubmittedAnswer = {
+  questionId?: number;
+  questionText?: string;
+  answer?: string;
+  answerText?: string;
+};
+
+type NormalizedAdvisorSubmittedAnswer = {
+  questionId?: number;
+  questionText: string;
+  answerText: string;
+};
+
+type AdvisorSubmittedResponse = {
+  expert: {
+    id: number;
+    name: string;
+    title?: string | null;
+    company?: string | null;
+    location?: string | null;
+    bio?: string | null;
+    rate?: string | number | null;
+  };
+  invitation: {
+    status?: string | null;
+    submittedAt?: string | null;
+  };
+  response: {
+    answers?: AdvisorSubmittedAnswer[];
+    consentAccepted?: boolean | null;
+    submittedAt?: string | null;
+  };
+};
+
 type ExpertWorkHistoryItem = {
   company?: string;
   jobTitle?: string;
@@ -222,6 +256,7 @@ export default function ProjectDetail() {
     expiresAt: string | null;
   } | null>(null);
   const [selectedInternalExpertIds, setSelectedInternalExpertIds] = useState<Set<number>>(new Set());
+  const [submittedResponseExpertId, setSubmittedResponseExpertId] = useState<number | null>(null);
   const [bulkInviteAngleIds, setBulkInviteAngleIds] = useState<number[]>([]);
   
   // Expert Search modal state
@@ -344,6 +379,20 @@ export default function ProjectDetail() {
       return res.json();
     },
     enabled: !!projectId,
+  });
+
+  const {
+    data: submittedAdvisorResponse,
+    isLoading: isSubmittedAdvisorResponseLoading,
+    isError: isSubmittedAdvisorResponseError,
+  } = useQuery<AdvisorSubmittedResponse>({
+    queryKey: ["/api/projects", projectId, "advisor-responses", submittedResponseExpertId],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/projects/${projectId}/advisor-responses/${submittedResponseExpertId}`);
+      return res.json();
+    },
+    enabled: !!projectId && !!submittedResponseExpertId,
+    retry: false,
   });
 
   const { data: clientOrganizations } = useQuery<ClientOrganization[]>({
@@ -1627,6 +1676,109 @@ export default function ProjectDetail() {
     return `USD ${numericRate.toLocaleString("en-US", { maximumFractionDigits: 0 })}/hr`;
   };
 
+  const formatSubmittedAdvisorRate = (rate?: string | number | null) => {
+    const numericRate = Number(rate);
+    if (!rate || !Number.isFinite(numericRate) || numericRate <= 0) return "Not set";
+    return `USD ${numericRate.toLocaleString("en-US", { maximumFractionDigits: 0 })}/hr`;
+  };
+
+  const formatSubmittedDateTime = (value?: string | null) => {
+    if (!value) return "Not available";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Not available";
+    return format(date, "MMM dd, yyyy 'at' HH:mm");
+  };
+
+  const submittedAdvisorAnswers = useMemo<NormalizedAdvisorSubmittedAnswer[]>(() => {
+    const rawAnswers = Array.isArray(submittedAdvisorResponse?.response?.answers)
+      ? submittedAdvisorResponse.response.answers
+      : [];
+
+    return rawAnswers.map((rawAnswer, index) => {
+      const answerRecord =
+        rawAnswer && typeof rawAnswer === "object"
+          ? rawAnswer as AdvisorSubmittedAnswer
+          : {};
+      const rawQuestionText = typeof answerRecord.questionText === "string"
+        ? answerRecord.questionText.trim()
+        : "";
+      const rawAnswerText = typeof answerRecord.answer === "string"
+        ? answerRecord.answer.trim()
+        : typeof answerRecord.answerText === "string"
+          ? answerRecord.answerText.trim()
+          : "";
+
+      return {
+        questionId: typeof answerRecord.questionId === "number" ? answerRecord.questionId : undefined,
+        questionText: rawQuestionText || `Question ${index + 1}: Question not available`,
+        answerText: rawAnswerText || "No answer provided",
+      };
+    });
+  }, [submittedAdvisorResponse]);
+
+  const clientReadyAdvisorSummary = useMemo(() => {
+    if (!submittedAdvisorResponse) return "";
+
+    const expert = submittedAdvisorResponse.expert;
+    const roleLine = [expert.title, expert.company].filter(Boolean).join(", ") || "Not provided";
+    const answerLines = submittedAdvisorAnswers.length > 0
+      ? submittedAdvisorAnswers
+          .map((answer, index) => `${index + 1}. ${answer.questionText}\n   ${answer.answerText}`)
+          .join("\n\n")
+      : "No screening responses were submitted.";
+
+    return [
+      `Expert: ${expert.name || "Advisor"}`,
+      `Current Role: ${roleLine}`,
+      `Location: ${expert.location || "Not provided"}`,
+      `Rate: ${formatSubmittedAdvisorRate(expert.rate)}`,
+      "",
+      "Relevant Background:",
+      expert.bio || "Not provided",
+      "",
+      "Screening Responses:",
+      "",
+      answerLines,
+      "",
+      `Submitted: ${formatSubmittedDateTime(
+        submittedAdvisorResponse.response?.submittedAt || submittedAdvisorResponse.invitation?.submittedAt
+      )}`,
+    ].join("\n");
+  }, [submittedAdvisorResponse, submittedAdvisorAnswers]);
+
+  const handleCopyClientReadySummary = async () => {
+    if (!clientReadyAdvisorSummary) {
+      toast({
+        title: "No summary available to copy",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(clientReadyAdvisorSummary);
+      toast({ title: "Client-ready summary copied" });
+    } catch {
+      toast({
+        title: "Unable to copy summary",
+        description: "Select the text block manually and copy it.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleProjectInviteIndicatorClick = (pe: EnrichedExpert, invitation?: AdvisorProjectInvitation) => {
+    const status = String(invitation?.status || "not_sent").toLowerCase();
+    if (status === "submitted") {
+      setSubmittedResponseExpertId(pe.expertId);
+      return;
+    }
+
+    toast({
+      title: "Project invitation sending will be implemented in the next step.",
+    });
+  };
+
   const getProjectInviteIndicator = (invitation?: AdvisorProjectInvitation) => {
     const status = String(invitation?.status || "not_sent").toLowerCase();
 
@@ -2815,11 +2967,7 @@ export default function ProjectDetail() {
                                   variant="ghost"
                                   size="icon"
                                   title={`Project invite: ${inviteIndicator.label}`}
-                                  onClick={() => {
-                                    toast({
-                                      title: "Project invitation sending will be implemented in the next step.",
-                                    });
-                                  }}
+                                  onClick={() => handleProjectInviteIndicatorClick(pe, advisorInvitation)}
                                   data-testid={`button-project-invite-placeholder-${pe.id}`}
                                 >
                                   <span className="relative inline-flex">
@@ -4690,6 +4838,134 @@ export default function ProjectDetail() {
             }}
             onCancel={() => setIsQuickInviteModalOpen(false)}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!submittedResponseExpertId} onOpenChange={(open) => !open && setSubmittedResponseExpertId(null)}>
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Submitted Advisor Response</DialogTitle>
+            <DialogDescription>
+              Review submitted screening answers and prepare advisor-safe client copy.
+            </DialogDescription>
+          </DialogHeader>
+
+          {isSubmittedAdvisorResponseLoading ? (
+            <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
+              Loading submitted response...
+            </div>
+          ) : isSubmittedAdvisorResponseError ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+              No submitted advisor response was found for this project advisor, or you do not have access to view it.
+            </div>
+          ) : submittedAdvisorResponse ? (
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold">Expert Profile Summary</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Name</p>
+                    <p className="font-medium">{submittedAdvisorResponse.expert.name || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Current title / role</p>
+                    <p className="font-medium">{submittedAdvisorResponse.expert.title || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Current company</p>
+                    <p className="font-medium">{submittedAdvisorResponse.expert.company || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Location</p>
+                    <p className="font-medium">{submittedAdvisorResponse.expert.location || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Rate</p>
+                    <p className="font-mono font-medium">{formatSubmittedAdvisorRate(submittedAdvisorResponse.expert.rate)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Consent accepted</p>
+                    <p className="font-medium">{submittedAdvisorResponse.response.consentAccepted ? "Yes" : "No"}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Bio / relevant experience</p>
+                  <p className="mt-1 whitespace-pre-wrap rounded-md border p-3 text-sm">
+                    {submittedAdvisorResponse.expert.bio || "No background summary available."}
+                  </p>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs text-muted-foreground">Invitation status</p>
+                  <p className="font-medium">{submittedAdvisorResponse.invitation.status || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Submitted date/time</p>
+                  <p className="font-medium">
+                    {formatSubmittedDateTime(
+                      submittedAdvisorResponse.response.submittedAt || submittedAdvisorResponse.invitation.submittedAt
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold">Submitted Screening Responses</h3>
+                {submittedAdvisorAnswers.length === 0 ? (
+                  <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                    No screening answers were included with this submission.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {submittedAdvisorAnswers.map((answer, index) => (
+                      <div key={`${answer.questionId || index}-${index}`} className="rounded-md border p-3">
+                        <p className="text-sm font-medium">{answer.questionText}</p>
+                        <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
+                          {answer.answerText}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-sm font-semibold">Client-ready formatted summary</h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCopyClientReadySummary}
+                    disabled={!clientReadyAdvisorSummary}
+                    data-testid="button-copy-client-ready-advisor-summary"
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy client-ready summary
+                  </Button>
+                </div>
+                <pre
+                  className="max-h-80 select-text overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-sm leading-6"
+                  data-testid="text-client-ready-advisor-summary"
+                >
+                  {clientReadyAdvisorSummary || "No client-ready summary available."}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              Select a submitted advisor response to review.
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSubmittedResponseExpertId(null)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
