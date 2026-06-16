@@ -1146,10 +1146,13 @@ export async function registerRoutes(
         invitation: {
           id: invitation.id,
           expiresAt: invitation.expiresAt,
+          status: invitation.status,
+          submittedAt: invitation.submittedAt,
         },
         advisor: {
           name: expert.name,
         },
+        alreadySubmitted: invitation.status === "submitted" || Boolean(invitation.submittedAt),
         screeningQuestions: vettingQuestions
           .sort((a, b) => a.orderIndex - b.orderIndex)
           .map((question) => ({
@@ -1163,6 +1166,107 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching public advisor project review:", error);
       res.status(500).json({ error: "Unable to load this review link" });
+    }
+  });
+
+  app.post("/api/public/advisor-project-review/:token/submit", async (req, res) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      if (!token) {
+        return res.status(404).json({ error: "Invalid or expired review link" });
+      }
+
+      const invitation = await storage.getAdvisorProjectInvitationByToken(token);
+      const expiresAt = invitation?.expiresAt ? new Date(invitation.expiresAt) : null;
+      if (
+        !invitation ||
+        !expiresAt ||
+        Number.isNaN(expiresAt.getTime()) ||
+        expiresAt <= new Date()
+      ) {
+        return res.status(404).json({ error: "Invalid or expired review link" });
+      }
+
+      const [project, expert, vettingQuestions] = await Promise.all([
+        storage.getProject(invitation.projectId),
+        storage.getExpert(invitation.expertId),
+        storage.getVettingQuestionsByProject(invitation.projectId),
+      ]);
+
+      if (!project || !expert) {
+        return res.status(404).json({ error: "Invalid or expired review link" });
+      }
+
+      if (req.body?.consentAccepted !== true) {
+        return res.status(400).json({ error: "Consent is required before submitting responses." });
+      }
+
+      const incomingAnswers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+      const answerByQuestionId = new Map<number, string>();
+      for (const item of incomingAnswers) {
+        const questionId = Number(item?.questionId);
+        if (!Number.isInteger(questionId)) continue;
+        answerByQuestionId.set(questionId, String(item?.answer || "").trim());
+      }
+
+      const orderedQuestions = [...vettingQuestions].sort((a, b) => a.orderIndex - b.orderIndex);
+      const missingRequiredQuestions = orderedQuestions.filter((question) =>
+        question.isRequired && !answerByQuestionId.get(question.id)
+      );
+
+      if (missingRequiredQuestions.length > 0) {
+        return res.status(400).json({
+          error: "Please answer all required screening questions before submitting.",
+          missingQuestionIds: missingRequiredQuestions.map((question) => question.id),
+        });
+      }
+
+      const answers = orderedQuestions.map((question) => ({
+        questionId: question.id,
+        questionText: question.question,
+        answer: answerByQuestionId.get(question.id) || "",
+      }));
+
+      const submittedAt = new Date();
+      const response = await storage.saveAdvisorProjectResponse({
+        invitationId: invitation.id,
+        projectId: invitation.projectId,
+        expertId: invitation.expertId,
+        answers,
+        consentAccepted: true,
+        submittedAt,
+      });
+
+      await storage.updateAdvisorProjectInvitation(invitation.id, {
+        status: "submitted",
+        submittedAt,
+      });
+
+      const projectAssignments = await storage.getProjectExpertsByProject(invitation.projectId);
+      const assignment = projectAssignments.find((item) => item.expertId === invitation.expertId);
+      if (assignment) {
+        await storage.updateProjectExpert(assignment.id, {
+          invitationStatus: "submitted",
+          applicationStatus: "submitted",
+          vqAnswers: answers.map((answer) => ({
+            questionId: answer.questionId,
+            questionText: answer.questionText,
+            answerText: answer.answer,
+          })),
+          respondedAt: submittedAt,
+          lastActivityAt: submittedAt,
+        } as any);
+      }
+
+      res.json({
+        success: true,
+        submittedAt: response.submittedAt,
+        status: "submitted",
+        message: "Thank you. Your responses have been submitted to Mirae Connext.",
+      });
+    } catch (error) {
+      console.error("Error submitting public advisor project review:", error);
+      res.status(500).json({ error: "Unable to submit this review link" });
     }
   });
 

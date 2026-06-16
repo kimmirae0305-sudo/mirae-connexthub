@@ -18,6 +18,7 @@ import {
   insights,
   expertInvitationLinks,
   advisorProjectInvitations,
+  advisorProjectResponses,
   projectActivities,
   projectAngles,
   type Project,
@@ -48,6 +49,8 @@ import {
   type InsertExpertInvitationLink,
   type AdvisorProjectInvitation,
   type InsertAdvisorProjectInvitation,
+  type AdvisorProjectResponse,
+  type InsertAdvisorProjectResponse,
   type ProjectActivity,
   type InsertProjectActivity,
   type ProjectAngle,
@@ -585,6 +588,8 @@ export interface IStorage {
     id: number,
     invitation: Partial<InsertAdvisorProjectInvitation>
   ): Promise<AdvisorProjectInvitation | undefined>;
+  getAdvisorProjectResponseByInvitation(invitationId: number): Promise<AdvisorProjectResponse | undefined>;
+  saveAdvisorProjectResponse(response: InsertAdvisorProjectResponse): Promise<AdvisorProjectResponse>;
   createAdvisorProjectInvitationPlaceholders(
     projectId: number,
     expertIds: number[],
@@ -3830,6 +3835,41 @@ export class DatabaseStorage implements IStorage {
       .where(eq(advisorProjectInvitations.id, id))
       .returning();
     return updated || undefined;
+  }
+
+  async getAdvisorProjectResponseByInvitation(invitationId: number): Promise<AdvisorProjectResponse | undefined> {
+    const [response] = await db
+      .select()
+      .from(advisorProjectResponses)
+      .where(eq(advisorProjectResponses.invitationId, invitationId));
+    return response || undefined;
+  }
+
+  async saveAdvisorProjectResponse(response: InsertAdvisorProjectResponse): Promise<AdvisorProjectResponse> {
+    const existing = await this.getAdvisorProjectResponseByInvitation(response.invitationId);
+    const now = new Date();
+
+    if (existing) {
+      const [updated] = await db
+        .update(advisorProjectResponses)
+        .set({
+          answers: response.answers,
+          consentAccepted: response.consentAccepted,
+          submittedAt: response.submittedAt ?? now,
+          updatedAt: now,
+        } as any)
+        .where(eq(advisorProjectResponses.id, existing.id))
+        .returning();
+
+      return updated;
+    }
+
+    const [created] = await db
+      .insert(advisorProjectResponses)
+      .values(response as any)
+      .returning();
+
+    return created;
   }
 
   async createAdvisorProjectInvitationPlaceholders(
