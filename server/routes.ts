@@ -37,6 +37,7 @@ import { eq, and, gte, lt, sql, desc, inArray, or, ilike } from "drizzle-orm";
 import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
 import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
+import { resolveEmailSenderIdentity } from "./emailSenderIdentity";
 import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
@@ -89,6 +90,16 @@ export async function registerRoutes(
   // ==================== AUTH ROUTES (PUBLIC) ====================
   app.post("/api/auth/login", loginHandler);
   app.get("/api/auth/me", authMiddleware, getMeHandler);
+
+  app.get("/api/email/sender-identity", authMiddleware, async (req: AuthRequest, res) => {
+    const senderIdentity = resolveEmailSenderIdentity(req.user);
+    res.json({
+      fromName: senderIdentity.fromName,
+      fromEmail: senderIdentity.fromEmail,
+      isValid: senderIdentity.isValid,
+      reason: senderIdentity.reason,
+    });
+  });
 
   // POST /api/auth/change-password - Change password on first login
   app.post("/api/auth/change-password", authMiddleware, async (req: AuthRequest, res) => {
