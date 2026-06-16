@@ -1682,6 +1682,16 @@ export default function ProjectDetail() {
     return `USD ${numericRate.toLocaleString("en-US", { maximumFractionDigits: 0 })}/hr`;
   };
 
+  const formatClientReadyCuRate = (rate?: string | number | null) => {
+    const numericRate = Number(rate);
+    if (!rate || !Number.isFinite(numericRate) || numericRate <= 0 || numericRate > 1200) {
+      return "To be confirmed";
+    }
+    if (numericRate < 600) return "1 CU";
+    if (numericRate < 900) return "1.5 CU";
+    return "2 CU";
+  };
+
   const formatSubmittedDateTime = (value?: string | null) => {
     if (!value) return "Not available";
     const date = new Date(value);
@@ -1731,7 +1741,7 @@ export default function ProjectDetail() {
       `Expert: ${expert.name || "Advisor"}`,
       `Current Role: ${roleLine}`,
       `Location: ${expert.location || "Not provided"}`,
-      `Rate: ${formatSubmittedAdvisorRate(expert.rate)}`,
+      `Rate: ${formatClientReadyCuRate(expert.rate)}`,
       "",
       "Relevant Background:",
       expert.bio || "Not provided",
