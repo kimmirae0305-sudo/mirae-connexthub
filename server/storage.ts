@@ -584,11 +584,13 @@ export interface IStorage {
   getAdvisorProjectInvitationsByProject(projectId: number): Promise<AdvisorProjectInvitation[]>;
   getAdvisorProjectInvitation(id: number): Promise<AdvisorProjectInvitation | undefined>;
   getAdvisorProjectInvitationByToken(token: string): Promise<AdvisorProjectInvitation | undefined>;
+  getAdvisorProjectInvitationByProjectExpert(projectId: number, expertId: number): Promise<AdvisorProjectInvitation | undefined>;
   updateAdvisorProjectInvitation(
     id: number,
     invitation: Partial<InsertAdvisorProjectInvitation>
   ): Promise<AdvisorProjectInvitation | undefined>;
   getAdvisorProjectResponseByInvitation(invitationId: number): Promise<AdvisorProjectResponse | undefined>;
+  getAdvisorProjectResponseByProjectExpert(projectId: number, expertId: number): Promise<AdvisorProjectResponse | undefined>;
   saveAdvisorProjectResponse(response: InsertAdvisorProjectResponse): Promise<AdvisorProjectResponse>;
   createAdvisorProjectInvitationPlaceholders(
     projectId: number,
@@ -3825,6 +3827,20 @@ export class DatabaseStorage implements IStorage {
     return invitation || undefined;
   }
 
+  async getAdvisorProjectInvitationByProjectExpert(projectId: number, expertId: number): Promise<AdvisorProjectInvitation | undefined> {
+    const [invitation] = await db
+      .select()
+      .from(advisorProjectInvitations)
+      .where(
+        and(
+          eq(advisorProjectInvitations.projectId, projectId),
+          eq(advisorProjectInvitations.expertId, expertId)
+        )
+      )
+      .orderBy(desc(advisorProjectInvitations.updatedAt));
+    return invitation || undefined;
+  }
+
   async updateAdvisorProjectInvitation(
     id: number,
     invitation: Partial<InsertAdvisorProjectInvitation>
@@ -3842,6 +3858,20 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(advisorProjectResponses)
       .where(eq(advisorProjectResponses.invitationId, invitationId));
+    return response || undefined;
+  }
+
+  async getAdvisorProjectResponseByProjectExpert(projectId: number, expertId: number): Promise<AdvisorProjectResponse | undefined> {
+    const [response] = await db
+      .select()
+      .from(advisorProjectResponses)
+      .where(
+        and(
+          eq(advisorProjectResponses.projectId, projectId),
+          eq(advisorProjectResponses.expertId, expertId)
+        )
+      )
+      .orderBy(desc(advisorProjectResponses.submittedAt));
     return response || undefined;
   }
 
