@@ -49,7 +49,7 @@ export default function ChangePassword() {
         throw new Error("No authentication token found");
       }
 
-      const response = await fetch("/api/auth/change-password", {
+      const response = await fetch(resolveApiUrl("/api/auth/change-password"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -58,6 +58,7 @@ export default function ChangePassword() {
         body: JSON.stringify({
           currentPassword: data.currentPassword,
           newPassword: data.newPassword,
+          confirmPassword: data.confirmPassword,
         }),
       });
 
@@ -67,12 +68,12 @@ export default function ChangePassword() {
       }
 
       const result = await response.json();
-      const nextToken = result?.token || token;
-      if (result?.user) {
-        updateAuthSession(result.user, nextToken);
-      } else if (user) {
-        updateAuthSession({ ...user, mustChangePassword: false }, nextToken);
+      if (!result?.success || !result?.user || result.user.mustChangePassword) {
+        throw new Error("Password change was not confirmed by the server");
       }
+
+      const nextToken = result?.token || token;
+      updateAuthSession(result.user, nextToken);
 
       const meResponse = await fetch(resolveApiUrl("/api/auth/me"), {
         headers: {
@@ -80,10 +81,15 @@ export default function ChangePassword() {
         },
         cache: "no-store",
       });
-      if (meResponse.ok) {
-        const refreshedUser = await meResponse.json();
-        updateAuthSession(refreshedUser, nextToken);
+      if (!meResponse.ok) {
+        throw new Error("Password changed, but the updated session could not be confirmed");
       }
+
+      const refreshedUser = await meResponse.json();
+      if (refreshedUser?.mustChangePassword) {
+        throw new Error("Password changed, but the account still requires a password change");
+      }
+      updateAuthSession(refreshedUser, nextToken);
 
       toast({ title: "Password updated successfully!" });
       setLocation(CRM_MAIN_ROUTE, { replace: true });
