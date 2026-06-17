@@ -118,6 +118,20 @@ const getZohoAccountEmail = (account: any) =>
   ).trim().toLowerCase();
 const getZohoAccountId = (account: any) =>
   String(account?.accountId || account?.mailAccountId || account?.id || "").trim();
+const getSafeRedirectUriParts = (redirectUri: string) => {
+  try {
+    const parsed = new URL(redirectUri);
+    return {
+      redirectUriHost: parsed.host,
+      redirectUriPath: parsed.pathname,
+    };
+  } catch {
+    return {
+      redirectUriHost: null,
+      redirectUriPath: null,
+    };
+  }
+};
 const expenseReceiptUpload = raw({
   type: ["application/pdf", "image/png", "image/jpeg"],
   limit: "5mb",
@@ -206,8 +220,19 @@ export async function registerRoutes(
       }
 
       const config = getZohoOAuthConfig();
+      const redirectUriParts = getSafeRedirectUriParts(config.redirectUri);
+      console.info("[zoho-oauth-connect-start]", {
+        provider: "zoho",
+        hasZohoOAuthRedirectUri: Boolean(config.redirectUri),
+        ...redirectUriParts,
+      });
+
       if (!config.isConfigured) {
         return res.status(503).json({ error: "Zoho OAuth is not configured." });
+      }
+
+      if (!redirectUriParts.redirectUriHost || !redirectUriParts.redirectUriPath) {
+        return res.status(503).json({ error: "Zoho OAuth redirect URI is not configured correctly." });
       }
 
       const state = `zoh_${crypto.randomBytes(32).toString("hex")}`;
