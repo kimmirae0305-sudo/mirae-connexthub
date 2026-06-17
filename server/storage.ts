@@ -384,6 +384,7 @@ export interface AdvisorProjectInvitationEmailHistoryItem {
   toEmail: string;
   subject: string;
   body: string;
+  emailType: string;
   provider: string;
   providerMessageId: string | null;
   status: string;
@@ -3960,6 +3961,7 @@ export class DatabaseStorage implements IStorage {
         toEmail: advisorProjectInvitationEmailSends.toEmail,
         subject: advisorProjectInvitationEmailSends.subject,
         body: advisorProjectInvitationEmailSends.body,
+        emailType: advisorProjectInvitationEmailSends.emailType,
         provider: advisorProjectInvitationEmailSends.provider,
         providerMessageId: advisorProjectInvitationEmailSends.providerMessageId,
         status: advisorProjectInvitationEmailSends.status,
