@@ -171,5 +171,22 @@ export async function getMeHandler(req: AuthRequest, res: Response) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  res.json(req.user);
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, req.user.id))
+    .limit(1);
+
+  const user = result[0];
+  if (!user || user.isActive === false) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  res.json({
+    id: user.id,
+    fullName: user.fullName,
+    email: user.email,
+    role: user.role,
+    mustChangePassword: user.mustChangePassword ?? false,
+  });
 }
