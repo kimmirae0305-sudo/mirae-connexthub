@@ -122,6 +122,7 @@ type NormalizedAdvisorSubmittedAnswer = {
 };
 
 type AdvisorEmailLanguage = "en" | "pt" | "es";
+type AdvisorEmailMode = "initial_invite" | "follow_up" | "resend_invite";
 
 type AdvisorEmailPreviewState = {
   invitationId: number | null;
@@ -133,6 +134,7 @@ type AdvisorEmailPreviewState = {
   existingInvitationStatus?: string | null;
   existingSentAt?: string | null;
   existingSentBy?: string | null;
+  emailMode: AdvisorEmailMode;
   language: AdvisorEmailLanguage;
   subject: string;
   body: string;
@@ -166,6 +168,7 @@ type AdvisorInvitationEmailHistoryItem = {
   fromName?: string | null;
   toEmail: string;
   subject: string;
+  emailType?: AdvisorEmailMode | null;
   provider: string;
   providerMessageId?: string | null;
   status: string;
@@ -278,6 +281,89 @@ function buildPublicAdvisorReviewUrl(token?: string | null) {
   if (!token) return "";
   const baseUrl = (import.meta.env.VITE_PUBLIC_INVITE_BASE_URL || window.location.origin).replace(/\/+$/, "");
   return `${baseUrl}/public/advisor-project-review/${token}`;
+}
+
+function getAdvisorEmailModeLabel(mode?: AdvisorEmailMode | null) {
+  if (mode === "follow_up") return "Follow-up";
+  if (mode === "resend_invite") return "Resend invite";
+  return "Initial invite";
+}
+
+function getAdvisorEmailModalTitle(mode?: AdvisorEmailMode | null) {
+  if (mode === "follow_up") return "Follow-up Email";
+  if (mode === "resend_invite") return "Resend Invitation";
+  return "Initial Invite";
+}
+
+function getAdvisorEmailTemplate(
+  mode: AdvisorEmailMode,
+  language: AdvisorEmailLanguage,
+  advisorName: string,
+  reviewLink: string
+) {
+  const safeName = advisorName.trim() || "Advisor";
+
+  if (mode !== "follow_up") {
+    return getAdvisorInviteEmailTemplate(language, advisorName, reviewLink);
+  }
+
+  if (language === "pt") {
+    return {
+      subject: "Acompanhamento: convite para consulta especializada da Mirae Connext",
+      body: `Prezado(a) ${safeName},
+
+Espero que esteja bem.
+
+Gostaria de fazer um breve acompanhamento sobre o convite da Mirae Connext para revisar uma possível oportunidade de consulta especializada.
+
+Quando puder, por favor revise o resumo e responda às perguntas rápidas pelo link seguro abaixo:
+
+${reviewLink}
+
+Obrigado pela sua atenção.
+
+Atenciosamente,
+Equipe Mirae Connext`,
+    };
+  }
+
+  if (language === "es") {
+    return {
+      subject: "Seguimiento: invitación de Mirae Connext para consulta especializada",
+      body: `Estimado(a) ${safeName},
+
+Espero que se encuentre bien.
+
+Quisiera hacer un breve seguimiento sobre la invitación de Mirae Connext para revisar una posible oportunidad de consulta especializada.
+
+Cuando pueda, por favor revise el resumen y responda las preguntas breves a través del enlace seguro a continuación:
+
+${reviewLink}
+
+Gracias por su atención.
+
+Atentamente,
+Equipo de Mirae Connext`,
+    };
+  }
+
+  return {
+    subject: "Follow-up: Expert consultation invitation from Mirae Connext",
+    body: `Dear ${safeName},
+
+I hope you are doing well.
+
+I wanted to follow up on Mirae Connext's invitation to review a potential expert consultation opportunity.
+
+When you have a moment, please review the brief and answer the short screening questions through the secure link below:
+
+${reviewLink}
+
+Thank you for your time.
+
+Best regards,
+Mirae Connext Team`,
+  };
 }
 
 function getAdvisorInviteEmailTemplate(language: AdvisorEmailLanguage, advisorName: string, reviewLink: string) {
@@ -1046,6 +1132,7 @@ export default function ProjectDetail() {
         toEmail: preview.advisorEmail,
         subject: preview.subject,
         body: preview.body,
+        emailType: preview.emailMode,
       });
       return res.json();
     },
@@ -1772,6 +1859,12 @@ export default function ProjectDetail() {
     [selectedAdvisorRows]
   );
 
+  const getDefaultAdvisorEmailMode = (invitation?: AdvisorProjectInvitationWithEmail | null): AdvisorEmailMode => {
+    const status = String(invitation?.status || "not_sent").toLowerCase();
+    if (status === "sent" || invitation?.sentAt || invitation?.latestEmailSend?.sentAt) return "follow_up";
+    return "initial_invite";
+  };
+
   const handleSelectExpert = (expertId: number, checked: boolean) => {
     const newSelected = new Set(selectedExperts);
     if (checked) {
@@ -2057,10 +2150,12 @@ export default function ProjectDetail() {
     }
   };
 
-  const openAdvisorEmailPreview = async (pe: EnrichedExpert) => {
+  const openAdvisorEmailPreview = async (pe: EnrichedExpert, requestedMode?: AdvisorEmailMode) => {
     const advisorName = pe.expert?.name || `Expert #${pe.expertId}`;
     const advisorEmail = pe.expert?.email || "";
-    const initialTemplate = getAdvisorInviteEmailTemplate("en", advisorName, "");
+    const invitation = advisorInviteByExpertId.get(pe.expertId);
+    const initialMode = requestedMode || getDefaultAdvisorEmailMode(invitation);
+    const initialTemplate = getAdvisorEmailTemplate(initialMode, "en", advisorName, "");
 
     setAdvisorEmailPreview({
       invitationId: null,
@@ -2072,6 +2167,7 @@ export default function ProjectDetail() {
       existingInvitationStatus: null,
       existingSentAt: null,
       existingSentBy: null,
+      emailMode: initialMode,
       language: "en",
       subject: initialTemplate.subject,
       body: initialTemplate.body,
@@ -2083,7 +2179,8 @@ export default function ProjectDetail() {
       const linkData = await ensureAdvisorReviewLink(pe);
       setAdvisorEmailPreview((current) => {
         const language = current?.language || "en";
-        const template = getAdvisorInviteEmailTemplate(language, advisorName, linkData.publicReviewUrl);
+        const emailMode = requestedMode || current?.emailMode || getDefaultAdvisorEmailMode(advisorInviteByExpertId.get(pe.expertId));
+        const template = getAdvisorEmailTemplate(emailMode, language, advisorName, linkData.publicReviewUrl);
         return {
           invitationId: linkData.invitationId,
           expertId: linkData.expertId,
@@ -2094,6 +2191,7 @@ export default function ProjectDetail() {
           existingInvitationStatus: linkData.existingInvitationStatus,
           existingSentAt: linkData.existingSentAt,
           existingSentBy: linkData.existingSentBy,
+          emailMode,
           language,
           subject: template.subject,
           body: template.body,
@@ -2120,16 +2218,36 @@ export default function ProjectDetail() {
       return;
     }
 
-    openAdvisorEmailPreview(selectedAdvisorRows[0]);
+    const selectedAdvisor = selectedAdvisorRows[0];
+    const invitation = advisorInviteByExpertId.get(selectedAdvisor.expertId);
+    if (String(invitation?.status || "").toLowerCase() === "submitted") {
+      setSubmittedResponseExpertId(selectedAdvisor.expertId);
+      return;
+    }
+
+    openAdvisorEmailPreview(selectedAdvisor, getDefaultAdvisorEmailMode(invitation));
   };
 
   const handleAdvisorEmailLanguageChange = (language: AdvisorEmailLanguage) => {
     setAdvisorEmailPreview((current) => {
       if (!current) return current;
-      const template = getAdvisorInviteEmailTemplate(language, current.advisorName, current.publicReviewUrl);
+      const template = getAdvisorEmailTemplate(current.emailMode, language, current.advisorName, current.publicReviewUrl);
       return {
         ...current,
         language,
+        subject: template.subject,
+        body: template.body,
+      };
+    });
+  };
+
+  const handleAdvisorEmailModeChange = (emailMode: AdvisorEmailMode) => {
+    setAdvisorEmailPreview((current) => {
+      if (!current) return current;
+      const template = getAdvisorEmailTemplate(emailMode, current.language, current.advisorName, current.publicReviewUrl);
+      return {
+        ...current,
+        emailMode,
         subject: template.subject,
         body: template.body,
       };
@@ -2194,8 +2312,12 @@ export default function ProjectDetail() {
 
     const hasAlreadySent = Boolean(advisorEmailPreview.existingSentAt) ||
       String(advisorEmailPreview.existingInvitationStatus || "").toLowerCase() === "sent";
-    const confirmationMessage = hasAlreadySent
-      ? "An invitation email has already been sent to this advisor. Do you want to send another email?"
+    const isSubmitted = String(advisorEmailPreview.existingInvitationStatus || "").toLowerCase() === "submitted";
+    const modeLabel = getAdvisorEmailModeLabel(advisorEmailPreview.emailMode).toLowerCase();
+    const confirmationMessage = isSubmitted
+      ? "This advisor has already submitted a response. Do you still want to send this follow-up email?"
+      : hasAlreadySent
+      ? `An invitation email has already been sent to this advisor. Do you want to send this ${modeLabel}?`
       : `Send this advisor invitation email to ${advisorEmailPreview.advisorEmail}?`;
     const confirmed = window.confirm(confirmationMessage);
     if (!confirmed) return;
@@ -2235,18 +2357,12 @@ export default function ProjectDetail() {
       return;
     }
 
-    if (status === "sent" && invitation) {
-      setSentHistoryContext({
-        invitationId: invitation.id,
-        advisorName: pe.expert?.name || `Expert #${pe.expertId}`,
-        advisorEmail: invitation.email || pe.expert?.email || "",
-      });
+    if (status === "sent") {
+      openAdvisorEmailPreview(pe, "follow_up");
       return;
     }
 
-    toast({
-      title: "No sent advisor invitation email yet.",
-    });
+    openAdvisorEmailPreview(pe, "initial_invite");
   };
 
   const getProjectInviteIndicator = (invitation?: AdvisorProjectInvitationWithEmail) => {
@@ -2292,6 +2408,17 @@ export default function ProjectDetail() {
       label: "Not sent",
     };
   };
+
+  const getAdvisorEmailActionLabel = (invitation?: AdvisorProjectInvitationWithEmail | null) => {
+    const status = String(invitation?.status || "not_sent").toLowerCase();
+    if (status === "submitted") return "View response";
+    if (status === "sent" || invitation?.sentAt || invitation?.latestEmailSend?.sentAt) return "Send follow-up";
+    return "Send invite";
+  };
+
+  const selectedAdvisorActionLabel = selectedAdvisorRows.length === 1
+    ? getAdvisorEmailActionLabel(advisorInviteByExpertId.get(selectedAdvisorRows[0].expertId))
+    : "Send invite";
 
   const getActivityIcon = (type: string) => {
     switch (type) {
@@ -3365,7 +3492,7 @@ export default function ProjectDetail() {
                       data-testid="button-send-project-invite-selected"
                     >
                       <Mail className="h-4 w-4 mr-2" />
-                      Send Project Invite to Selected
+                      {selectedAdvisorActionLabel}
                     </Button>
                   </div>
                   <div className="rounded-md border overflow-hidden">
@@ -3403,6 +3530,7 @@ export default function ProjectDetail() {
                           advisorInvitation?.sentAt || advisorInvitation?.latestEmailSend?.sentAt
                         );
                         const sentByDisplay = advisorInvitation?.latestEmailSend?.sentBy || null;
+                        const advisorActionLabel = getAdvisorEmailActionLabel(advisorInvitation);
                         const expertName = pe.expert?.name || `Expert #${pe.expertId}`;
                         return (
                           <TableRow key={pe.id} data-testid={`row-existing-expert-${pe.id}`}>
@@ -3455,7 +3583,7 @@ export default function ProjectDetail() {
                                 </div>
                                 <Button
                                   variant="ghost"
-                                  size="icon"
+                                  size="sm"
                                   title={`Project invite: ${inviteIndicator.label}${sentAtDisplay ? ` at ${sentAtDisplay}` : ""}`}
                                   onClick={() => handleProjectInviteIndicatorClick(pe, advisorInvitation)}
                                   data-testid={`button-project-invite-placeholder-${pe.id}`}
@@ -3468,6 +3596,7 @@ export default function ProjectDetail() {
                                       </span>
                                     )}
                                   </span>
+                                  <span className="ml-2 hidden xl:inline">{advisorActionLabel}</span>
                                 </Button>
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
@@ -4575,7 +4704,10 @@ export default function ProjectDetail() {
                             {item.sentBy ? ` by ${item.sentBy}` : ""}
                           </div>
                         </div>
-                        <Badge variant="secondary">{item.status || "sent"}</Badge>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="outline">{getAdvisorEmailModeLabel(item.emailType)}</Badge>
+                          <Badge variant="secondary">{item.status || "sent"}</Badge>
+                        </div>
                       </div>
                       <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
                         <div>
@@ -4589,6 +4721,10 @@ export default function ProjectDetail() {
                         <div>
                           <span className="font-medium">Provider: </span>
                           <span className="text-muted-foreground">{item.provider || "zoho"}</span>
+                        </div>
+                        <div>
+                          <span className="font-medium">Email type: </span>
+                          <span className="text-muted-foreground">{getAdvisorEmailModeLabel(item.emailType)}</span>
                         </div>
                         <div>
                           <span className="font-medium">Provider message id: </span>
@@ -4617,9 +4753,13 @@ export default function ProjectDetail() {
       <Dialog open={!!advisorEmailPreview} onOpenChange={(open) => !open && setAdvisorEmailPreview(null)}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Email Preview</DialogTitle>
+            <DialogTitle>{getAdvisorEmailModalTitle(advisorEmailPreview?.emailMode)}</DialogTitle>
             <DialogDescription>
-              Review advisor-facing invitation copy before sending.
+              {advisorEmailPreview?.emailMode === "follow_up"
+                ? "Review this advisor-facing follow-up before sending."
+                : advisorEmailPreview?.emailMode === "resend_invite"
+                ? "Review this advisor-facing invitation resend before sending."
+                : "Review this advisor-facing invitation before sending."}
             </DialogDescription>
           </DialogHeader>
           {advisorEmailPreview ? (
@@ -4717,6 +4857,33 @@ export default function ProjectDetail() {
                 </div>
               </div>
 
+              {(advisorEmailPreview.existingSentAt ||
+                String(advisorEmailPreview.existingInvitationStatus || "").toLowerCase() === "sent") && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Email mode</label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={advisorEmailPreview.emailMode === "follow_up" ? "default" : "outline"}
+                      onClick={() => handleAdvisorEmailModeChange("follow_up")}
+                      data-testid="button-advisor-email-mode-follow-up"
+                    >
+                      Follow-up
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={advisorEmailPreview.emailMode === "resend_invite" ? "default" : "outline"}
+                      onClick={() => handleAdvisorEmailModeChange("resend_invite")}
+                      data-testid="button-advisor-email-mode-resend"
+                    >
+                      Resend invitation
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {advisorEmailPreview.error && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                   {advisorEmailPreview.error}
@@ -4728,7 +4895,7 @@ export default function ProjectDetail() {
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                   This advisor invitation email was already sent
                   {formatAdvisorInviteSentAt(advisorEmailPreview.existingSentAt) ? ` on ${formatAdvisorInviteSentAt(advisorEmailPreview.existingSentAt)}` : ""}
-                  {advisorEmailPreview.existingSentBy ? ` by ${advisorEmailPreview.existingSentBy}` : ""}. Sending again will create a new sent email record.
+                  {advisorEmailPreview.existingSentBy ? ` by ${advisorEmailPreview.existingSentBy}` : ""}. This draft is a {getAdvisorEmailModeLabel(advisorEmailPreview.emailMode).toLowerCase()} and sending it will create a new sent email record.
                 </div>
               )}
 
@@ -4820,7 +4987,9 @@ export default function ProjectDetail() {
                 data-testid="button-send-advisor-invite-email"
               >
                 <Send className="h-4 w-4 mr-2" />
-                {sendAdvisorInviteEmailMutation.isPending ? "Sending..." : "Send email"}
+                {sendAdvisorInviteEmailMutation.isPending
+                  ? "Sending..."
+                  : `Send ${getAdvisorEmailModeLabel(advisorEmailPreview?.emailMode).toLowerCase()}`}
               </Button>
             )}
             <Button type="button" onClick={() => setAdvisorEmailPreview(null)}>

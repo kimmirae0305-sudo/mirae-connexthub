@@ -136,6 +136,7 @@ const getSafeRedirectUriParts = (redirectUri: string) => {
 const normalizeEmailForMatch = (email?: string | null) => String(email || "").trim().toLowerCase();
 const isSingleRecipientEmail = (email: string) =>
   Boolean(email) && !email.includes(",") && !email.includes(";") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const advisorEmailTypes = new Set(["initial_invite", "follow_up", "resend_invite"]);
 const getZohoProviderMessageId = (payload: any) =>
   String(
     payload?.data?.messageId ||
@@ -476,9 +477,13 @@ export async function registerRoutes(
       const toEmail = normalizeEmailForMatch(req.body?.toEmail);
       const subject = String(req.body?.subject || "").trim();
       const body = String(req.body?.body || "").trim();
+      const emailType = String(req.body?.emailType || req.body?.emailMode || "initial_invite").trim();
 
       if (![projectId, invitationId, expertId].every((id) => Number.isInteger(id) && id > 0)) {
         return res.status(400).json({ error: "Invalid project, invitation, or advisor id." });
+      }
+      if (!advisorEmailTypes.has(emailType)) {
+        return res.status(400).json({ error: "Invalid advisor email type." });
       }
       if (!isSingleRecipientEmail(toEmail)) {
         return res.status(400).json({ error: "A single valid advisor recipient email is required." });
@@ -601,6 +606,7 @@ export async function registerRoutes(
         toEmail,
         subject,
         body,
+        emailType,
         provider: "zoho",
         providerMessageId,
         status: "sent",
@@ -1618,6 +1624,7 @@ export async function registerRoutes(
               fromEmail: latestEmailSend.fromEmail,
               toEmail: latestEmailSend.toEmail,
               subject: latestEmailSend.subject,
+              emailType: latestEmailSend.emailType,
               provider: latestEmailSend.provider,
               providerMessageId: latestEmailSend.providerMessageId,
               status: latestEmailSend.status,
@@ -1665,6 +1672,7 @@ export async function registerRoutes(
         fromName: item.fromName,
         toEmail: item.toEmail,
         subject: item.subject,
+        emailType: item.emailType,
         provider: item.provider,
         providerMessageId: item.providerMessageId,
         status: item.status,

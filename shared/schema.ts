@@ -397,6 +397,7 @@ export const advisorProjectInvitationEmailSends = pgTable("advisor_project_invit
   toEmail: text("to_email").notNull(),
   subject: text("subject").notNull(),
   body: text("body").notNull(),
+  emailType: text("email_type").notNull().default("initial_invite"),
   provider: text("provider").notNull().default("zoho"),
   providerMessageId: text("provider_message_id"),
   status: text("status").notNull().default("sent"),
