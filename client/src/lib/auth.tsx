@@ -17,6 +17,7 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
+  updateAuthSession: (nextUser: AuthUser, nextToken?: string | null) => void;
   logout: () => void;
 }
 
@@ -134,6 +135,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLocation("/login");
   }, [setLocation]);
 
+  const updateAuthSession = useCallback((nextUser: AuthUser, nextToken?: string | null) => {
+    if (nextToken) {
+      localStorage.setItem("authToken", nextToken);
+      setToken(nextToken);
+    }
+    setUser(nextUser);
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -142,6 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated: !!user && !!token,
         login,
+        updateAuthSession,
         logout,
       }}
     >

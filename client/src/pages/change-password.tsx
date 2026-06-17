@@ -23,7 +23,7 @@ const changePasswordSchema = z.object({
 type ChangePasswordForm = z.infer<typeof changePasswordSchema>;
 
 export default function ChangePassword() {
-  const { user, logout } = useAuth();
+  const { user, logout, updateAuthSession } = useAuth();
   const [, setLocation] = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
@@ -62,10 +62,11 @@ export default function ChangePassword() {
         throw new Error(errorData.error || "Failed to change password");
       }
 
-      // Update user state to clear mustChangePassword flag
-      if (user) {
-        const updatedUser = { ...user, mustChangePassword: false };
-        localStorage.setItem("authToken", token);
+      const result = await response.json();
+      if (result?.user) {
+        updateAuthSession(result.user, result.token || token);
+      } else if (user) {
+        updateAuthSession({ ...user, mustChangePassword: false }, token);
       }
 
       toast({ title: "Password updated successfully!" });

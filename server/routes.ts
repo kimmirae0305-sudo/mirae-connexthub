@@ -31,7 +31,7 @@ import {
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
-import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles, hashPassword, comparePassword, type AuthRequest } from "./auth";
+import { authMiddleware, loginHandler, getMeHandler, requireAdmin, requireRoles, hashPassword, comparePassword, generateToken, type AuthRequest } from "./auth";
 import { insertClientSchema } from "@shared/schema";
 import { eq, and, gte, lt, sql, desc, inArray, or, ilike } from "drizzle-orm";
 import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
@@ -359,6 +359,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Current and new passwords are required" });
       }
 
+      if (String(newPassword).length < 8) {
+        return res.status(400).json({ error: "New password must be at least 8 characters" });
+      }
+
       if (!req.user) {
         return res.status(401).json({ error: "Unauthorized" });
       }
@@ -377,12 +381,28 @@ export async function registerRoutes(
 
       // Hash new password and update user
       const hashedNewPassword = await hashPassword(newPassword);
-      await storage.updateUser(req.user.id, {
+      const updatedUser = await storage.updateUser(req.user.id, {
         passwordHash: hashedNewPassword,
         mustChangePassword: false,
       });
 
-      res.json({ success: true });
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const authUser = {
+        id: updatedUser.id,
+        fullName: updatedUser.fullName,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        mustChangePassword: updatedUser.mustChangePassword ?? false,
+      };
+
+      res.json({
+        success: true,
+        token: generateToken(authUser),
+        user: authUser,
+      });
     } catch (error) {
       console.error("Change password error:", error);
       res.status(500).json({ error: "Failed to change password" });
