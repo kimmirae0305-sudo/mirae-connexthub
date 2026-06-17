@@ -28,6 +28,7 @@ import {
   projectExperts,
   projectAngles,
   users,
+  type UserEmailConnection,
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import crypto from "crypto";
@@ -38,7 +39,7 @@ import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
 import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
 import { resolveEmailSenderIdentity } from "./emailSenderIdentity";
-import { encryptEmailToken, getEmailTokenEncryptionKeyStatus } from "./emailTokenCrypto";
+import { decryptEmailToken, encryptEmailToken, getEmailTokenEncryptionKeyStatus } from "./emailTokenCrypto";
 import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
@@ -132,6 +133,82 @@ const getSafeRedirectUriParts = (redirectUri: string) => {
     };
   }
 };
+const normalizeEmailForMatch = (email?: string | null) => String(email || "").trim().toLowerCase();
+const isSingleRecipientEmail = (email: string) =>
+  Boolean(email) && !email.includes(",") && !email.includes(";") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const getZohoProviderMessageId = (payload: any) =>
+  String(
+    payload?.data?.messageId ||
+    payload?.data?.message_id ||
+    payload?.messageId ||
+    payload?.message_id ||
+    payload?.data?.[0]?.messageId ||
+    payload?.data?.[0]?.message_id ||
+    ""
+  ).trim();
+const getZohoAccessTokenForConnection = async (
+  connection: UserEmailConnection,
+  config: ReturnType<typeof getZohoOAuthConfig>
+) => {
+  const expiresAt = connection.accessTokenExpiresAt ? new Date(connection.accessTokenExpiresAt) : null;
+  const cachedTokenIsUsable = Boolean(
+    connection.encryptedAccessToken &&
+    expiresAt &&
+    !Number.isNaN(expiresAt.getTime()) &&
+    expiresAt.getTime() > Date.now() + 5 * 60 * 1000
+  );
+
+  if (cachedTokenIsUsable) {
+    return decryptEmailToken(connection.encryptedAccessToken!);
+  }
+
+  if (!connection.encryptedRefreshToken) {
+    throw new Error("zoho_refresh_token_missing");
+  }
+
+  const refreshToken = decryptEmailToken(connection.encryptedRefreshToken);
+  const refreshParams = new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    refresh_token: refreshToken,
+  });
+
+  const tokenRes = await fetch(`${config.accountsBaseUrl}/oauth/v2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: refreshParams.toString(),
+  });
+  const tokenPayload: any = await tokenRes.json().catch(() => ({}));
+  if (!tokenRes.ok || !tokenPayload.access_token) {
+    throw new Error("zoho_access_token_refresh_failed");
+  }
+
+  const expiresInSeconds = Number(tokenPayload.expires_in || 0);
+  const accessTokenExpiresAt = Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
+    ? new Date(Date.now() + expiresInSeconds * 1000)
+    : null;
+
+  await storage.upsertUserEmailConnection({
+    userId: connection.userId,
+    provider: connection.provider || ZOHO_MAIL_PROVIDER,
+    providerEmail: connection.providerEmail || null,
+    providerAccountId: connection.providerAccountId || null,
+    providerUserId: connection.providerUserId || null,
+    providerOrgId: connection.providerOrgId || null,
+    encryptedRefreshToken: connection.encryptedRefreshToken,
+    encryptedAccessToken: encryptEmailToken(String(tokenPayload.access_token)),
+    accessTokenExpiresAt,
+    scopes: String(tokenPayload.scope || connection.scopes || ZOHO_MAIL_SCOPES.join(" ")),
+    status: "connected",
+    lastConnectedAt: connection.lastConnectedAt || new Date(),
+    lastValidatedAt: new Date(),
+    revokedAt: null,
+  });
+
+  return String(tokenPayload.access_token);
+};
+
 const expenseReceiptUpload = raw({
   type: ["application/pdf", "image/png", "image/jpeg"],
   limit: "5mb",
@@ -373,6 +450,189 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error disconnecting Zoho Mail:", error);
       res.status(500).json({ error: "Failed to disconnect Zoho Mail" });
+    }
+  });
+
+  app.post("/api/email/zoho/send-advisor-invite", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const user = req.user!;
+      const senderIdentity = resolveEmailSenderIdentity(user);
+      if (!senderIdentity.isValid) {
+        return res.status(400).json({
+          error: senderIdentity.reason || "Sender identity is not configured for Mirae Connext email sending.",
+        });
+      }
+
+      const forbiddenFields = ["cc", "bcc", "attachments"].filter((field) =>
+        Object.prototype.hasOwnProperty.call(req.body || {}, field)
+      );
+      if (forbiddenFields.length > 0) {
+        return res.status(400).json({ error: "CC, BCC, and attachments are not supported for advisor invites." });
+      }
+
+      const projectId = Number(req.body?.projectId);
+      const invitationId = Number(req.body?.invitationId);
+      const expertId = Number(req.body?.expertId);
+      const toEmail = normalizeEmailForMatch(req.body?.toEmail);
+      const subject = String(req.body?.subject || "").trim();
+      const body = String(req.body?.body || "").trim();
+
+      if (![projectId, invitationId, expertId].every((id) => Number.isInteger(id) && id > 0)) {
+        return res.status(400).json({ error: "Invalid project, invitation, or advisor id." });
+      }
+      if (!isSingleRecipientEmail(toEmail)) {
+        return res.status(400).json({ error: "A single valid advisor recipient email is required." });
+      }
+      if (!subject || !body) {
+        return res.status(400).json({ error: "Subject and body are required before sending." });
+      }
+      if (subject.length > 300 || body.length > 20000) {
+        return res.status(400).json({ error: "Subject or body is too long to send safely." });
+      }
+
+      const config = getZohoOAuthConfig();
+      if (!config.isConfigured) {
+        return res.status(503).json({ error: "Zoho OAuth is not configured." });
+      }
+
+      const [project, invitation, expert, projectAssignments] = await Promise.all([
+        storage.getProject(projectId),
+        storage.getAdvisorProjectInvitation(invitationId),
+        storage.getExpert(expertId),
+        storage.getProjectExpertsByProject(projectId),
+      ]);
+
+      if (!project) {
+        return res.status(404).json({ error: "Project not found." });
+      }
+      if (!canManageProjectAdvisorInvitations(project, user)) {
+        return res.status(403).json({ error: "Access denied: You cannot send advisor invitations for this project." });
+      }
+      const isAttachedExpert = projectAssignments.some((assignment) => assignment.expertId === expertId);
+      if (!invitation || !expert || !isAttachedExpert || invitation.projectId !== projectId || invitation.expertId !== expertId) {
+        return res.status(404).json({ error: "Advisor invitation not found." });
+      }
+
+      const invitationEmail = normalizeEmailForMatch(invitation.email);
+      const expertEmail = normalizeEmailForMatch(expert.email);
+      if (!invitationEmail || invitationEmail !== toEmail || (expertEmail && expertEmail !== toEmail)) {
+        return res.status(400).json({ error: "Recipient email must match the selected advisor invitation." });
+      }
+
+      const connection = await storage.getUserEmailConnection(user.id, ZOHO_MAIL_PROVIDER);
+      if (!connection || connection.status !== "connected") {
+        return res.status(403).json({ error: "Connect your Zoho Mail account before sending advisor invitations." });
+      }
+      if (normalizeEmailForMatch(connection.providerEmail) !== senderIdentity.fromEmail) {
+        return res.status(403).json({ error: "Connected Zoho Mail account does not match your CRM sender identity." });
+      }
+
+      const accessToken = await getZohoAccessTokenForConnection(connection, config);
+      let accountId = String(connection.providerAccountId || "").trim();
+      if (!accountId) {
+        const latestConnection = await storage.getUserEmailConnection(user.id, ZOHO_MAIL_PROVIDER) || connection;
+        const accountsRes = await fetch(`${config.mailApiBaseUrl}/api/accounts`, {
+          headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+        });
+        const accountsPayload: any = await accountsRes.json().catch(() => ({}));
+        if (!accountsRes.ok) {
+          return res.status(502).json({ error: "Unable to verify Zoho Mail account before sending." });
+        }
+        const matchingAccount = extractZohoAccounts(accountsPayload).find(
+          (account) => getZohoAccountEmail(account) === senderIdentity.fromEmail
+        );
+        accountId = getZohoAccountId(matchingAccount);
+        if (!accountId) {
+          return res.status(403).json({ error: "Connected Zoho Mail account does not match your CRM sender identity." });
+        }
+        await storage.upsertUserEmailConnection({
+          userId: latestConnection.userId,
+          provider: latestConnection.provider || ZOHO_MAIL_PROVIDER,
+          providerEmail: senderIdentity.fromEmail,
+          providerAccountId: accountId,
+          providerUserId: String(matchingAccount?.userId || matchingAccount?.zohoUserId || latestConnection.providerUserId || ""),
+          providerOrgId: String(matchingAccount?.organizationId || matchingAccount?.orgId || latestConnection.providerOrgId || ""),
+          encryptedRefreshToken: latestConnection.encryptedRefreshToken,
+          encryptedAccessToken: latestConnection.encryptedAccessToken,
+          accessTokenExpiresAt: latestConnection.accessTokenExpiresAt,
+          scopes: latestConnection.scopes || ZOHO_MAIL_SCOPES.join(" "),
+          status: "connected",
+          lastConnectedAt: latestConnection.lastConnectedAt || new Date(),
+          lastValidatedAt: new Date(),
+          revokedAt: null,
+        });
+      }
+
+      const zohoRes = await fetch(`${config.mailApiBaseUrl}/api/accounts/${encodeURIComponent(accountId)}/messages`, {
+        method: "POST",
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          fromAddress: senderIdentity.fromEmail,
+          toAddress: toEmail,
+          subject,
+          content: body,
+          mailFormat: "plaintext",
+        }),
+      });
+      const zohoPayload: any = await zohoRes.json().catch(() => ({}));
+      if (!zohoRes.ok) {
+        console.warn("[zoho-send-advisor-invite]", {
+          provider: "zoho",
+          userId: user.id,
+          projectId,
+          invitationId,
+          status: zohoRes.status,
+        });
+        return res.status(502).json({ error: "Zoho Mail could not send the advisor invitation." });
+      }
+
+      const sentAt = new Date();
+      const providerMessageId = getZohoProviderMessageId(zohoPayload) || null;
+      await storage.createAdvisorProjectInvitationEmailSend({
+        projectId,
+        invitationId,
+        expertId,
+        sentByUserId: user.id,
+        fromEmail: senderIdentity.fromEmail,
+        fromName: senderIdentity.fromName || null,
+        toEmail,
+        subject,
+        body,
+        provider: "zoho",
+        providerMessageId,
+        status: "sent",
+        sentAt,
+      });
+
+      const currentStatus = String(invitation.status || "").toLowerCase();
+      const invitationUpdates = currentStatus === "submitted"
+        ? { sentAt: invitation.sentAt || sentAt }
+        : { status: "sent", sentAt };
+      const updatedInvitation = await storage.updateAdvisorProjectInvitation(invitation.id, invitationUpdates);
+
+      res.json({
+        success: true,
+        status: "sent",
+        sentAt,
+        provider: "zoho",
+        providerMessageId,
+        invitation: {
+          id: updatedInvitation?.id || invitation.id,
+          status: updatedInvitation?.status || invitation.status,
+          sentAt: updatedInvitation?.sentAt || sentAt,
+          submittedAt: updatedInvitation?.submittedAt || invitation.submittedAt,
+        },
+      });
+    } catch (error: any) {
+      const message = String(error?.message || "");
+      if (message === "zoho_refresh_token_missing" || message === "zoho_access_token_refresh_failed") {
+        return res.status(403).json({ error: "Zoho Mail connection needs to be reconnected before sending." });
+      }
+      console.error("Error sending advisor invitation through Zoho Mail:", error);
+      res.status(500).json({ error: "Failed to send advisor invitation email" });
     }
   });
 
