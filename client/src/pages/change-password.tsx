@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, LogOut } from "lucide-react";
-import { useLocation } from "wouter";
+import { resolveApiUrl } from "@/lib/apiUrl";
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "Current password is required"),
@@ -24,7 +24,6 @@ type ChangePasswordForm = z.infer<typeof changePasswordSchema>;
 
 export default function ChangePassword() {
   const { user, logout, updateAuthSession } = useAuth();
-  const [, setLocation] = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -63,14 +62,26 @@ export default function ChangePassword() {
       }
 
       const result = await response.json();
+      const nextToken = result?.token || token;
       if (result?.user) {
-        updateAuthSession(result.user, result.token || token);
+        updateAuthSession(result.user, nextToken);
       } else if (user) {
-        updateAuthSession({ ...user, mustChangePassword: false }, token);
+        updateAuthSession({ ...user, mustChangePassword: false }, nextToken);
+      }
+
+      const meResponse = await fetch(resolveApiUrl("/api/auth/me"), {
+        headers: {
+          Authorization: `Bearer ${nextToken}`,
+        },
+        cache: "no-store",
+      });
+      if (meResponse.ok) {
+        const refreshedUser = await meResponse.json();
+        updateAuthSession(refreshedUser, nextToken);
       }
 
       toast({ title: "Password updated successfully!" });
-      setLocation("/");
+      window.location.replace("/");
     } catch (error) {
       toast({
         title: "Failed to change password",
