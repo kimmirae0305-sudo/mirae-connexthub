@@ -353,7 +353,7 @@ export async function registerRoutes(
   // POST /api/auth/change-password - Change password on first login
   app.post("/api/auth/change-password", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { currentPassword, newPassword } = req.body;
+      const { currentPassword, newPassword, confirmPassword } = req.body;
       
       if (!currentPassword || !newPassword) {
         return res.status(400).json({ error: "Current and new passwords are required" });
@@ -361,6 +361,10 @@ export async function registerRoutes(
 
       if (String(newPassword).length < 8) {
         return res.status(400).json({ error: "New password must be at least 8 characters" });
+      }
+
+      if (confirmPassword !== undefined && newPassword !== confirmPassword) {
+        return res.status(400).json({ error: "New password and confirmation do not match" });
       }
 
       if (!req.user) {
@@ -379,6 +383,11 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Current password is incorrect" });
       }
 
+      const isSamePassword = await comparePassword(newPassword, user.passwordHash);
+      if (isSamePassword) {
+        return res.status(400).json({ error: "New password must be different from the current password" });
+      }
+
       // Hash new password and update user
       const hashedNewPassword = await hashPassword(newPassword);
       const updatedUser = await storage.updateUser(req.user.id, {
@@ -390,12 +399,30 @@ export async function registerRoutes(
         return res.status(404).json({ error: "User not found" });
       }
 
+      const verifiedUser = await storage.getUser(req.user.id);
+      if (!verifiedUser || !verifiedUser.passwordHash) {
+        return res.status(500).json({ error: "Password update could not be verified" });
+      }
+
+      const newPasswordWorks = await comparePassword(newPassword, verifiedUser.passwordHash);
+      const oldPasswordStillWorks = await comparePassword(currentPassword, verifiedUser.passwordHash);
+      const passwordHashChanged = verifiedUser.passwordHash !== user.passwordHash;
+      const passwordChangePersisted =
+        passwordHashChanged &&
+        newPasswordWorks &&
+        !oldPasswordStillWorks &&
+        verifiedUser.mustChangePassword === false;
+
+      if (!passwordChangePersisted) {
+        return res.status(500).json({ error: "Password update was not persisted" });
+      }
+
       const authUser = {
-        id: updatedUser.id,
-        fullName: updatedUser.fullName,
-        email: updatedUser.email,
-        role: updatedUser.role,
-        mustChangePassword: updatedUser.mustChangePassword ?? false,
+        id: verifiedUser.id,
+        fullName: verifiedUser.fullName,
+        email: verifiedUser.email,
+        role: verifiedUser.role,
+        mustChangePassword: verifiedUser.mustChangePassword ?? false,
       };
 
       res.json({
