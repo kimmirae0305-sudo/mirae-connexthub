@@ -130,6 +130,9 @@ type AdvisorEmailPreviewState = {
   advisorEmail: string;
   publicReviewUrl: string;
   expiresAt: string | null;
+  existingInvitationStatus?: string | null;
+  existingSentAt?: string | null;
+  existingSentBy?: string | null;
   language: AdvisorEmailLanguage;
   subject: string;
   body: string;
@@ -152,6 +155,24 @@ type ZohoEmailConnectionStatus = {
   lastConnectedAt?: string | null;
   lastValidatedAt?: string | null;
   reason?: string | null;
+};
+
+type AdvisorInvitationEmailHistoryItem = {
+  id: number;
+  sentAt: string;
+  sentBy?: string | null;
+  sentByEmail?: string | null;
+  fromEmail: string;
+  fromName?: string | null;
+  toEmail: string;
+  subject: string;
+  provider: string;
+  providerMessageId?: string | null;
+  status: string;
+};
+
+type AdvisorProjectInvitationWithEmail = AdvisorProjectInvitation & {
+  latestEmailSend?: AdvisorInvitationEmailHistoryItem | null;
 };
 
 type AdvisorSubmittedResponse = {
@@ -369,6 +390,11 @@ export default function ProjectDetail() {
     expiresAt: string | null;
   } | null>(null);
   const [advisorEmailPreview, setAdvisorEmailPreview] = useState<AdvisorEmailPreviewState | null>(null);
+  const [sentHistoryContext, setSentHistoryContext] = useState<{
+    invitationId: number;
+    advisorName: string;
+    advisorEmail: string;
+  } | null>(null);
   const [selectedInternalExpertIds, setSelectedInternalExpertIds] = useState<Set<number>>(new Set());
   const [submittedResponseExpertId, setSubmittedResponseExpertId] = useState<number | null>(null);
   const [bulkInviteAngleIds, setBulkInviteAngleIds] = useState<number[]>([]);
@@ -486,13 +512,29 @@ export default function ProjectDetail() {
     enabled: !!projectId,
   });
 
-  const { data: advisorProjectInvitations = [] } = useQuery<AdvisorProjectInvitation[]>({
+  const { data: advisorProjectInvitations = [] } = useQuery<AdvisorProjectInvitationWithEmail[]>({
     queryKey: ["/api/projects", projectId, "advisor-invitations"],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/projects/${projectId}/advisor-invitations`);
       return res.json();
     },
     enabled: !!projectId,
+  });
+
+  const {
+    data: sentEmailHistory = [],
+    isLoading: sentEmailHistoryLoading,
+    isError: sentEmailHistoryError,
+  } = useQuery<AdvisorInvitationEmailHistoryItem[]>({
+    queryKey: ["/api/projects", projectId, "advisor-invitations", sentHistoryContext?.invitationId, "email-history"],
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/projects/${projectId}/advisor-invitations/${sentHistoryContext!.invitationId}/email-history`
+      );
+      return res.json();
+    },
+    enabled: !!projectId && !!sentHistoryContext?.invitationId,
   });
 
   const { data: senderIdentity, isLoading: senderIdentityLoading } = useQuery<EmailSenderIdentity>({
@@ -897,6 +939,9 @@ export default function ProjectDetail() {
         advisorEmail: pe.expert?.email || "",
         publicReviewUrl: buildPublicAdvisorReviewUrl(invitation!.token),
         expiresAt: invitation?.expiresAt || null,
+        existingInvitationStatus: invitation?.status || null,
+        existingSentAt: invitation?.sentAt || invitation?.latestEmailSend?.sentAt || null,
+        existingSentBy: invitation?.latestEmailSend?.sentBy || null,
       };
     }
 
@@ -928,6 +973,9 @@ export default function ProjectDetail() {
       advisorEmail: pe.expert?.email || "",
       publicReviewUrl: data.publicReviewUrl,
       expiresAt: data.expiresAt || null,
+      existingInvitationStatus: invitation.status || null,
+      existingSentAt: invitation.sentAt || invitation.latestEmailSend?.sentAt || null,
+      existingSentBy: invitation.latestEmailSend?.sentBy || null,
     };
   };
 
@@ -1001,9 +1049,15 @@ export default function ProjectDetail() {
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "advisor-invitations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      setAdvisorEmailPreview((current) => current ? {
+        ...current,
+        existingInvitationStatus: data?.invitation?.status || "sent",
+        existingSentAt: data?.sentAt || data?.invitation?.sentAt || new Date().toISOString(),
+        existingSentBy: senderIdentity?.fromName || senderIdentity?.fromEmail || current.existingSentBy || null,
+      } : current);
       toast({ title: "Advisor invitation email sent" });
     },
     onError: (error: any) => {
@@ -1701,7 +1755,7 @@ export default function ProjectDetail() {
   }, [projectAdvisors, internalExpertsAngleFilter]);
 
   const advisorInviteByExpertId = useMemo(() => {
-    const byExpertId = new Map<number, AdvisorProjectInvitation>();
+    const byExpertId = new Map<number, AdvisorProjectInvitationWithEmail>();
     advisorProjectInvitations.forEach((invitation) => {
       byExpertId.set(invitation.expertId, invitation);
     });
@@ -2015,6 +2069,9 @@ export default function ProjectDetail() {
       advisorEmail,
       publicReviewUrl: "",
       expiresAt: null,
+      existingInvitationStatus: null,
+      existingSentAt: null,
+      existingSentBy: null,
       language: "en",
       subject: initialTemplate.subject,
       body: initialTemplate.body,
@@ -2034,6 +2091,9 @@ export default function ProjectDetail() {
           advisorEmail,
           publicReviewUrl: linkData.publicReviewUrl,
           expiresAt: linkData.expiresAt,
+          existingInvitationStatus: linkData.existingInvitationStatus,
+          existingSentAt: linkData.existingSentAt,
+          existingSentBy: linkData.existingSentBy,
           language,
           subject: template.subject,
           body: template.body,
@@ -2132,7 +2192,12 @@ export default function ProjectDetail() {
       return;
     }
 
-    const confirmed = window.confirm(`Send this advisor invitation email to ${advisorEmailPreview.advisorEmail}?`);
+    const hasAlreadySent = Boolean(advisorEmailPreview.existingSentAt) ||
+      String(advisorEmailPreview.existingInvitationStatus || "").toLowerCase() === "sent";
+    const confirmationMessage = hasAlreadySent
+      ? "An invitation email has already been sent to this advisor. Do you want to send another email?"
+      : `Send this advisor invitation email to ${advisorEmailPreview.advisorEmail}?`;
+    const confirmed = window.confirm(confirmationMessage);
     if (!confirmed) return;
 
     sendAdvisorInviteEmailMutation.mutate(advisorEmailPreview);
@@ -2156,19 +2221,35 @@ export default function ProjectDetail() {
     return "Not connected";
   };
 
-  const handleProjectInviteIndicatorClick = (pe: EnrichedExpert, invitation?: AdvisorProjectInvitation) => {
+  const formatAdvisorInviteSentAt = (value?: string | Date | null) => {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return format(date, "MMM d, yyyy h:mm a");
+  };
+
+  const handleProjectInviteIndicatorClick = (pe: EnrichedExpert, invitation?: AdvisorProjectInvitationWithEmail) => {
     const status = String(invitation?.status || "not_sent").toLowerCase();
     if (status === "submitted") {
       setSubmittedResponseExpertId(pe.expertId);
       return;
     }
 
+    if (status === "sent" && invitation) {
+      setSentHistoryContext({
+        invitationId: invitation.id,
+        advisorName: pe.expert?.name || `Expert #${pe.expertId}`,
+        advisorEmail: invitation.email || pe.expert?.email || "",
+      });
+      return;
+    }
+
     toast({
-      title: "Project invitation sending will be implemented in the next step.",
+      title: "No sent advisor invitation email yet.",
     });
   };
 
-  const getProjectInviteIndicator = (invitation?: AdvisorProjectInvitation) => {
+  const getProjectInviteIndicator = (invitation?: AdvisorProjectInvitationWithEmail) => {
     const status = String(invitation?.status || "not_sent").toLowerCase();
 
     if (status === "submitted") {
@@ -3310,13 +3391,18 @@ export default function ProjectDetail() {
                           </TableHead>
                           <TableHead className="text-xs font-semibold uppercase">Name</TableHead>
                           <TableHead className="w-40 text-xs font-semibold uppercase">Rate</TableHead>
-                          <TableHead className="w-40 text-xs font-semibold uppercase">Project Invite</TableHead>
+                          <TableHead className="w-56 text-xs font-semibold uppercase">Project Invite</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredInternalExperts.map((pe) => {
                         const advisorInvitation = advisorInviteByExpertId.get(pe.expertId);
                         const inviteIndicator = getProjectInviteIndicator(advisorInvitation);
+                        const inviteStatus = String(advisorInvitation?.status || "not_sent").toLowerCase();
+                        const sentAtDisplay = formatAdvisorInviteSentAt(
+                          advisorInvitation?.sentAt || advisorInvitation?.latestEmailSend?.sentAt
+                        );
+                        const sentByDisplay = advisorInvitation?.latestEmailSend?.sentBy || null;
                         const expertName = pe.expert?.name || `Expert #${pe.expertId}`;
                         return (
                           <TableRow key={pe.id} data-testid={`row-existing-expert-${pe.id}`}>
@@ -3352,10 +3438,25 @@ export default function ProjectDetail() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0 space-y-1">
+                                  <Badge
+                                    variant={inviteStatus === "submitted" ? "default" : inviteStatus === "sent" ? "secondary" : "outline"}
+                                    className="gap-1"
+                                  >
+                                    {inviteIndicator.icon}
+                                    {inviteIndicator.label}
+                                  </Badge>
+                                  {inviteStatus === "sent" && (sentAtDisplay || sentByDisplay) && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {sentAtDisplay && <div>{sentAtDisplay}</div>}
+                                      {sentByDisplay && <div className="truncate">by {sentByDisplay}</div>}
+                                    </div>
+                                  )}
+                                </div>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  title={`Project invite: ${inviteIndicator.label}`}
+                                  title={`Project invite: ${inviteIndicator.label}${sentAtDisplay ? ` at ${sentAtDisplay}` : ""}`}
                                   onClick={() => handleProjectInviteIndicatorClick(pe, advisorInvitation)}
                                   data-testid={`button-project-invite-placeholder-${pe.id}`}
                                 >
@@ -3382,6 +3483,18 @@ export default function ProjectDetail() {
                                       <Link2 className="h-4 w-4 mr-2" />
                                       Generate Review Link
                                     </DropdownMenuItem>
+                                    {advisorInvitation && (
+                                      <DropdownMenuItem
+                                        onClick={() => setSentHistoryContext({
+                                          invitationId: advisorInvitation.id,
+                                          advisorName: expertName,
+                                          advisorEmail: advisorInvitation.email || pe.expert?.email || "",
+                                        })}
+                                      >
+                                        <Mail className="h-4 w-4 mr-2" />
+                                        View sent history
+                                      </DropdownMenuItem>
+                                    )}
                                     <DropdownMenuItem
                                       onClick={() => removeExpertMutation.mutate(pe.id)}
                                       className="text-destructive"
@@ -4416,6 +4529,90 @@ export default function ProjectDetail() {
         </DialogContent>
       </Dialog>
 
+      {/* Advisor Invitation Sent History Modal */}
+      <Dialog open={!!sentHistoryContext} onOpenChange={(open) => !open && setSentHistoryContext(null)}>
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Advisor Invite Email History</DialogTitle>
+            <DialogDescription>
+              Sent email records for {sentHistoryContext?.advisorName || "this advisor"}.
+            </DialogDescription>
+          </DialogHeader>
+          {sentHistoryContext ? (
+            <div className="space-y-4 py-2">
+              <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                <div className="font-medium">{sentHistoryContext.advisorName}</div>
+                <div className="text-muted-foreground">{sentHistoryContext.advisorEmail || "No email on profile"}</div>
+              </div>
+
+              {sentEmailHistoryLoading && (
+                <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                  Loading sent email history...
+                </div>
+              )}
+
+              {sentEmailHistoryError && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                  Unable to load sent email history.
+                </div>
+              )}
+
+              {!sentEmailHistoryLoading && !sentEmailHistoryError && sentEmailHistory.length === 0 && (
+                <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                  No sent email records found for this advisor invitation.
+                </div>
+              )}
+
+              {!sentEmailHistoryLoading && !sentEmailHistoryError && sentEmailHistory.length > 0 && (
+                <div className="space-y-3">
+                  {sentEmailHistory.map((item) => (
+                    <div key={item.id} className="rounded-md border p-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="font-medium">{item.subject || "No subject"}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {formatAdvisorInviteSentAt(item.sentAt) || "Sent date unavailable"}
+                            {item.sentBy ? ` by ${item.sentBy}` : ""}
+                          </div>
+                        </div>
+                        <Badge variant="secondary">{item.status || "sent"}</Badge>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                        <div>
+                          <span className="font-medium">From: </span>
+                          <span className="text-muted-foreground">{item.fromName ? `${item.fromName} <${item.fromEmail}>` : item.fromEmail}</span>
+                        </div>
+                        <div>
+                          <span className="font-medium">To: </span>
+                          <span className="text-muted-foreground">{item.toEmail}</span>
+                        </div>
+                        <div>
+                          <span className="font-medium">Provider: </span>
+                          <span className="text-muted-foreground">{item.provider || "zoho"}</span>
+                        </div>
+                        <div>
+                          <span className="font-medium">Provider message id: </span>
+                          <span className="text-muted-foreground">{item.providerMessageId || "Not available"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              Select a sent advisor invitation to view history.
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" onClick={() => setSentHistoryContext(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Advisor Email Preview Modal */}
       <Dialog open={!!advisorEmailPreview} onOpenChange={(open) => !open && setAdvisorEmailPreview(null)}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
@@ -4523,6 +4720,15 @@ export default function ProjectDetail() {
               {advisorEmailPreview.error && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                   {advisorEmailPreview.error}
+                </div>
+              )}
+
+              {(advisorEmailPreview.existingSentAt ||
+                String(advisorEmailPreview.existingInvitationStatus || "").toLowerCase() === "sent") && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  This advisor invitation email was already sent
+                  {formatAdvisorInviteSentAt(advisorEmailPreview.existingSentAt) ? ` on ${formatAdvisorInviteSentAt(advisorEmailPreview.existingSentAt)}` : ""}
+                  {advisorEmailPreview.existingSentBy ? ` by ${advisorEmailPreview.existingSentBy}` : ""}. Sending again will create a new sent email record.
                 </div>
               )}
 

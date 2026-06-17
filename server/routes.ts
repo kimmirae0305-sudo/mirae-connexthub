@@ -1605,10 +1605,73 @@ export async function registerRoutes(
       }
 
       const invitations = await storage.getAdvisorProjectInvitationsByProject(projectId);
-      res.json(invitations);
+      const invitationsWithLatestEmail = await Promise.all(
+        invitations.map(async (invitation) => {
+          const [latestEmailSend] = await storage.getAdvisorProjectInvitationEmailHistory(invitation.id);
+          return {
+            ...invitation,
+            latestEmailSend: latestEmailSend ? {
+              id: latestEmailSend.id,
+              sentAt: latestEmailSend.sentAt,
+              sentBy: latestEmailSend.sentByName || latestEmailSend.sentByEmail || null,
+              sentByEmail: latestEmailSend.sentByEmail,
+              fromEmail: latestEmailSend.fromEmail,
+              toEmail: latestEmailSend.toEmail,
+              subject: latestEmailSend.subject,
+              provider: latestEmailSend.provider,
+              providerMessageId: latestEmailSend.providerMessageId,
+              status: latestEmailSend.status,
+            } : null,
+          };
+        })
+      );
+      res.json(invitationsWithLatestEmail);
     } catch (error) {
       console.error("Error fetching advisor project invitations:", error);
       res.status(500).json({ error: "Failed to fetch advisor project invitations" });
+    }
+  });
+
+  app.get("/api/projects/:projectId/advisor-invitations/:invitationId/email-history", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const invitationId = parseInt(req.params.invitationId);
+      const user = req.user!;
+
+      if (!Number.isInteger(projectId) || !Number.isInteger(invitationId)) {
+        return res.status(400).json({ error: "Invalid project or invitation id" });
+      }
+
+      const [project, invitation] = await Promise.all([
+        storage.getProject(projectId),
+        storage.getAdvisorProjectInvitation(invitationId),
+      ]);
+
+      if (!project || !invitation || invitation.projectId !== projectId) {
+        return res.status(404).json({ error: "Advisor invitation email history not found" });
+      }
+
+      if (!canManageProjectAdvisorInvitations(project, user)) {
+        return res.status(403).json({ error: "Access denied: You cannot view advisor invitation email history for this project" });
+      }
+
+      const history = await storage.getAdvisorProjectInvitationEmailHistory(invitationId);
+      res.json(history.map((item) => ({
+        id: item.id,
+        sentAt: item.sentAt,
+        sentBy: item.sentByName || item.sentByEmail || null,
+        sentByEmail: item.sentByEmail,
+        fromEmail: item.fromEmail,
+        fromName: item.fromName,
+        toEmail: item.toEmail,
+        subject: item.subject,
+        provider: item.provider,
+        providerMessageId: item.providerMessageId,
+        status: item.status,
+      })));
+    } catch (error) {
+      console.error("Error fetching advisor invitation email history:", error);
+      res.status(500).json({ error: "Failed to fetch advisor invitation email history" });
     }
   });
 
@@ -3323,7 +3386,7 @@ export async function registerRoutes(
         description: "Advisor marked as invited internally. No email was sent.",
         metadata: {
           emailSent: false,
-          futureIntegrationPoint: "Attach SMTP/API email sending here after miraeconnext.com SPF/DKIM/DMARC setup.",
+          futureIntegrationPoint: "Attach Zoho Mail delivery here after miraeconnext.com SPF/DKIM/DMARC setup.",
         },
       });
 

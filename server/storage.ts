@@ -373,6 +373,22 @@ export interface PmPerformanceReport {
   rows: PmPerformanceRow[];
 }
 
+export interface AdvisorProjectInvitationEmailHistoryItem {
+  id: number;
+  sentAt: Date;
+  sentByUserId: number | null;
+  sentByName: string | null;
+  sentByEmail: string | null;
+  fromEmail: string;
+  fromName: string | null;
+  toEmail: string;
+  subject: string;
+  body: string;
+  provider: string;
+  providerMessageId: string | null;
+  status: string;
+}
+
 export type CompanyLinkStatus = "pending_review" | "suggested" | "linked" | "unclear" | "ignored";
 
 export interface CompanySuggestion {
@@ -604,6 +620,7 @@ export interface IStorage {
   createAdvisorProjectInvitationEmailSend(
     emailSend: InsertAdvisorProjectInvitationEmailSend
   ): Promise<AdvisorProjectInvitationEmailSend>;
+  getAdvisorProjectInvitationEmailHistory(invitationId: number): Promise<AdvisorProjectInvitationEmailHistoryItem[]>;
   getUserEmailConnection(userId: number, provider: string): Promise<UserEmailConnection | undefined>;
   upsertUserEmailConnection(connection: InsertUserEmailConnection): Promise<UserEmailConnection>;
   disconnectUserEmailConnection(userId: number, provider: string): Promise<UserEmailConnection | undefined>;
@@ -3928,6 +3945,38 @@ export class DatabaseStorage implements IStorage {
       .values(emailSend as any)
       .returning();
     return created;
+  }
+
+  async getAdvisorProjectInvitationEmailHistory(invitationId: number): Promise<AdvisorProjectInvitationEmailHistoryItem[]> {
+    const rows = await db
+      .select({
+        id: advisorProjectInvitationEmailSends.id,
+        sentAt: advisorProjectInvitationEmailSends.sentAt,
+        sentByUserId: advisorProjectInvitationEmailSends.sentByUserId,
+        sentByName: users.fullName,
+        sentByEmail: users.email,
+        fromEmail: advisorProjectInvitationEmailSends.fromEmail,
+        fromName: advisorProjectInvitationEmailSends.fromName,
+        toEmail: advisorProjectInvitationEmailSends.toEmail,
+        subject: advisorProjectInvitationEmailSends.subject,
+        body: advisorProjectInvitationEmailSends.body,
+        provider: advisorProjectInvitationEmailSends.provider,
+        providerMessageId: advisorProjectInvitationEmailSends.providerMessageId,
+        status: advisorProjectInvitationEmailSends.status,
+      })
+      .from(advisorProjectInvitationEmailSends)
+      .leftJoin(users, eq(advisorProjectInvitationEmailSends.sentByUserId, users.id))
+      .where(eq(advisorProjectInvitationEmailSends.invitationId, invitationId))
+      .orderBy(desc(advisorProjectInvitationEmailSends.sentAt));
+
+    return rows.map((row) => ({
+      ...row,
+      sentByUserId: row.sentByUserId ?? null,
+      sentByName: row.sentByName ?? null,
+      sentByEmail: row.sentByEmail ?? null,
+      fromName: row.fromName ?? null,
+      providerMessageId: row.providerMessageId ?? null,
+    }));
   }
 
   async getUserEmailConnection(userId: number, provider: string): Promise<UserEmailConnection | undefined> {
