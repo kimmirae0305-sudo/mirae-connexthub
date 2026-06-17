@@ -386,6 +386,24 @@ export const advisorProjectResponses = pgTable("advisor_project_responses", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const advisorProjectInvitationEmailSends = pgTable("advisor_project_invitation_email_sends", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  invitationId: integer("invitation_id").notNull().references(() => advisorProjectInvitations.id, { onDelete: "cascade" }),
+  expertId: integer("expert_id").references(() => experts.id, { onDelete: "set null" }),
+  sentByUserId: integer("sent_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  fromEmail: text("from_email").notNull(),
+  fromName: text("from_name"),
+  toEmail: text("to_email").notNull(),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+  provider: text("provider").notNull().default("zoho"),
+  providerMessageId: text("provider_message_id"),
+  status: text("status").notNull().default("sent"),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Project Activities table (for activity log)
 export const projectActivities = pgTable("project_activities", {
   id: serial("id").primaryKey(),
@@ -706,6 +724,25 @@ export const advisorProjectResponsesRelations = relations(advisorProjectResponse
   }),
 }));
 
+export const advisorProjectInvitationEmailSendsRelations = relations(advisorProjectInvitationEmailSends, ({ one }) => ({
+  project: one(projects, {
+    fields: [advisorProjectInvitationEmailSends.projectId],
+    references: [projects.id],
+  }),
+  invitation: one(advisorProjectInvitations, {
+    fields: [advisorProjectInvitationEmailSends.invitationId],
+    references: [advisorProjectInvitations.id],
+  }),
+  expert: one(experts, {
+    fields: [advisorProjectInvitationEmailSends.expertId],
+    references: [experts.id],
+  }),
+  sentByUser: one(users, {
+    fields: [advisorProjectInvitationEmailSends.sentByUserId],
+    references: [users.id],
+  }),
+}));
+
 export const projectActivitiesRelations = relations(projectActivities, ({ one }) => ({
   project: one(projects, {
     fields: [projectActivities.projectId],
@@ -955,6 +992,13 @@ export const insertAdvisorProjectResponseSchema = createInsertSchema(advisorProj
   submittedAt: coerceDate.optional(),
 });
 
+export const insertAdvisorProjectInvitationEmailSendSchema = createInsertSchema(advisorProjectInvitationEmailSends).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  sentAt: coerceDate.optional(),
+});
+
 export const insertProjectActivitySchema = createInsertSchema(projectActivities).omit({
   id: true,
   createdAt: true,
@@ -1058,6 +1102,8 @@ export type AdvisorProjectInvitation = typeof advisorProjectInvitations.$inferSe
 export type InsertAdvisorProjectInvitation = z.infer<typeof insertAdvisorProjectInvitationSchema>;
 export type AdvisorProjectResponse = typeof advisorProjectResponses.$inferSelect;
 export type InsertAdvisorProjectResponse = z.infer<typeof insertAdvisorProjectResponseSchema>;
+export type AdvisorProjectInvitationEmailSend = typeof advisorProjectInvitationEmailSends.$inferSelect;
+export type InsertAdvisorProjectInvitationEmailSend = z.infer<typeof insertAdvisorProjectInvitationEmailSendSchema>;
 
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type InsertUsageRecord = z.infer<typeof insertUsageRecordSchema>;

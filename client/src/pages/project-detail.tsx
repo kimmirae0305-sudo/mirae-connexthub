@@ -124,6 +124,8 @@ type NormalizedAdvisorSubmittedAnswer = {
 type AdvisorEmailLanguage = "en" | "pt" | "es";
 
 type AdvisorEmailPreviewState = {
+  invitationId: number | null;
+  expertId: number | null;
   advisorName: string;
   advisorEmail: string;
   publicReviewUrl: string;
@@ -889,6 +891,8 @@ export default function ProjectDetail() {
 
     if (hasValidToken) {
       return {
+        invitationId: invitation!.id,
+        expertId: pe.expertId,
         advisorName: pe.expert?.name || `Expert #${pe.expertId}`,
         advisorEmail: pe.expert?.email || "",
         publicReviewUrl: buildPublicAdvisorReviewUrl(invitation!.token),
@@ -918,6 +922,8 @@ export default function ProjectDetail() {
     queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "advisor-invitations"] });
 
     return {
+      invitationId: data.invitationId || invitation.id,
+      expertId: data.expertId || pe.expertId,
       advisorName: pe.expert?.name || `Expert #${pe.expertId}`,
       advisorEmail: pe.expert?.email || "",
       publicReviewUrl: data.publicReviewUrl,
@@ -978,6 +984,31 @@ export default function ProjectDetail() {
     onError: (error: any) => {
       toast({
         title: error?.message || "Failed to disconnect Zoho Mail",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const sendAdvisorInviteEmailMutation = useMutation({
+    mutationFn: async (preview: AdvisorEmailPreviewState) => {
+      const res = await apiRequest("POST", "/api/email/zoho/send-advisor-invite", {
+        projectId: Number(projectId),
+        invitationId: preview.invitationId,
+        expertId: preview.expertId,
+        toEmail: preview.advisorEmail,
+        subject: preview.subject,
+        body: preview.body,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "advisor-invitations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      toast({ title: "Advisor invitation email sent" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: error?.message || "Failed to send advisor invitation email",
         variant: "destructive",
       });
     },
@@ -1978,6 +2009,8 @@ export default function ProjectDetail() {
     const initialTemplate = getAdvisorInviteEmailTemplate("en", advisorName, "");
 
     setAdvisorEmailPreview({
+      invitationId: null,
+      expertId: pe.expertId,
       advisorName,
       advisorEmail,
       publicReviewUrl: "",
@@ -1995,6 +2028,8 @@ export default function ProjectDetail() {
         const language = current?.language || "en";
         const template = getAdvisorInviteEmailTemplate(language, advisorName, linkData.publicReviewUrl);
         return {
+          invitationId: linkData.invitationId,
+          expertId: linkData.expertId,
           advisorName,
           advisorEmail,
           publicReviewUrl: linkData.publicReviewUrl,
@@ -2074,6 +2109,33 @@ export default function ProjectDetail() {
         variant: "destructive",
       });
     }
+  };
+
+  const handleSendAdvisorInviteEmail = () => {
+    if (!advisorEmailPreview) return;
+    if (!zohoConnectionStatus?.isConnected) {
+      toast({ title: "Connect Zoho Mail before sending", variant: "destructive" });
+      return;
+    }
+    if (
+      advisorEmailPreview.isLoadingLink ||
+      !advisorEmailPreview.invitationId ||
+      !advisorEmailPreview.expertId ||
+      !advisorEmailPreview.advisorEmail ||
+      !advisorEmailPreview.publicReviewUrl
+    ) {
+      toast({ title: "Advisor invite is not ready to send", variant: "destructive" });
+      return;
+    }
+    if (!advisorEmailPreview.subject.trim() || !advisorEmailPreview.body.trim()) {
+      toast({ title: "Subject and body are required before sending", variant: "destructive" });
+      return;
+    }
+
+    const confirmed = window.confirm(`Send this advisor invitation email to ${advisorEmailPreview.advisorEmail}?`);
+    if (!confirmed) return;
+
+    sendAdvisorInviteEmailMutation.mutate(advisorEmailPreview);
   };
 
   const formatSenderIdentityDisplay = (identity?: EmailSenderIdentity) => {
@@ -4360,7 +4422,7 @@ export default function ProjectDetail() {
           <DialogHeader>
             <DialogTitle>Email Preview</DialogTitle>
             <DialogDescription>
-              Preview advisor-facing invitation copy. No email will be sent from this modal.
+              Review advisor-facing invitation copy before sending.
             </DialogDescription>
           </DialogHeader>
           {advisorEmailPreview ? (
@@ -4516,7 +4578,7 @@ export default function ProjectDetail() {
               </div>
 
               <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                This is a preview only. Zoho SMTP delivery and email sending are not enabled in this step.
+                Emails are sent through the connected Zoho Mail account. Please review the subject and body before sending.
               </div>
             </div>
           ) : (
@@ -4535,6 +4597,26 @@ export default function ProjectDetail() {
               <Copy className="h-4 w-4 mr-2" />
               Copy email body
             </Button>
+            {zohoConnectionStatus?.isConnected && (
+              <Button
+                type="button"
+                onClick={handleSendAdvisorInviteEmail}
+                disabled={
+                  sendAdvisorInviteEmailMutation.isPending ||
+                  advisorEmailPreview?.isLoadingLink ||
+                  !advisorEmailPreview?.invitationId ||
+                  !advisorEmailPreview?.expertId ||
+                  !advisorEmailPreview?.advisorEmail ||
+                  !advisorEmailPreview?.publicReviewUrl ||
+                  !advisorEmailPreview?.subject.trim() ||
+                  !advisorEmailPreview?.body.trim()
+                }
+                data-testid="button-send-advisor-invite-email"
+              >
+                <Send className="h-4 w-4 mr-2" />
+                {sendAdvisorInviteEmailMutation.isPending ? "Sending..." : "Send email"}
+              </Button>
+            )}
             <Button type="button" onClick={() => setAdvisorEmailPreview(null)}>
               Close
             </Button>

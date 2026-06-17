@@ -19,6 +19,7 @@ import {
   expertInvitationLinks,
   advisorProjectInvitations,
   advisorProjectResponses,
+  advisorProjectInvitationEmailSends,
   userEmailConnections,
   emailOauthStates,
   projectActivities,
@@ -53,6 +54,8 @@ import {
   type InsertAdvisorProjectInvitation,
   type AdvisorProjectResponse,
   type InsertAdvisorProjectResponse,
+  type AdvisorProjectInvitationEmailSend,
+  type InsertAdvisorProjectInvitationEmailSend,
   type UserEmailConnection,
   type InsertUserEmailConnection,
   type EmailOauthState,
@@ -598,6 +601,9 @@ export interface IStorage {
   getAdvisorProjectResponseByInvitation(invitationId: number): Promise<AdvisorProjectResponse | undefined>;
   getAdvisorProjectResponseByProjectExpert(projectId: number, expertId: number): Promise<AdvisorProjectResponse | undefined>;
   saveAdvisorProjectResponse(response: InsertAdvisorProjectResponse): Promise<AdvisorProjectResponse>;
+  createAdvisorProjectInvitationEmailSend(
+    emailSend: InsertAdvisorProjectInvitationEmailSend
+  ): Promise<AdvisorProjectInvitationEmailSend>;
   getUserEmailConnection(userId: number, provider: string): Promise<UserEmailConnection | undefined>;
   upsertUserEmailConnection(connection: InsertUserEmailConnection): Promise<UserEmailConnection>;
   disconnectUserEmailConnection(userId: number, provider: string): Promise<UserEmailConnection | undefined>;
@@ -3911,6 +3917,16 @@ export class DatabaseStorage implements IStorage {
       .values(response as any)
       .returning();
 
+    return created;
+  }
+
+  async createAdvisorProjectInvitationEmailSend(
+    emailSend: InsertAdvisorProjectInvitationEmailSend
+  ): Promise<AdvisorProjectInvitationEmailSend> {
+    const [created] = await db
+      .insert(advisorProjectInvitationEmailSends)
+      .values(emailSend as any)
+      .returning();
     return created;
   }
 
