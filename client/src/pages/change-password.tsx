@@ -14,6 +14,7 @@ import { useLocation } from "wouter";
 
 const CRM_MAIN_ROUTE = "/";
 const CHANGE_PASSWORD_ROUTE = "/change-password";
+const CHANGE_PASSWORD_ROUTE_VERSION = "2026-06-password-persistence-v2";
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "Current password is required"),
@@ -68,6 +69,10 @@ export default function ChangePassword() {
       }
 
       const result = await response.json();
+      if (result?.changePasswordRouteVersion !== CHANGE_PASSWORD_ROUTE_VERSION) {
+        throw new Error("Password update could not be verified. Please refresh and try again.");
+      }
+
       if (!result?.success || !result?.user || result.user.mustChangePassword) {
         throw new Error("Password change was not confirmed by the server");
       }
