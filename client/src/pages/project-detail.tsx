@@ -142,6 +142,16 @@ type EmailSenderIdentity = {
   reason?: string;
 };
 
+type ZohoEmailConnectionStatus = {
+  provider: string;
+  isConnected: boolean;
+  providerEmail?: string | null;
+  status?: string | null;
+  lastConnectedAt?: string | null;
+  lastValidatedAt?: string | null;
+  reason?: string | null;
+};
+
 type AdvisorSubmittedResponse = {
   expert: {
     id: number;
@@ -487,6 +497,19 @@ export default function ProjectDetail() {
     queryKey: ["/api/email/sender-identity"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/email/sender-identity");
+      return res.json();
+    },
+    enabled: !!projectId,
+  });
+
+  const {
+    data: zohoConnectionStatus,
+    isLoading: zohoConnectionStatusLoading,
+    isError: zohoConnectionStatusError,
+  } = useQuery<ZohoEmailConnectionStatus>({
+    queryKey: ["/api/email/zoho/status"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/email/zoho/status");
       return res.json();
     },
     enabled: !!projectId,
@@ -918,6 +941,43 @@ export default function ProjectDetail() {
     onError: (error: any) => {
       toast({
         title: error?.message || "Failed to generate review link",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const startZohoConnectionMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/email/zoho/connect/start");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data?.authorizationUrl) {
+        window.location.href = data.authorizationUrl;
+        return;
+      }
+      toast({ title: "Zoho connection URL was not returned", variant: "destructive" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: error?.message || "Failed to start Zoho Mail connection",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const disconnectZohoConnectionMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/email/zoho/disconnect");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/email/zoho/status"] });
+      toast({ title: "Zoho Mail disconnected" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: error?.message || "Failed to disconnect Zoho Mail",
         variant: "destructive",
       });
     },
@@ -2021,6 +2081,17 @@ export default function ProjectDetail() {
     if (!identity.fromEmail) return "Sender identity unavailable";
     const displayName = identity.fromName?.trim() || identity.fromEmail.split("@")[0] || "Mirae Connext";
     return `${displayName} <${identity.fromEmail}>`;
+  };
+
+  const getZohoConnectionStatusLabel = () => {
+    if (zohoConnectionStatusLoading) return "Loading Zoho Mail connection...";
+    if (zohoConnectionStatusError) return "Connection error";
+    if (!zohoConnectionStatus) return "Not connected";
+    if (zohoConnectionStatus.status === "error") return "Configuration error";
+    if (zohoConnectionStatus.isConnected && zohoConnectionStatus.providerEmail) {
+      return `Connected as ${zohoConnectionStatus.providerEmail}`;
+    }
+    return "Not connected";
   };
 
   const handleProjectInviteIndicatorClick = (pe: EnrichedExpert, invitation?: AdvisorProjectInvitation) => {
@@ -4310,6 +4381,46 @@ export default function ProjectDetail() {
                     {senderIdentity.reason || "Your sender identity is not configured for Mirae Connext email sending."}
                   </div>
                 )}
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Zoho Mail connection</p>
+                    <p className="text-sm text-muted-foreground">{getZohoConnectionStatusLabel()}</p>
+                    {(zohoConnectionStatus?.reason || zohoConnectionStatusError) && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {zohoConnectionStatus?.reason || "Unable to load Zoho Mail connection status."}
+                      </p>
+                    )}
+                  </div>
+                  {zohoConnectionStatus?.isConnected ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => disconnectZohoConnectionMutation.mutate()}
+                      disabled={disconnectZohoConnectionMutation.isPending}
+                      data-testid="button-disconnect-zoho-mail"
+                    >
+                      Disconnect
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => startZohoConnectionMutation.mutate()}
+                      disabled={
+                        startZohoConnectionMutation.isPending ||
+                        senderIdentityLoading ||
+                        !senderIdentity?.isValid
+                      }
+                      data-testid="button-connect-zoho-mail"
+                    >
+                      Connect Zoho Mail
+                    </Button>
+                  )}
+                </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">

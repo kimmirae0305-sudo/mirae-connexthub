@@ -38,6 +38,7 @@ import { toZonedTime, fromZonedTime, format } from "date-fns-tz";
 import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
 import { resolveEmailSenderIdentity } from "./emailSenderIdentity";
+import { encryptEmailToken, getEmailTokenEncryptionKeyStatus } from "./emailTokenCrypto";
 import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
@@ -65,6 +66,57 @@ const getInviteBaseUrl = (req: AuthRequest) => {
 const buildPublicRecruitmentUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/r/${token}`;
 const buildPublicAdvisorProjectReviewUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/advisor-project-review/${token}`;
+const ZOHO_MAIL_PROVIDER = "zoho_mail";
+const ZOHO_MAIL_SCOPES = ["ZohoMail.accounts.READ", "ZohoMail.messages.CREATE"];
+const getAppBaseUrl = (req: AuthRequest) => {
+  const appBaseUrl = process.env.APP_BASE_URL?.trim();
+  if (appBaseUrl) return trimTrailingSlashes(appBaseUrl);
+  return trimTrailingSlashes(getRequestBaseUrl(req));
+};
+const buildEmailOAuthReturnUrl = (req: AuthRequest, status: "connected" | "error", reason?: string) => {
+  const url = new URL("/projects", getAppBaseUrl(req) || "http://localhost");
+  url.searchParams.set("email_zoho", status);
+  if (reason) url.searchParams.set("reason", reason);
+  return url.toString();
+};
+const getZohoOAuthConfig = () => {
+  const config = {
+    clientId: process.env.ZOHO_CLIENT_ID?.trim() || "",
+    clientSecret: process.env.ZOHO_CLIENT_SECRET?.trim() || "",
+    accountsBaseUrl: trimTrailingSlashes(process.env.ZOHO_ACCOUNTS_BASE_URL?.trim() || ""),
+    mailApiBaseUrl: trimTrailingSlashes(process.env.ZOHO_MAIL_API_BASE_URL?.trim() || ""),
+    redirectUri: process.env.ZOHO_OAUTH_REDIRECT_URI?.trim() || "",
+  };
+  const missing = Object.entries(config)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+
+  if (!getEmailTokenEncryptionKeyStatus().isValid) {
+    missing.push("emailTokenEncryptionKey");
+  }
+
+  return {
+    ...config,
+    isConfigured: missing.length === 0,
+    missing,
+  };
+};
+const extractZohoAccounts = (payload: any): any[] => {
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.accounts)) return payload.accounts;
+  if (Array.isArray(payload)) return payload;
+  return [];
+};
+const getZohoAccountEmail = (account: any) =>
+  String(
+    account?.primaryEmailAddress ||
+    account?.emailAddress ||
+    account?.mailboxAddress ||
+    account?.email ||
+    ""
+  ).trim().toLowerCase();
+const getZohoAccountId = (account: any) =>
+  String(account?.accountId || account?.mailAccountId || account?.id || "").trim();
 const expenseReceiptUpload = raw({
   type: ["application/pdf", "image/png", "image/jpeg"],
   limit: "5mb",
@@ -99,6 +151,203 @@ export async function registerRoutes(
       isValid: senderIdentity.isValid,
       reason: senderIdentity.reason,
     });
+  });
+
+  app.get("/api/email/zoho/status", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const config = getZohoOAuthConfig();
+      if (!config.isConfigured) {
+        return res.json({
+          provider: ZOHO_MAIL_PROVIDER,
+          isConnected: false,
+          providerEmail: null,
+          status: "error",
+          lastConnectedAt: null,
+          lastValidatedAt: null,
+          reason: "Zoho OAuth is not configured.",
+        });
+      }
+
+      const connection = await storage.getUserEmailConnection(req.user!.id, ZOHO_MAIL_PROVIDER);
+      if (!connection || connection.status !== "connected") {
+        return res.json({
+          provider: ZOHO_MAIL_PROVIDER,
+          isConnected: false,
+          providerEmail: connection?.providerEmail || null,
+          status: connection?.status || "disconnected",
+          lastConnectedAt: connection?.lastConnectedAt || null,
+          lastValidatedAt: connection?.lastValidatedAt || null,
+          reason: connection?.status === "error" ? "Zoho Mail connection needs attention." : "Zoho Mail is not connected.",
+        });
+      }
+
+      res.json({
+        provider: ZOHO_MAIL_PROVIDER,
+        isConnected: true,
+        providerEmail: connection.providerEmail,
+        status: connection.status,
+        lastConnectedAt: connection.lastConnectedAt,
+        lastValidatedAt: connection.lastValidatedAt,
+      });
+    } catch (error) {
+      console.error("Error fetching Zoho email connection status:", error);
+      res.status(500).json({ error: "Failed to fetch Zoho connection status" });
+    }
+  });
+
+  app.post("/api/email/zoho/connect/start", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const senderIdentity = resolveEmailSenderIdentity(req.user);
+      if (!senderIdentity.isValid) {
+        return res.status(400).json({
+          error: senderIdentity.reason || "Sender identity is not configured for Mirae Connext email sending.",
+        });
+      }
+
+      const config = getZohoOAuthConfig();
+      if (!config.isConfigured) {
+        return res.status(503).json({ error: "Zoho OAuth is not configured." });
+      }
+
+      const state = `zoh_${crypto.randomBytes(32).toString("hex")}`;
+      await storage.createEmailOauthState({
+        state,
+        userId: req.user!.id,
+        provider: ZOHO_MAIL_PROVIDER,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      });
+
+      const authorizationUrl = new URL("/oauth/v2/auth", config.accountsBaseUrl);
+      authorizationUrl.searchParams.set("scope", ZOHO_MAIL_SCOPES.join(" "));
+      authorizationUrl.searchParams.set("client_id", config.clientId);
+      authorizationUrl.searchParams.set("response_type", "code");
+      authorizationUrl.searchParams.set("access_type", "offline");
+      authorizationUrl.searchParams.set("prompt", "consent");
+      authorizationUrl.searchParams.set("redirect_uri", config.redirectUri);
+      authorizationUrl.searchParams.set("state", state);
+
+      res.json({ authorizationUrl: authorizationUrl.toString() });
+    } catch (error) {
+      console.error("Error starting Zoho OAuth connection:", error);
+      res.status(500).json({ error: "Failed to start Zoho OAuth connection" });
+    }
+  });
+
+  app.get("/api/email/zoho/callback", async (req: AuthRequest, res) => {
+    const fail = (reason: string) => res.redirect(buildEmailOAuthReturnUrl(req, "error", reason));
+
+    try {
+      const code = String(req.query.code || "").trim();
+      const stateValue = String(req.query.state || "").trim();
+      const oauthError = String(req.query.error || "").trim();
+
+      if (oauthError) return fail("oauth_denied");
+      if (!code || !stateValue) return fail("missing_oauth_parameters");
+
+      const oauthState = await storage.getEmailOauthState(stateValue);
+      if (!oauthState || oauthState.provider !== ZOHO_MAIL_PROVIDER) return fail("invalid_oauth_state");
+      if (oauthState.usedAt) return fail("used_oauth_state");
+      if (new Date(oauthState.expiresAt) <= new Date()) return fail("expired_oauth_state");
+
+      await storage.markEmailOauthStateUsed(oauthState.id);
+
+      const user = await storage.getUser(oauthState.userId);
+      const senderIdentity = resolveEmailSenderIdentity(user ? {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
+        mustChangePassword: user.mustChangePassword,
+      } : null);
+      if (!senderIdentity.isValid) return fail("invalid_sender_identity");
+
+      const config = getZohoOAuthConfig();
+      if (!config.isConfigured) return fail("zoho_oauth_not_configured");
+
+      const tokenParams = new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        redirect_uri: config.redirectUri,
+        code,
+      });
+
+      const tokenRes = await fetch(`${config.accountsBaseUrl}/oauth/v2/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: tokenParams.toString(),
+      });
+      const tokenPayload: any = await tokenRes.json().catch(() => ({}));
+      if (!tokenRes.ok || !tokenPayload.access_token) return fail("token_exchange_failed");
+      if (!tokenPayload.refresh_token) return fail("refresh_token_missing");
+
+      const accountsRes = await fetch(`${config.mailApiBaseUrl}/api/accounts`, {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${tokenPayload.access_token}`,
+        },
+      });
+      const accountsPayload: any = await accountsRes.json().catch(() => ({}));
+      if (!accountsRes.ok) return fail("zoho_accounts_fetch_failed");
+
+      const accounts = extractZohoAccounts(accountsPayload);
+      const matchingAccount = accounts.find((account) => getZohoAccountEmail(account) === senderIdentity.fromEmail);
+      if (!matchingAccount) {
+        await storage.upsertUserEmailConnection({
+          userId: oauthState.userId,
+          provider: ZOHO_MAIL_PROVIDER,
+          providerEmail: accounts.map(getZohoAccountEmail).filter(Boolean)[0] || null,
+          status: "error",
+          lastValidatedAt: new Date(),
+          scopes: String(tokenPayload.scope || ZOHO_MAIL_SCOPES.join(" ")),
+        });
+        return fail("zoho_email_mismatch");
+      }
+
+      const expiresInSeconds = Number(tokenPayload.expires_in || 0);
+      const expiresAt = Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
+        ? new Date(Date.now() + expiresInSeconds * 1000)
+        : null;
+      const now = new Date();
+
+      await storage.upsertUserEmailConnection({
+        userId: oauthState.userId,
+        provider: ZOHO_MAIL_PROVIDER,
+        providerEmail: senderIdentity.fromEmail,
+        providerAccountId: getZohoAccountId(matchingAccount),
+        providerUserId: String(matchingAccount?.userId || matchingAccount?.zohoUserId || ""),
+        providerOrgId: String(matchingAccount?.organizationId || matchingAccount?.orgId || ""),
+        encryptedRefreshToken: encryptEmailToken(String(tokenPayload.refresh_token)),
+        encryptedAccessToken: tokenPayload.access_token ? encryptEmailToken(String(tokenPayload.access_token)) : null,
+        accessTokenExpiresAt: expiresAt,
+        scopes: String(tokenPayload.scope || ZOHO_MAIL_SCOPES.join(" ")),
+        status: "connected",
+        lastConnectedAt: now,
+        lastValidatedAt: now,
+        revokedAt: null,
+      });
+
+      return res.redirect(buildEmailOAuthReturnUrl(req, "connected"));
+    } catch (error) {
+      console.error("Error handling Zoho OAuth callback:", error);
+      return fail("zoho_oauth_callback_failed");
+    }
+  });
+
+  app.post("/api/email/zoho/disconnect", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const connection = await storage.disconnectUserEmailConnection(req.user!.id, ZOHO_MAIL_PROVIDER);
+      res.json({
+        provider: ZOHO_MAIL_PROVIDER,
+        isConnected: false,
+        providerEmail: connection?.providerEmail || null,
+        status: connection?.status || "disconnected",
+        lastConnectedAt: connection?.lastConnectedAt || null,
+        lastValidatedAt: connection?.lastValidatedAt || null,
+      });
+    } catch (error) {
+      console.error("Error disconnecting Zoho Mail:", error);
+      res.status(500).json({ error: "Failed to disconnect Zoho Mail" });
+    }
   });
 
   // POST /api/auth/change-password - Change password on first login

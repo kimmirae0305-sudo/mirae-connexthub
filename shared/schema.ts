@@ -16,6 +16,36 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const userEmailConnections = pgTable("user_email_connections", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull().default("zoho_mail"),
+  providerEmail: text("provider_email"),
+  providerAccountId: text("provider_account_id"),
+  providerUserId: text("provider_user_id"),
+  providerOrgId: text("provider_org_id"),
+  encryptedRefreshToken: text("encrypted_refresh_token"),
+  encryptedAccessToken: text("encrypted_access_token"),
+  accessTokenExpiresAt: timestamp("access_token_expires_at"),
+  scopes: text("scopes"),
+  status: text("status").notNull().default("disconnected"),
+  lastConnectedAt: timestamp("last_connected_at"),
+  lastValidatedAt: timestamp("last_validated_at"),
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const emailOauthStates = pgTable("email_oauth_states", {
+  id: serial("id").primaryKey(),
+  state: text("state").notNull().unique(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull().default("zoho_mail"),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Clients table (Internal CRM - managed by employees)
 export const clients = pgTable("clients", {
   id: serial("id").primaryKey(),
@@ -478,6 +508,22 @@ export const usersRelations = relations(users, ({ many }) => ({
   managedOrganizations: many(clientOrganizations),
   createdProjects: many(projects, { relationName: "createdBy" }),
   assistedProjects: many(projects, { relationName: "assignedRa" }),
+  emailConnections: many(userEmailConnections),
+  emailOauthStates: many(emailOauthStates),
+}));
+
+export const userEmailConnectionsRelations = relations(userEmailConnections, ({ one }) => ({
+  user: one(users, {
+    fields: [userEmailConnections.userId],
+    references: [users.id],
+  }),
+}));
+
+export const emailOauthStatesRelations = relations(emailOauthStates, ({ one }) => ({
+  user: one(users, {
+    fields: [emailOauthStates.userId],
+    references: [users.id],
+  }),
 }));
 
 export const clientOrganizationsRelations = relations(clientOrganizations, ({ one, many }) => ({
@@ -769,6 +815,25 @@ export const insertUserSchema = createInsertSchema(users).omit({
   mustChangePassword: z.boolean().default(false),
 });
 
+export const insertUserEmailConnectionSchema = createInsertSchema(userEmailConnections).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  accessTokenExpiresAt: coerceDate.optional(),
+  lastConnectedAt: coerceDate.optional(),
+  lastValidatedAt: coerceDate.optional(),
+  revokedAt: coerceDate.optional(),
+});
+
+export const insertEmailOauthStateSchema = createInsertSchema(emailOauthStates).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  expiresAt: coerceDateRequired,
+  usedAt: coerceDate.optional(),
+});
+
 export const insertClientSchema = createInsertSchema(clients).omit({
   id: true,
   createdAt: true,
@@ -947,6 +1012,10 @@ export const insertExpenseSchema = createInsertSchema(expenses).omit({
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
+export type UserEmailConnection = typeof userEmailConnections.$inferSelect;
+export type InsertUserEmailConnection = z.infer<typeof insertUserEmailConnectionSchema>;
+export type EmailOauthState = typeof emailOauthStates.$inferSelect;
+export type InsertEmailOauthState = z.infer<typeof insertEmailOauthStateSchema>;
 
 export type Client = typeof clients.$inferSelect;
 export type InsertClient = z.infer<typeof insertClientSchema>;

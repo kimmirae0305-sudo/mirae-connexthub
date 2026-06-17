@@ -19,6 +19,8 @@ import {
   expertInvitationLinks,
   advisorProjectInvitations,
   advisorProjectResponses,
+  userEmailConnections,
+  emailOauthStates,
   projectActivities,
   projectAngles,
   type Project,
@@ -51,6 +53,10 @@ import {
   type InsertAdvisorProjectInvitation,
   type AdvisorProjectResponse,
   type InsertAdvisorProjectResponse,
+  type UserEmailConnection,
+  type InsertUserEmailConnection,
+  type EmailOauthState,
+  type InsertEmailOauthState,
   type ProjectActivity,
   type InsertProjectActivity,
   type ProjectAngle,
@@ -592,6 +598,12 @@ export interface IStorage {
   getAdvisorProjectResponseByInvitation(invitationId: number): Promise<AdvisorProjectResponse | undefined>;
   getAdvisorProjectResponseByProjectExpert(projectId: number, expertId: number): Promise<AdvisorProjectResponse | undefined>;
   saveAdvisorProjectResponse(response: InsertAdvisorProjectResponse): Promise<AdvisorProjectResponse>;
+  getUserEmailConnection(userId: number, provider: string): Promise<UserEmailConnection | undefined>;
+  upsertUserEmailConnection(connection: InsertUserEmailConnection): Promise<UserEmailConnection>;
+  disconnectUserEmailConnection(userId: number, provider: string): Promise<UserEmailConnection | undefined>;
+  createEmailOauthState(state: InsertEmailOauthState): Promise<EmailOauthState>;
+  getEmailOauthState(state: string): Promise<EmailOauthState | undefined>;
+  markEmailOauthStateUsed(id: number, usedAt?: Date): Promise<EmailOauthState | undefined>;
   createAdvisorProjectInvitationPlaceholders(
     projectId: number,
     expertIds: number[],
@@ -3900,6 +3912,84 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     return created;
+  }
+
+  async getUserEmailConnection(userId: number, provider: string): Promise<UserEmailConnection | undefined> {
+    const [connection] = await db
+      .select()
+      .from(userEmailConnections)
+      .where(
+        and(
+          eq(userEmailConnections.userId, userId),
+          eq(userEmailConnections.provider, provider)
+        )
+      );
+    return connection || undefined;
+  }
+
+  async upsertUserEmailConnection(connection: InsertUserEmailConnection): Promise<UserEmailConnection> {
+    const existing = await this.getUserEmailConnection(connection.userId, connection.provider || "zoho_mail");
+    const now = new Date();
+
+    if (existing) {
+      const [updated] = await db
+        .update(userEmailConnections)
+        .set({
+          ...(connection as any),
+          updatedAt: now,
+        })
+        .where(eq(userEmailConnections.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db
+      .insert(userEmailConnections)
+      .values(connection as any)
+      .returning();
+    return created;
+  }
+
+  async disconnectUserEmailConnection(userId: number, provider: string): Promise<UserEmailConnection | undefined> {
+    const existing = await this.getUserEmailConnection(userId, provider);
+    if (!existing) return undefined;
+
+    const now = new Date();
+    const [updated] = await db
+      .update(userEmailConnections)
+      .set({
+        status: "disconnected",
+        revokedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(userEmailConnections.id, existing.id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async createEmailOauthState(state: InsertEmailOauthState): Promise<EmailOauthState> {
+    const [created] = await db
+      .insert(emailOauthStates)
+      .values(state as any)
+      .returning();
+    return created;
+  }
+
+  async getEmailOauthState(state: string): Promise<EmailOauthState | undefined> {
+    const [oauthState] = await db
+      .select()
+      .from(emailOauthStates)
+      .where(eq(emailOauthStates.state, state));
+    return oauthState || undefined;
+  }
+
+  async markEmailOauthStateUsed(id: number, usedAt = new Date()): Promise<EmailOauthState | undefined> {
+    const [updated] = await db
+      .update(emailOauthStates)
+      .set({ usedAt } as any)
+      .where(eq(emailOauthStates.id, id))
+      .returning();
+    return updated || undefined;
   }
 
   async createAdvisorProjectInvitationPlaceholders(
