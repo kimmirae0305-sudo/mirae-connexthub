@@ -10,6 +10,10 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, LogOut } from "lucide-react";
 import { resolveApiUrl } from "@/lib/apiUrl";
+import { useLocation } from "wouter";
+
+const CRM_MAIN_ROUTE = "/";
+const CHANGE_PASSWORD_ROUTE = "/change-password";
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "Current password is required"),
@@ -24,6 +28,7 @@ type ChangePasswordForm = z.infer<typeof changePasswordSchema>;
 
 export default function ChangePassword() {
   const { user, logout, updateAuthSession } = useAuth();
+  const [, setLocation] = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -81,7 +86,13 @@ export default function ChangePassword() {
       }
 
       toast({ title: "Password updated successfully!" });
-      window.location.replace("/");
+      setLocation(CRM_MAIN_ROUTE, { replace: true });
+      window.setTimeout(() => {
+        const currentPath = window.location.pathname.replace(/\/+$/, "") || "/";
+        if (currentPath === CHANGE_PASSWORD_ROUTE) {
+          window.location.replace(CRM_MAIN_ROUTE);
+        }
+      }, 500);
     } catch (error) {
       toast({
         title: "Failed to change password",

@@ -25,6 +25,8 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const userStorageKeys = ["user", "authUser", "currentUser"];
 const invalidStorageValues = new Set(["", "undefined", "null"]);
+const CRM_MAIN_ROUTE = "/";
+const CHANGE_PASSWORD_ROUTE = "/change-password";
 
 function getStoredAuthToken() {
   const storedToken = localStorage.getItem("authToken");
@@ -170,7 +172,7 @@ export function useAuth() {
 
 export function ProtectedRoute({ children, allowChangePassword = false }: { children: React.ReactNode, allowChangePassword?: boolean }) {
   const { isAuthenticated, isLoading, user } = useAuth();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -181,9 +183,15 @@ export function ProtectedRoute({ children, allowChangePassword = false }: { chil
   useEffect(() => {
     // If user must change password and this route doesn't allow it, redirect
     if (!isLoading && user && user.mustChangePassword && !allowChangePassword) {
-      setLocation("/change-password");
+      setLocation(CHANGE_PASSWORD_ROUTE, { replace: true });
     }
   }, [user, isLoading, allowChangePassword, setLocation]);
+
+  useEffect(() => {
+    if (!isLoading && user && !user.mustChangePassword && allowChangePassword && location === CHANGE_PASSWORD_ROUTE) {
+      setLocation(CRM_MAIN_ROUTE, { replace: true });
+    }
+  }, [user, isLoading, allowChangePassword, location, setLocation]);
 
   if (isLoading) {
     return (
