@@ -68,6 +68,7 @@ const buildPublicAdvisorProjectReviewUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/advisor-project-review/${token}`;
 const ZOHO_MAIL_PROVIDER = "zoho_mail";
 const ZOHO_MAIL_SCOPES = ["ZohoMail.accounts.READ", "ZohoMail.messages.CREATE"];
+const CHANGE_PASSWORD_ROUTE_VERSION = "2026-06-password-persistence-v2";
 const getAppBaseUrl = (req: AuthRequest) => {
   const appBaseUrl = process.env.APP_BASE_URL?.trim();
   if (appBaseUrl) return trimTrailingSlashes(appBaseUrl);
@@ -352,47 +353,69 @@ export async function registerRoutes(
 
   // POST /api/auth/change-password - Change password on first login
   app.post("/api/auth/change-password", authMiddleware, async (req: AuthRequest, res) => {
+    const auditBase = {
+      routeVersion: CHANGE_PASSWORD_ROUTE_VERSION,
+      userId: req.user?.id ?? null,
+      email: req.user?.email ?? null,
+    };
+    const logChangePasswordAudit = (event: string, details: Record<string, unknown> = {}) => {
+      console.info("[change-password]", { ...auditBase, event, ...details });
+    };
+
     try {
       const { currentPassword, newPassword, confirmPassword } = req.body;
+      logChangePasswordAudit("route_hit");
       
       if (!currentPassword || !newPassword) {
+        logChangePasswordAudit("validation_failed", { reason: "missing_required_fields" });
         return res.status(400).json({ error: "Current and new passwords are required" });
       }
 
       if (String(newPassword).length < 8) {
+        logChangePasswordAudit("validation_failed", { reason: "new_password_too_short" });
         return res.status(400).json({ error: "New password must be at least 8 characters" });
       }
 
       if (confirmPassword !== undefined && newPassword !== confirmPassword) {
+        logChangePasswordAudit("validation_failed", { reason: "password_confirmation_mismatch" });
         return res.status(400).json({ error: "New password and confirmation do not match" });
       }
 
       if (!req.user) {
+        logChangePasswordAudit("auth_failed", { reason: "missing_authenticated_user" });
         return res.status(401).json({ error: "Unauthorized" });
       }
 
       // Get user from database
       const user = await storage.getUser(req.user.id);
       if (!user || !user.passwordHash) {
+        logChangePasswordAudit("user_lookup_failed", { userFound: Boolean(user) });
         return res.status(404).json({ error: "User not found" });
       }
 
       // Verify current password
       const isValid = await comparePassword(currentPassword, user.passwordHash);
+      logChangePasswordAudit("current_password_checked", { currentPasswordValid: isValid });
       if (!isValid) {
         return res.status(400).json({ error: "Current password is incorrect" });
       }
 
       const isSamePassword = await comparePassword(newPassword, user.passwordHash);
       if (isSamePassword) {
+        logChangePasswordAudit("validation_failed", { reason: "new_password_matches_current" });
         return res.status(400).json({ error: "New password must be different from the current password" });
       }
 
       // Hash new password and update user
       const hashedNewPassword = await hashPassword(newPassword);
+      logChangePasswordAudit("db_update_attempted");
       const updatedUser = await storage.updateUser(req.user.id, {
         passwordHash: hashedNewPassword,
         mustChangePassword: false,
+      });
+      logChangePasswordAudit("db_update_completed", {
+        updateReturnedUser: Boolean(updatedUser),
+        affectedRowCount: updatedUser ? 1 : 0,
       });
 
       if (!updatedUser) {
@@ -400,6 +423,10 @@ export async function registerRoutes(
       }
 
       const verifiedUser = await storage.getUser(req.user.id);
+      logChangePasswordAudit("user_reread_after_update", {
+        rereadUserFound: Boolean(verifiedUser),
+        mustChangePasswordFalse: verifiedUser?.mustChangePassword === false,
+      });
       if (!verifiedUser || !verifiedUser.passwordHash) {
         return res.status(500).json({ error: "Password update could not be verified" });
       }
@@ -407,6 +434,12 @@ export async function registerRoutes(
       const newPasswordWorks = await comparePassword(newPassword, verifiedUser.passwordHash);
       const oldPasswordStillWorks = await comparePassword(currentPassword, verifiedUser.passwordHash);
       const passwordHashChanged = verifiedUser.passwordHash !== user.passwordHash;
+      logChangePasswordAudit("password_update_verified", {
+        passwordHashChanged,
+        newPasswordWorks,
+        oldPasswordStillWorks,
+        mustChangePasswordFalse: verifiedUser.mustChangePassword === false,
+      });
       const passwordChangePersisted =
         passwordHashChanged &&
         newPasswordWorks &&
@@ -414,6 +447,7 @@ export async function registerRoutes(
         verifiedUser.mustChangePassword === false;
 
       if (!passwordChangePersisted) {
+        logChangePasswordAudit("persistence_verification_failed");
         return res.status(500).json({ error: "Password update was not persisted" });
       }
 
@@ -427,10 +461,12 @@ export async function registerRoutes(
 
       res.json({
         success: true,
+        changePasswordRouteVersion: CHANGE_PASSWORD_ROUTE_VERSION,
         token: generateToken(authUser),
         user: authUser,
       });
     } catch (error) {
+      logChangePasswordAudit("unexpected_error");
       console.error("Change password error:", error);
       res.status(500).json({ error: "Failed to change password" });
     }
