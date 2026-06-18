@@ -583,10 +583,14 @@ export async function registerRoutes(
         });
       }
 
+      const senderProfile = await storage.getUser(user.id);
       const emailHtml = renderAdvisorEmailHtml({
         body,
         senderName: senderIdentity.fromName,
         senderEmail: senderIdentity.fromEmail,
+        signatureName: senderProfile?.signatureName || null,
+        jobTitle: senderProfile?.jobTitle || null,
+        mobilePhone: senderProfile?.mobilePhone || null,
         logoUrl: buildAdvisorEmailLogoUrl(req),
       });
 
@@ -904,6 +908,15 @@ export async function registerRoutes(
   });
 
   // ==================== EMPLOYEES (ADMIN ONLY) ====================
+  const normalizeOptionalEmployeeText = (value: unknown) => {
+    if (value === undefined) return undefined;
+    const text = String(value || "").trim();
+    return text || null;
+  };
+
+  const isValidOptionalMobilePhone = (value: string | null | undefined) =>
+    !value || /^[+\d\s().-]+$/.test(value);
+
   app.get("/api/employees", authMiddleware, requireAdmin, async (req, res) => {
     try {
       const users = await storage.getUsers();
@@ -916,6 +929,9 @@ export async function registerRoutes(
   app.post("/api/employees", authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
     try {
       const { fullName, localPart, role, tempPassword } = req.body;
+      const signatureName = normalizeOptionalEmployeeText(req.body.signatureName);
+      const jobTitle = normalizeOptionalEmployeeText(req.body.jobTitle);
+      const mobilePhone = normalizeOptionalEmployeeText(req.body.mobilePhone);
       
       if (!fullName || !localPart || !role || !tempPassword) {
         return res.status(400).json({ error: "fullName, localPart, role, and tempPassword are required" });
@@ -923,6 +939,9 @@ export async function registerRoutes(
       
       if (!["admin", "pm", "ra", "finance"].includes(role)) {
         return res.status(400).json({ error: "Invalid role. Must be admin, pm, ra, or finance" });
+      }
+      if (!isValidOptionalMobilePhone(mobilePhone)) {
+        return res.status(400).json({ error: "Mobile phone may contain only +, spaces, numbers, parentheses, periods, and hyphens" });
       }
       
       const email = `${localPart.toLowerCase()}@miraeconnext.com`;
@@ -940,6 +959,9 @@ export async function registerRoutes(
         email,
         passwordHash,
         role,
+        signatureName,
+        jobTitle,
+        mobilePhone,
         isActive: true,
         mustChangePassword: true, // Force password change on first login
       });
@@ -967,6 +989,15 @@ export async function registerRoutes(
         updateData.role = role;
       }
       if (isActive !== undefined) updateData.isActive = isActive;
+      if (req.body.signatureName !== undefined) updateData.signatureName = normalizeOptionalEmployeeText(req.body.signatureName);
+      if (req.body.jobTitle !== undefined) updateData.jobTitle = normalizeOptionalEmployeeText(req.body.jobTitle);
+      if (req.body.mobilePhone !== undefined) {
+        const mobilePhone = normalizeOptionalEmployeeText(req.body.mobilePhone);
+        if (!isValidOptionalMobilePhone(mobilePhone)) {
+          return res.status(400).json({ error: "Mobile phone may contain only +, spaces, numbers, parentheses, periods, and hyphens" });
+        }
+        updateData.mobilePhone = mobilePhone;
+      }
       
       const user = await storage.updateUser(id, updateData);
       if (!user) {

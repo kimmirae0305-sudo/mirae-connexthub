@@ -2,11 +2,13 @@ type AdvisorEmailRenderOptions = {
   body: string;
   senderName?: string | null;
   senderEmail?: string | null;
+  signatureName?: string | null;
+  jobTitle?: string | null;
+  mobilePhone?: string | null;
   logoUrl?: string | null;
 };
 
 const BRAND_NAME = "Mirae Connext";
-const MIRAE_EMAIL = "mirae@miraeconnext.com";
 const WEBSITE_URL = "http://www.miraeconnext.com";
 const WEBSITE_LABEL = "www.miraeconnext.com";
 
@@ -37,17 +39,6 @@ function getSenderSignatureProfile(senderName?: string | null, senderEmail?: str
   const email = normalizeEmail(senderEmail);
   const name = String(senderName || "").trim();
   const senderFirstName = getSenderFirstName(name, email);
-  const isMirae = email === MIRAE_EMAIL || /^mirae\b/i.test(name);
-
-  if (isMirae) {
-    return {
-      closingName: "Mirae",
-      displayName: "Mirae K.",
-      title: `Co Founder & COO | ${BRAND_NAME}`,
-      mobile: "+55 11 95500 7861",
-      email: MIRAE_EMAIL,
-    };
-  }
 
   return {
     closingName: senderFirstName || BRAND_NAME,
@@ -80,17 +71,21 @@ function renderBodyHtml(body: string) {
 
 function renderFooterHtml(options: AdvisorEmailRenderOptions) {
   const profile = getSenderSignatureProfile(options.senderName, options.senderEmail);
+  const signatureName = String(options.signatureName || "").trim();
+  const jobTitle = String(options.jobTitle || "").trim();
+  const mobilePhone = String(options.mobilePhone || "").trim();
+  const displayName = signatureName || profile.displayName;
   const logoHtml = options.logoUrl
     ? `<img src="${escapeHtml(options.logoUrl)}" alt="${BRAND_NAME}" width="132" style="display:block;border:0;outline:none;text-decoration:none;width:132px;max-width:132px;height:auto;" />`
     : `<div style="font-size:18px;line-height:20px;font-weight:700;color:#111827;margin:0;">${BRAND_NAME}</div>`;
   const emailHtml = profile.email
     ? `<div style="margin:0;">Email: <a href="mailto:${escapeHtml(profile.email)}" style="color:#2563eb;text-decoration:none;">${escapeHtml(profile.email)}</a></div>`
     : "";
-  const mobileHtml = profile.mobile
-    ? `<div style="margin:0;">Mobile: ${escapeHtml(profile.mobile)}</div>`
+  const mobileHtml = mobilePhone
+    ? `<div style="margin:0;">Mobile: ${escapeHtml(mobilePhone)}</div>`
     : "";
-  const titleHtml = profile.title
-    ? `<div style="margin:0;color:#374151;">${escapeHtml(profile.title)}</div>`
+  const titleHtml = jobTitle
+    ? `<div style="margin:0;color:#374151;">${escapeHtml(jobTitle)}</div>`
     : "";
 
   return `
@@ -105,7 +100,7 @@ function renderFooterHtml(options: AdvisorEmailRenderOptions) {
             ${logoHtml}
           </td>
           <td style="vertical-align:top;padding:0 0 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:17px;color:#4b5563;">
-            <div style="margin:0 0 2px 0;font-size:13px;line-height:18px;font-weight:700;color:#111827;">${escapeHtml(profile.displayName)}</div>
+            <div style="margin:0 0 2px 0;font-size:13px;line-height:18px;font-weight:700;color:#111827;">${escapeHtml(displayName)}</div>
             ${titleHtml}
             ${mobileHtml}
             ${emailHtml}
