@@ -586,6 +586,16 @@ export async function registerRoutes(
       const senderProfile = await storage.getUser(user.id);
       const signatureSenderName = senderProfile?.fullName || senderIdentity.fromName;
       const signatureSenderEmail = senderProfile?.email || senderIdentity.fromEmail;
+      console.info("[advisor-email-signature-profile]", {
+        senderUserId: user.id,
+        hasSenderProfile: Boolean(senderProfile),
+        hasSignatureName: Boolean(senderProfile?.signatureName),
+        hasJobTitle: Boolean(senderProfile?.jobTitle),
+        hasMobilePhone: Boolean(senderProfile?.mobilePhone),
+        signatureNameLength: String(senderProfile?.signatureName || "").length,
+        jobTitleLength: String(senderProfile?.jobTitle || "").length,
+        mobilePhoneLength: String(senderProfile?.mobilePhone || "").length,
+      });
       const emailHtml = renderAdvisorEmailHtml({
         body,
         senderName: signatureSenderName,
