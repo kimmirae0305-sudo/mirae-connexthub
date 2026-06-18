@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+﻿import { useEffect, useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation, Link } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
@@ -295,131 +295,76 @@ function getAdvisorEmailModalTitle(mode?: AdvisorEmailMode | null) {
   return "Initial Invite";
 }
 
+function getFirstName(value?: string | null) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const base = text.includes("@") ? text.split("@")[0] : text;
+  return base.split(/[\s._-]+/)[0] || "";
+}
+
+function getAdvisorGreeting(advisorName: string, language: AdvisorEmailLanguage) {
+  const advisorFirstName = getFirstName(advisorName);
+  if (language === "pt") return advisorFirstName ? `Ola ${advisorFirstName},` : "Ola,";
+  if (language === "es") return advisorFirstName ? `Hola ${advisorFirstName},` : "Hola,";
+  return advisorFirstName ? `Hi ${advisorFirstName},` : "Hello,";
+}
+
 function getAdvisorEmailTemplate(
   mode: AdvisorEmailMode,
   language: AdvisorEmailLanguage,
   advisorName: string,
-  reviewLink: string
+  reviewLink: string,
+  senderName?: string | null
 ) {
-  const safeName = advisorName.trim() || "Advisor";
+  const senderFirstName = getFirstName(senderName) || "Mirae";
+  const greeting = getAdvisorGreeting(advisorName, language);
 
   if (mode !== "follow_up") {
-    return getAdvisorInviteEmailTemplate(language, advisorName, reviewLink);
-  }
+    if (language === "pt") {
+      return {
+        subject: "Mirae Connext | Oportunidade de consulta especializada",
+        body: `${greeting}
 
-  if (language === "pt") {
+Aqui e ${senderFirstName} da Mirae Connext.
+
+Estamos avaliando uma possivel oportunidade de consulta especializada que pode ser relevante para a sua experiencia profissional.
+
+Voce poderia revisar o resumo e responder a algumas perguntas rapidas de qualificacao por meio do link seguro abaixo?
+
+${reviewLink}
+
+Suas respostas nos ajudarao a confirmar se a consulta e adequada antes de avancarmos.
+
+Esta e uma etapa inicial de avaliacao e ainda nao representa uma consulta confirmada.`,
+      };
+    }
+
+    if (language === "es") {
+      return {
+        subject: "Mirae Connext | Oportunidad de consulta especializada",
+        body: `${greeting}
+
+Soy ${senderFirstName} de Mirae Connext.
+
+Estamos evaluando una posible oportunidad de consulta especializada que podria ser relevante para su experiencia profesional.
+
+Podria revisar el resumen y responder algunas preguntas breves de evaluacion a traves del enlace seguro a continuacion?
+
+${reviewLink}
+
+Sus respuestas nos ayudaran a confirmar si la consulta es adecuada antes de avanzar.
+
+Esta es una etapa inicial de evaluacion y aun no representa una consulta confirmada.`,
+      };
+    }
+
     return {
-      subject: "Acompanhamento: convite para consulta especializada da Mirae Connext",
-      body: `Prezado(a) ${safeName},
+      subject: "Mirae Connext | Expert consultation opportunity",
+      body: `${greeting}
 
-Espero que esteja bem.
+This is ${senderFirstName} from Mirae Connext.
 
-Gostaria de fazer um breve acompanhamento sobre o convite da Mirae Connext para revisar uma possível oportunidade de consulta especializada.
-
-Quando puder, por favor revise o resumo e responda às perguntas rápidas pelo link seguro abaixo:
-
-${reviewLink}
-
-Obrigado pela sua atenção.
-
-Atenciosamente,
-Equipe Mirae Connext`,
-    };
-  }
-
-  if (language === "es") {
-    return {
-      subject: "Seguimiento: invitación de Mirae Connext para consulta especializada",
-      body: `Estimado(a) ${safeName},
-
-Espero que se encuentre bien.
-
-Quisiera hacer un breve seguimiento sobre la invitación de Mirae Connext para revisar una posible oportunidad de consulta especializada.
-
-Cuando pueda, por favor revise el resumen y responda las preguntas breves a través del enlace seguro a continuación:
-
-${reviewLink}
-
-Gracias por su atención.
-
-Atentamente,
-Equipo de Mirae Connext`,
-    };
-  }
-
-  return {
-    subject: "Follow-up: Expert consultation invitation from Mirae Connext",
-    body: `Dear ${safeName},
-
-I hope you are doing well.
-
-I wanted to follow up on Mirae Connext's invitation to review a potential expert consultation opportunity.
-
-When you have a moment, please review the brief and answer the short screening questions through the secure link below:
-
-${reviewLink}
-
-Thank you for your time.
-
-Best regards,
-Mirae Connext Team`,
-  };
-}
-
-function getAdvisorInviteEmailTemplate(language: AdvisorEmailLanguage, advisorName: string, reviewLink: string) {
-  const safeName = advisorName.trim() || "Advisor";
-
-  if (language === "pt") {
-    return {
-      subject: "Mirae Connext | Oportunidade de consulta especializada",
-      body: `Prezado(a) ${safeName},
-
-Espero que esteja bem.
-
-A Mirae Connext está avaliando uma possível oportunidade de consulta especializada que pode ser relevante para a sua experiência profissional.
-
-Você poderia, por gentileza, revisar o resumo e responder a algumas perguntas rápidas de qualificação por meio do link seguro abaixo?
-
-${reviewLink}
-
-Suas respostas nos ajudarão a confirmar se a consulta é adequada antes de avançarmos.
-
-Por favor, observe que esta é uma etapa inicial de avaliação e ainda não representa uma consulta confirmada.
-
-Atenciosamente,
-Equipe Mirae Connext`,
-    };
-  }
-
-  if (language === "es") {
-    return {
-      subject: "Mirae Connext | Oportunidad de consulta especializada",
-      body: `Estimado(a) ${safeName},
-
-Espero que se encuentre bien.
-
-Mirae Connext está evaluando una posible oportunidad de consulta especializada que podría ser relevante para su experiencia profesional.
-
-¿Podría revisar el resumen y responder algunas preguntas breves de evaluación a través del enlace seguro a continuación?
-
-${reviewLink}
-
-Sus respuestas nos ayudarán a confirmar si la consulta es adecuada antes de avanzar.
-
-Tenga en cuenta que esta es una etapa inicial de evaluación y aún no representa una consulta confirmada.
-
-Atentamente,
-Equipo de Mirae Connext`,
-    };
-  }
-
-  return {
-    subject: "Mirae Connext | Expert consultation opportunity",
-    body: `Dear ${safeName},
-
-I hope you are doing well.
-
-Mirae Connext is currently reviewing a potential expert consultation opportunity that may be relevant to your professional background.
+We are currently reviewing a potential expert consultation opportunity that may be relevant to your professional background.
 
 Could you please review the brief and answer a few short screening questions through the secure link below?
 
@@ -427,13 +372,59 @@ ${reviewLink}
 
 Your responses will help us confirm whether the consultation is a good fit before moving forward.
 
-Please note that this is an initial review step and does not yet represent a confirmed consultation.
+This is an initial review step and does not yet represent a confirmed consultation.`,
+    };
+  }
 
-Best regards,
-Mirae Connext Team`,
+  if (language === "pt") {
+    return {
+      subject: "Acompanhamento: convite para consulta especializada da Mirae Connext",
+      body: `${greeting}
+
+Aqui e ${senderFirstName} da Mirae Connext.
+
+Gostaria de fazer um breve acompanhamento sobre o convite da Mirae Connext para revisar uma possivel oportunidade de consulta especializada.
+
+Quando puder, por favor revise o resumo e responda as perguntas rapidas pelo link seguro abaixo:
+
+${reviewLink}
+
+Obrigado pela sua atencao.`,
+    };
+  }
+
+  if (language === "es") {
+    return {
+      subject: "Seguimiento: invitacion de Mirae Connext para consulta especializada",
+      body: `${greeting}
+
+Soy ${senderFirstName} de Mirae Connext.
+
+Quisiera hacer un breve seguimiento sobre la invitacion de Mirae Connext para revisar una posible oportunidad de consulta especializada.
+
+Cuando pueda, por favor revise el resumen y responda las preguntas breves a traves del enlace seguro a continuacion:
+
+${reviewLink}
+
+Gracias por su atencion.`,
+    };
+  }
+
+  return {
+    subject: "Follow-up: Expert consultation invitation from Mirae Connext",
+    body: `${greeting}
+
+This is ${senderFirstName} from Mirae Connext.
+
+I wanted to follow up on Mirae Connext's invitation to review a potential expert consultation opportunity.
+
+When you have a moment, please review the brief and answer the short screening questions through the secure link below:
+
+${reviewLink}
+
+Thank you for your time.`,
   };
 }
-
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
@@ -2155,7 +2146,8 @@ export default function ProjectDetail() {
     const advisorEmail = pe.expert?.email || "";
     const invitation = advisorInviteByExpertId.get(pe.expertId);
     const initialMode = requestedMode || getDefaultAdvisorEmailMode(invitation);
-    const initialTemplate = getAdvisorEmailTemplate(initialMode, "en", advisorName, "");
+    const senderTemplateName = senderIdentity?.fromName || senderIdentity?.fromEmail;
+    const initialTemplate = getAdvisorEmailTemplate(initialMode, "en", advisorName, "", senderTemplateName);
 
     setAdvisorEmailPreview({
       invitationId: null,
@@ -2180,7 +2172,7 @@ export default function ProjectDetail() {
       setAdvisorEmailPreview((current) => {
         const language = current?.language || "en";
         const emailMode = requestedMode || current?.emailMode || getDefaultAdvisorEmailMode(advisorInviteByExpertId.get(pe.expertId));
-        const template = getAdvisorEmailTemplate(emailMode, language, advisorName, linkData.publicReviewUrl);
+        const template = getAdvisorEmailTemplate(emailMode, language, advisorName, linkData.publicReviewUrl, senderTemplateName);
         return {
           invitationId: linkData.invitationId,
           expertId: linkData.expertId,
@@ -2231,7 +2223,7 @@ export default function ProjectDetail() {
   const handleAdvisorEmailLanguageChange = (language: AdvisorEmailLanguage) => {
     setAdvisorEmailPreview((current) => {
       if (!current) return current;
-      const template = getAdvisorEmailTemplate(current.emailMode, language, current.advisorName, current.publicReviewUrl);
+      const template = getAdvisorEmailTemplate(current.emailMode, language, current.advisorName, current.publicReviewUrl, senderIdentity?.fromName || senderIdentity?.fromEmail);
       return {
         ...current,
         language,
@@ -2244,7 +2236,7 @@ export default function ProjectDetail() {
   const handleAdvisorEmailModeChange = (emailMode: AdvisorEmailMode) => {
     setAdvisorEmailPreview((current) => {
       if (!current) return current;
-      const template = getAdvisorEmailTemplate(emailMode, current.language, current.advisorName, current.publicReviewUrl);
+      const template = getAdvisorEmailTemplate(emailMode, current.language, current.advisorName, current.publicReviewUrl, senderIdentity?.fromName || senderIdentity?.fromEmail);
       return {
         ...current,
         emailMode,
@@ -4951,7 +4943,7 @@ export default function ProjectDetail() {
               </div>
 
               <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                Emails are sent through the connected Zoho Mail account. Please review the subject and body before sending.
+                Emails are sent through the connected Zoho Mail account with a Mirae Connext branded footer/signature added at send time. Please review the subject and core message before sending.
               </div>
             </div>
           ) : (

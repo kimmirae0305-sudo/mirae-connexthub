@@ -40,6 +40,7 @@ import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
 import { resolveEmailSenderIdentity } from "./emailSenderIdentity";
 import { decryptEmailToken, encryptEmailToken, getEmailTokenEncryptionKeyStatus } from "./emailTokenCrypto";
+import { renderAdvisorEmailHtml } from "./advisorEmailTemplate";
 import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
@@ -67,6 +68,10 @@ const getInviteBaseUrl = (req: AuthRequest) => {
 const buildPublicRecruitmentUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/r/${token}`;
 const buildPublicAdvisorProjectReviewUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/advisor-project-review/${token}`;
+const getEmailAssetBaseUrl = (req: AuthRequest) =>
+  trimTrailingSlashes(process.env.EMAIL_ASSET_BASE_URL?.trim() || getRequestBaseUrl(req));
+const buildAdvisorEmailLogoUrl = (req: AuthRequest) =>
+  `${getEmailAssetBaseUrl(req)}/email-assets/mirae-connext-logo.png`;
 const ZOHO_MAIL_PROVIDER = "zoho_mail";
 const ZOHO_MAIL_SCOPES = ["ZohoMail.accounts.READ", "ZohoMail.messages.CREATE"];
 const CHANGE_PASSWORD_ROUTE_VERSION = "2026-06-password-persistence-v2";
@@ -232,6 +237,16 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  app.get("/email-assets/mirae-connext-logo.png", (_req, res) => {
+    const logoPath = path.resolve(process.cwd(), "attached_assets", "Logo_1764384177823.png");
+    if (!fs.existsSync(logoPath)) {
+      return res.status(404).send("Not found");
+    }
+
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.sendFile(logoPath);
+  });
+
   // ==================== AUTH ROUTES (PUBLIC) ====================
   app.post("/api/auth/login", loginHandler);
   app.get("/api/auth/me", authMiddleware, getMeHandler);
@@ -568,6 +583,13 @@ export async function registerRoutes(
         });
       }
 
+      const emailHtml = renderAdvisorEmailHtml({
+        body,
+        senderName: senderIdentity.fromName,
+        senderEmail: senderIdentity.fromEmail,
+        logoUrl: buildAdvisorEmailLogoUrl(req),
+      });
+
       const zohoRes = await fetch(`${config.mailApiBaseUrl}/api/accounts/${encodeURIComponent(accountId)}/messages`, {
         method: "POST",
         headers: {
@@ -578,8 +600,8 @@ export async function registerRoutes(
           fromAddress: senderIdentity.fromEmail,
           toAddress: toEmail,
           subject,
-          content: body,
-          mailFormat: "plaintext",
+          content: emailHtml,
+          mailFormat: "html",
         }),
       });
       const zohoPayload: any = await zohoRes.json().catch(() => ({}));
