@@ -142,6 +142,72 @@ const normalizeEmailForMatch = (email?: string | null) => String(email || "").tr
 const isSingleRecipientEmail = (email: string) =>
   Boolean(email) && !email.includes(",") && !email.includes(";") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const advisorEmailTypes = new Set(["initial_invite", "follow_up", "resend_invite"]);
+const SELECTED_ADVISOR_SEND_LIMIT = 20;
+const getFirstNameForEmail = (name?: string | null) => {
+  const firstName = String(name || "").trim().split(/\s+/)[0];
+  return firstName || "";
+};
+const buildSelectedAdvisorEmailContent = ({
+  emailType,
+  advisorName,
+  reviewUrl,
+  senderName,
+}: {
+  emailType: "initial_invite" | "follow_up";
+  advisorName?: string | null;
+  reviewUrl: string;
+  senderName?: string | null;
+}) => {
+  const advisorFirstName = getFirstNameForEmail(advisorName);
+  const senderFirstName = getFirstNameForEmail(senderName) || "Mirae Connext";
+  const greeting = advisorFirstName ? `Hi ${advisorFirstName},` : "Hello,";
+  const intro = `This is ${senderFirstName} from Mirae Connext.`;
+  const closing = `Best regards,\n${senderFirstName}`;
+
+  if (emailType === "follow_up") {
+    return {
+      subject: "Follow-up: Expert consultation invitation from Mirae Connext",
+      body: [
+        greeting,
+        "",
+        intro,
+        "",
+        "I wanted to follow up on the expert consultation opportunity we shared with you.",
+        "",
+        "When convenient, could you please review the brief and answer the short screening questions through the secure link below?",
+        "",
+        reviewUrl,
+        "",
+        "Your responses will help us confirm whether the consultation is a good fit before moving forward.",
+        "",
+        "Thank you.",
+        "",
+        closing,
+      ].join("\n"),
+    };
+  }
+
+  return {
+    subject: "Mirae Connext | Expert consultation opportunity",
+    body: [
+      greeting,
+      "",
+      intro,
+      "",
+      "Mirae Connext is currently reviewing a potential expert consultation opportunity that may be relevant to your professional background.",
+      "",
+      "Could you please review the brief and answer a few short screening questions through the secure link below?",
+      "",
+      reviewUrl,
+      "",
+      "Your responses will help us confirm whether the consultation is a good fit before moving forward.",
+      "",
+      "Please note that this is an initial review step and does not yet represent a confirmed consultation.",
+      "",
+      closing,
+    ].join("\n"),
+  };
+};
 const getZohoProviderMessageId = (payload: any) =>
   String(
     payload?.data?.messageId ||
@@ -677,6 +743,331 @@ export async function registerRoutes(
       }
       console.error("Error sending advisor invitation through Zoho Mail:", error);
       res.status(500).json({ error: "Failed to send advisor invitation email" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/advisor-invitations/send-selected", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const user = req.user!;
+      const projectId = Number(req.params.projectId);
+      const senderIdentity = resolveEmailSenderIdentity(user);
+      if (!senderIdentity.isValid) {
+        return res.status(400).json({
+          error: senderIdentity.reason || "Sender identity is not configured for Mirae Connext email sending.",
+        });
+      }
+
+      const forbiddenFields = ["toEmail", "toEmails", "recipients", "cc", "bcc", "attachments", "subject", "body"].filter((field) =>
+        Object.prototype.hasOwnProperty.call(req.body || {}, field)
+      );
+      if (forbiddenFields.length > 0) {
+        return res.status(400).json({
+          error: "Selected advisor sending only accepts advisor invitation ids. Recipients, CC, BCC, attachments, subject, and body cannot be supplied.",
+        });
+      }
+
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        return res.status(400).json({ error: "Invalid project id." });
+      }
+
+      const invitationIds = Array.from(
+        new Set(
+          (Array.isArray(req.body?.invitationIds) ? req.body.invitationIds : [])
+            .map((invitationId) => Number(invitationId))
+            .filter((invitationId) => Number.isInteger(invitationId) && invitationId > 0)
+        )
+      );
+
+      if (invitationIds.length === 0) {
+        return res.status(400).json({ error: "Select at least one advisor invitation." });
+      }
+      if (invitationIds.length > SELECTED_ADVISOR_SEND_LIMIT) {
+        return res.status(400).json({
+          error: `Selected advisor sending is limited to ${SELECTED_ADVISOR_SEND_LIMIT} advisors at a time.`,
+        });
+      }
+
+      const config = getZohoOAuthConfig();
+      if (!config.isConfigured) {
+        return res.status(503).json({ error: "Zoho OAuth is not configured." });
+      }
+
+      const [project, projectAssignments, senderProfile] = await Promise.all([
+        storage.getProject(projectId),
+        storage.getProjectExpertsByProject(projectId),
+        storage.getUser(user.id),
+      ]);
+
+      if (!project) {
+        return res.status(404).json({ error: "Project not found." });
+      }
+      if (!canManageProjectAdvisorInvitations(project, user)) {
+        return res.status(403).json({ error: "Access denied: You cannot send advisor invitations for this project." });
+      }
+
+      const connection = await storage.getUserEmailConnection(user.id, ZOHO_MAIL_PROVIDER);
+      if (!connection || connection.status !== "connected") {
+        return res.status(403).json({ error: "Connect your Zoho Mail account before sending advisor invitations." });
+      }
+      if (normalizeEmailForMatch(connection.providerEmail) !== senderIdentity.fromEmail) {
+        return res.status(403).json({ error: "Connected Zoho Mail account does not match your CRM sender identity." });
+      }
+
+      const accessToken = await getZohoAccessTokenForConnection(connection, config);
+      let accountId = String(connection.providerAccountId || "").trim();
+      if (!accountId) {
+        const latestConnection = await storage.getUserEmailConnection(user.id, ZOHO_MAIL_PROVIDER) || connection;
+        const accountsRes = await fetch(`${config.mailApiBaseUrl}/api/accounts`, {
+          headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+        });
+        const accountsPayload: any = await accountsRes.json().catch(() => ({}));
+        if (!accountsRes.ok) {
+          return res.status(502).json({ error: "Unable to verify Zoho Mail account before sending." });
+        }
+        const matchingAccount = extractZohoAccounts(accountsPayload).find(
+          (account) => getZohoAccountEmail(account) === senderIdentity.fromEmail
+        );
+        accountId = getZohoAccountId(matchingAccount);
+        if (!accountId) {
+          return res.status(403).json({ error: "Connected Zoho Mail account does not match your CRM sender identity." });
+        }
+        await storage.upsertUserEmailConnection({
+          userId: latestConnection.userId,
+          provider: latestConnection.provider || ZOHO_MAIL_PROVIDER,
+          providerEmail: senderIdentity.fromEmail,
+          providerAccountId: accountId,
+          providerUserId: String(matchingAccount?.userId || matchingAccount?.zohoUserId || latestConnection.providerUserId || ""),
+          providerOrgId: String(matchingAccount?.organizationId || matchingAccount?.orgId || latestConnection.providerOrgId || ""),
+          encryptedRefreshToken: latestConnection.encryptedRefreshToken,
+          encryptedAccessToken: latestConnection.encryptedAccessToken,
+          accessTokenExpiresAt: latestConnection.accessTokenExpiresAt,
+          scopes: latestConnection.scopes || ZOHO_MAIL_SCOPES.join(" "),
+          status: "connected",
+          lastConnectedAt: latestConnection.lastConnectedAt || new Date(),
+          lastValidatedAt: new Date(),
+          revokedAt: null,
+        });
+      }
+
+      const attachedExpertIds = new Set(projectAssignments.map((assignment) => assignment.expertId));
+      const senderName = senderProfile?.fullName || senderIdentity.fromName;
+      const senderEmail = senderProfile?.email || senderIdentity.fromEmail;
+      const logoUrl = buildAdvisorEmailLogoUrl(req);
+      const results: Array<{
+        invitationId: number;
+        expertId?: number | null;
+        advisorName?: string | null;
+        advisorEmail?: string | null;
+        status: "sent" | "skipped" | "failed";
+        emailType?: "initial_invite" | "follow_up" | null;
+        message: string;
+      }> = [];
+
+      let initialInviteCount = 0;
+      let followUpCount = 0;
+      let submittedSkippedCount = 0;
+      let ineligibleSkippedCount = 0;
+
+      for (const invitationId of invitationIds) {
+        const invitation = await storage.getAdvisorProjectInvitation(invitationId);
+        if (!invitation || invitation.projectId !== projectId) {
+          ineligibleSkippedCount += 1;
+          results.push({
+            invitationId,
+            status: "failed",
+            emailType: null,
+            message: "Failed: missing invitation/magic link",
+          });
+          continue;
+        }
+
+        const expert = await storage.getExpert(invitation.expertId);
+        const advisorName = expert?.name || `Expert #${invitation.expertId}`;
+        const invitationEmail = normalizeEmailForMatch(invitation.email);
+        const expertEmail = normalizeEmailForMatch(expert?.email);
+        const toEmail = invitationEmail || expertEmail;
+        const currentStatus = String(invitation.status || "not_sent").toLowerCase();
+
+        if (!attachedExpertIds.has(invitation.expertId) || !expert) {
+          ineligibleSkippedCount += 1;
+          results.push({
+            invitationId,
+            expertId: invitation.expertId,
+            advisorName,
+            advisorEmail: toEmail || null,
+            status: "failed",
+            emailType: null,
+            message: "Failed: missing invitation/magic link",
+          });
+          continue;
+        }
+
+        if (currentStatus === "submitted") {
+          submittedSkippedCount += 1;
+          results.push({
+            invitationId,
+            expertId: invitation.expertId,
+            advisorName,
+            advisorEmail: toEmail || null,
+            status: "skipped",
+            emailType: null,
+            message: "Skipped: already submitted",
+          });
+          continue;
+        }
+
+        if (!isSingleRecipientEmail(toEmail) || (invitationEmail && expertEmail && invitationEmail !== expertEmail)) {
+          ineligibleSkippedCount += 1;
+          results.push({
+            invitationId,
+            expertId: invitation.expertId,
+            advisorName,
+            advisorEmail: toEmail || null,
+            status: "skipped",
+            emailType: null,
+            message: "Skipped: invalid email",
+          });
+          continue;
+        }
+
+        const expiresAt = invitation.expiresAt ? new Date(invitation.expiresAt) : null;
+        const hasValidToken = Boolean(
+          invitation.token &&
+          expiresAt &&
+          !Number.isNaN(expiresAt.getTime()) &&
+          expiresAt > new Date()
+        );
+        if (!hasValidToken) {
+          ineligibleSkippedCount += 1;
+          results.push({
+            invitationId,
+            expertId: invitation.expertId,
+            advisorName,
+            advisorEmail: toEmail,
+            status: "failed",
+            emailType: null,
+            message: "Failed: missing invitation/magic link",
+          });
+          continue;
+        }
+
+        const emailType: "initial_invite" | "follow_up" =
+          currentStatus === "sent" || invitation.sentAt ? "follow_up" : "initial_invite";
+        if (emailType === "follow_up") followUpCount += 1;
+        else initialInviteCount += 1;
+
+        const reviewUrl = buildPublicAdvisorProjectReviewUrl(invitation.token!, req);
+        const { subject, body } = buildSelectedAdvisorEmailContent({
+          emailType,
+          advisorName,
+          reviewUrl,
+          senderName,
+        });
+        const emailHtml = renderAdvisorEmailHtml({
+          body,
+          senderName,
+          senderEmail,
+          signatureName: senderProfile?.signatureName || null,
+          jobTitle: senderProfile?.jobTitle || null,
+          mobilePhone: senderProfile?.mobilePhone || null,
+          logoUrl,
+        });
+
+        const zohoRes = await fetch(`${config.mailApiBaseUrl}/api/accounts/${encodeURIComponent(accountId)}/messages`, {
+          method: "POST",
+          headers: {
+            Authorization: `Zoho-oauthtoken ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            fromAddress: senderIdentity.fromEmail,
+            toAddress: toEmail,
+            subject,
+            content: emailHtml,
+            mailFormat: "html",
+          }),
+        });
+        const zohoPayload: any = await zohoRes.json().catch(() => ({}));
+        if (!zohoRes.ok) {
+          console.warn("[zoho-send-selected-advisor-invite]", {
+            provider: "zoho",
+            userId: user.id,
+            projectId,
+            invitationId,
+            status: zohoRes.status,
+          });
+          results.push({
+            invitationId,
+            expertId: invitation.expertId,
+            advisorName,
+            advisorEmail: toEmail,
+            status: "failed",
+            emailType,
+            message: "Failed: Zoho send error",
+          });
+          continue;
+        }
+
+        const sentAt = new Date();
+        const providerMessageId = getZohoProviderMessageId(zohoPayload) || null;
+        await storage.createAdvisorProjectInvitationEmailSend({
+          projectId,
+          invitationId,
+          expertId: invitation.expertId,
+          sentByUserId: user.id,
+          fromEmail: senderIdentity.fromEmail,
+          fromName: senderIdentity.fromName || null,
+          toEmail,
+          subject,
+          body,
+          emailType,
+          provider: "zoho",
+          providerMessageId,
+          status: "sent",
+          sentAt,
+        });
+
+        await storage.updateAdvisorProjectInvitation(invitation.id, {
+          status: "sent",
+          sentAt,
+        });
+
+        results.push({
+          invitationId,
+          expertId: invitation.expertId,
+          advisorName,
+          advisorEmail: toEmail,
+          status: "sent",
+          emailType,
+          message: emailType === "follow_up" ? "Sent follow-up" : "Sent initial invite",
+        });
+      }
+
+      const sentCount = results.filter((result) => result.status === "sent").length;
+      const skippedCount = results.filter((result) => result.status === "skipped").length;
+      const failedCount = results.filter((result) => result.status === "failed").length;
+
+      res.json({
+        success: true,
+        summary: {
+          totalSelected: invitationIds.length,
+          sentCount,
+          skippedCount,
+          failedCount,
+          initialInviteCount,
+          followUpCount,
+          submittedSkippedCount,
+          ineligibleSkippedCount,
+        },
+        results,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || "");
+      if (message === "zoho_refresh_token_missing" || message === "zoho_access_token_refresh_failed") {
+        return res.status(403).json({ error: "Zoho Mail connection needs to be reconnected before sending." });
+      }
+      console.error("Error sending selected advisor invitations through Zoho Mail:", error);
+      res.status(500).json({ error: "Failed to send selected advisor invitation emails" });
     }
   });
 

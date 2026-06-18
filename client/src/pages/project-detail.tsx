@@ -178,6 +178,31 @@ type AdvisorProjectInvitationWithEmail = AdvisorProjectInvitation & {
   latestEmailSend?: AdvisorInvitationEmailHistoryItem | null;
 };
 
+type SelectedAdvisorSendResult = {
+  invitationId: number;
+  expertId?: number | null;
+  advisorName?: string | null;
+  advisorEmail?: string | null;
+  status: "sent" | "skipped" | "failed";
+  emailType?: AdvisorEmailMode | null;
+  message: string;
+};
+
+type SelectedAdvisorSendResponse = {
+  success: boolean;
+  summary?: {
+    totalSelected: number;
+    sentCount: number;
+    skippedCount: number;
+    failedCount: number;
+    initialInviteCount: number;
+    followUpCount: number;
+    submittedSkippedCount: number;
+    ineligibleSkippedCount: number;
+  };
+  results?: SelectedAdvisorSendResult[];
+};
+
 type AdvisorSubmittedResponse = {
   expert: {
     id: number;
@@ -251,6 +276,7 @@ const projectEditSchema = z.object({
 type ProjectEditFormData = z.infer<typeof projectEditSchema>;
 
 const projectStatusOptions = ["new", "sourcing", "shortlisted", "confirmed", "completed", "cancelled"];
+const SELECTED_ADVISOR_SEND_LIMIT = 20;
 const projectIndustryOptions = [
   "Technology",
   "Healthcare",
@@ -467,6 +493,8 @@ export default function ProjectDetail() {
     expiresAt: string | null;
   } | null>(null);
   const [advisorEmailPreview, setAdvisorEmailPreview] = useState<AdvisorEmailPreviewState | null>(null);
+  const [isSelectedAdvisorSendModalOpen, setIsSelectedAdvisorSendModalOpen] = useState(false);
+  const [selectedAdvisorSendResult, setSelectedAdvisorSendResult] = useState<SelectedAdvisorSendResponse | null>(null);
   const [sentHistoryContext, setSentHistoryContext] = useState<{
     invitationId: number;
     advisorName: string;
@@ -534,6 +562,12 @@ export default function ProjectDetail() {
       setEmploymentEndYear(currentYearValue);
     }
   }, [searchCompanyScope, currentMonthValue, currentYearValue]);
+
+  useEffect(() => {
+    setSelectedInternalExpertIds(new Set());
+    setSelectedAdvisorSendResult(null);
+    setIsSelectedAdvisorSendModalOpen(false);
+  }, [projectId]);
 
   const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const seniorityOptions = [
@@ -1141,6 +1175,52 @@ export default function ProjectDetail() {
     onError: (error: any) => {
       toast({
         title: error?.message || "Failed to send advisor invitation email",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const sendSelectedAdvisorEmailsMutation = useMutation({
+    mutationFn: async (invitationIds: number[]) => {
+      const res = await apiRequest("POST", `/api/projects/${projectId}/advisor-invitations/send-selected`, {
+        invitationIds,
+      });
+      return res.json() as Promise<SelectedAdvisorSendResponse>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "advisor-invitations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      const preSkippedResults: SelectedAdvisorSendResult[] = selectedAdvisorSendPlan.ineligible.map((pe) => ({
+        invitationId: advisorInviteByExpertId.get(pe.expertId)?.id || pe.id,
+        expertId: pe.expertId,
+        advisorName: pe.expert?.name || `Expert #${pe.expertId}`,
+        advisorEmail: pe.expert?.email || null,
+        status: "skipped",
+        emailType: null,
+        message: "Skipped: missing invitation/magic link",
+      }));
+      const mergedSummary = data.summary
+        ? {
+            ...data.summary,
+            totalSelected: selectedAdvisorSendPlan.totalSelected,
+            skippedCount: data.summary.skippedCount + preSkippedResults.length,
+            ineligibleSkippedCount: data.summary.ineligibleSkippedCount + preSkippedResults.length,
+          }
+        : undefined;
+      setSelectedAdvisorSendResult({
+        ...data,
+        summary: mergedSummary,
+        results: [...(data.results || []), ...preSkippedResults],
+      });
+      setSelectedInternalExpertIds(new Set());
+      toast({
+        title: "Selected advisor email send completed",
+        description: `${mergedSummary?.sentCount || 0} sent, ${mergedSummary?.skippedCount || 0} skipped, ${mergedSummary?.failedCount || 0} failed.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: error?.message || "Failed to send selected advisor emails",
         variant: "destructive",
       });
     },
@@ -1850,6 +1930,60 @@ export default function ProjectDetail() {
     [selectedAdvisorRows]
   );
 
+  const selectedAdvisorSendPlan = useMemo(() => {
+    const now = new Date();
+    const plan = {
+      totalSelected: selectedAdvisorRows.length,
+      initialInvites: [] as EnrichedExpert[],
+      followUps: [] as EnrichedExpert[],
+      excludedSubmitted: [] as EnrichedExpert[],
+      ineligible: [] as EnrichedExpert[],
+      invitationIds: [] as number[],
+    };
+
+    selectedAdvisorRows.forEach((pe) => {
+      const invitation = advisorInviteByExpertId.get(pe.expertId);
+      const status = String(invitation?.status || "not_sent").toLowerCase();
+      const expiresAt = invitation?.expiresAt ? new Date(invitation.expiresAt) : null;
+      const hasValidReviewLink = Boolean(
+        invitation?.id &&
+        invitation?.token &&
+        expiresAt &&
+        !Number.isNaN(expiresAt.getTime()) &&
+        expiresAt > now
+      );
+      const hasEmail = Boolean((invitation?.email || pe.expert?.email || "").trim());
+
+      if (status === "submitted") {
+        if (invitation?.id) plan.invitationIds.push(invitation.id);
+        plan.excludedSubmitted.push(pe);
+        return;
+      }
+
+      if (!invitation?.id || !hasValidReviewLink || !hasEmail) {
+        plan.ineligible.push(pe);
+        return;
+      }
+
+      plan.invitationIds.push(invitation.id);
+      if (status === "sent" || invitation.sentAt || invitation.latestEmailSend?.sentAt) {
+        plan.followUps.push(pe);
+      } else {
+        plan.initialInvites.push(pe);
+      }
+    });
+
+    return plan;
+  }, [advisorInviteByExpertId, selectedAdvisorRows]);
+
+  const visibleEligibleAdvisorRows = useMemo(
+    () => filteredInternalExperts.filter((pe) => {
+      const invitation = advisorInviteByExpertId.get(pe.expertId);
+      return String(invitation?.status || "not_sent").toLowerCase() !== "submitted";
+    }),
+    [advisorInviteByExpertId, filteredInternalExperts]
+  );
+
   const getDefaultAdvisorEmailMode = (invitation?: AdvisorProjectInvitationWithEmail | null): AdvisorEmailMode => {
     const status = String(invitation?.status || "not_sent").toLowerCase();
     if (status === "sent" || invitation?.sentAt || invitation?.latestEmailSend?.sentAt) return "follow_up";
@@ -2200,24 +2334,44 @@ export default function ProjectDetail() {
     }
   };
 
-  const handleOpenSelectedAdvisorEmailPreview = () => {
-    if (selectedAdvisorRows.length !== 1) {
+  const handleOpenSelectedAdvisorSendModal = () => {
+    if (selectedAdvisorRows.length === 0) {
       toast({
-        title: "Select one advisor to preview an email",
-        description: "Email preview is prepared one advisor at a time.",
+        title: "Select at least one advisor",
+        description: "Choose advisors from the Existing Experts table before sending.",
         variant: "destructive",
       });
       return;
     }
-
-    const selectedAdvisor = selectedAdvisorRows[0];
-    const invitation = advisorInviteByExpertId.get(selectedAdvisor.expertId);
-    if (String(invitation?.status || "").toLowerCase() === "submitted") {
-      setSubmittedResponseExpertId(selectedAdvisor.expertId);
+    if (selectedAdvisorRows.length > SELECTED_ADVISOR_SEND_LIMIT) {
+      toast({
+        title: `Select ${SELECTED_ADVISOR_SEND_LIMIT} advisors or fewer`,
+        description: "Selected advisor email sends are capped to keep delivery controlled.",
+        variant: "destructive",
+      });
       return;
     }
+    if (selectedAdvisorSendPlan.invitationIds.length === 0) {
+      toast({
+        title: "No selected advisors are ready to email",
+        description: "Generate review links for eligible advisors before using selected send.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSelectedAdvisorSendResult(null);
+    setIsSelectedAdvisorSendModalOpen(true);
+  };
 
-    openAdvisorEmailPreview(selectedAdvisor, getDefaultAdvisorEmailMode(invitation));
+  const handleConfirmSelectedAdvisorSend = () => {
+    if (selectedAdvisorSendPlan.invitationIds.length === 0) {
+      toast({
+        title: "No advisor invitations ready to send",
+        variant: "destructive",
+      });
+      return;
+    }
+    sendSelectedAdvisorEmailsMutation.mutate(selectedAdvisorSendPlan.invitationIds);
   };
 
   const handleAdvisorEmailLanguageChange = (language: AdvisorEmailLanguage) => {
@@ -2407,10 +2561,6 @@ export default function ProjectDetail() {
     if (status === "sent" || invitation?.sentAt || invitation?.latestEmailSend?.sentAt) return "Send follow-up";
     return "Send invite";
   };
-
-  const selectedAdvisorActionLabel = selectedAdvisorRows.length === 1
-    ? getAdvisorEmailActionLabel(advisorInviteByExpertId.get(selectedAdvisorRows[0].expertId))
-    : "Send invite";
 
   const getActivityIcon = (type: string) => {
     switch (type) {
@@ -3474,18 +3624,34 @@ export default function ProjectDetail() {
               ) : (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm text-muted-foreground">
-                      {selectedInternalExpertIds.size} selected
-                    </p>
-                    <Button
-                      size="sm"
-                      disabled={selectedInternalExpertIds.size === 0}
-                      onClick={handleOpenSelectedAdvisorEmailPreview}
-                      data-testid="button-send-project-invite-selected"
-                    >
-                      <Mail className="h-4 w-4 mr-2" />
-                      {selectedAdvisorActionLabel}
-                    </Button>
+                    <div className="text-sm text-muted-foreground">
+                      <span>{selectedInternalExpertIds.size} selected</span>
+                      {selectedInternalExpertIds.size > 0 && (
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          className="h-auto px-2 py-0"
+                          onClick={() => setSelectedInternalExpertIds(new Set())}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                    {selectedInternalExpertIds.size > 0 && (
+                      <Button
+                        size="sm"
+                        disabled={
+                          sendSelectedAdvisorEmailsMutation.isPending ||
+                          selectedAdvisorRows.length > SELECTED_ADVISOR_SEND_LIMIT
+                        }
+                        onClick={handleOpenSelectedAdvisorSendModal}
+                        data-testid="button-send-project-invite-selected"
+                      >
+                        <Mail className="h-4 w-4 mr-2" />
+                        Send email to selected
+                      </Button>
+                    )}
                   </div>
                   <div className="rounded-md border overflow-hidden">
                     <Table>
@@ -3494,17 +3660,17 @@ export default function ProjectDetail() {
                           <TableHead className="w-12">
                             <Checkbox
                               checked={
-                                filteredInternalExperts.length > 0 &&
-                                filteredInternalExperts.every((pe) => selectedInternalExpertIds.has(pe.id))
+                                visibleEligibleAdvisorRows.length > 0 &&
+                                visibleEligibleAdvisorRows.every((pe) => selectedInternalExpertIds.has(pe.id))
                               }
                               onCheckedChange={(checked) => {
                                 if (checked) {
-                                  setSelectedInternalExpertIds(new Set(filteredInternalExperts.map((pe) => pe.id)));
+                                  setSelectedInternalExpertIds(new Set(visibleEligibleAdvisorRows.map((pe) => pe.id)));
                                 } else {
                                   setSelectedInternalExpertIds(new Set());
                                 }
                               }}
-                              aria-label="Select all advisors"
+                              aria-label="Select all visible eligible advisors"
                               data-testid="checkbox-select-all-existing-experts"
                             />
                           </TableHead>
@@ -4748,6 +4914,114 @@ export default function ProjectDetail() {
           <DialogFooter>
             <Button type="button" onClick={() => setSentHistoryContext(null)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Selected Advisor Email Send Modal */}
+      <Dialog open={isSelectedAdvisorSendModalOpen} onOpenChange={setIsSelectedAdvisorSendModalOpen}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Send email to selected advisors</DialogTitle>
+            <DialogDescription>
+              Confirm this project-scoped send before sending individual advisor emails through Zoho Mail.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <div className="rounded-md border p-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Selected</p>
+                <p className="mt-1 text-2xl font-semibold">{selectedAdvisorSendPlan.totalSelected}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Initial invites</p>
+                <p className="mt-1 text-2xl font-semibold">{selectedAdvisorSendPlan.initialInvites.length}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Follow-ups</p>
+                <p className="mt-1 text-2xl font-semibold">{selectedAdvisorSendPlan.followUps.length}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Submitted</p>
+                <p className="mt-1 text-2xl font-semibold">{selectedAdvisorSendPlan.excludedSubmitted.length}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Skipped</p>
+                <p className="mt-1 text-2xl font-semibold">{selectedAdvisorSendPlan.ineligible.length}</p>
+              </div>
+            </div>
+
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Each advisor will receive an individual email with their own secure review link. Client name, rate, CU, payout, billing, and internal notes are not included.
+            </div>
+
+            {selectedAdvisorSendPlan.totalSelected > SELECTED_ADVISOR_SEND_LIMIT && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                Selected advisor email sends are capped at {SELECTED_ADVISOR_SEND_LIMIT} advisors per operation.
+              </div>
+            )}
+
+            {selectedAdvisorSendPlan.ineligible.length > 0 && (
+              <div className="rounded-md border p-3">
+                <p className="text-sm font-medium">Ineligible or skipped before send</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  These advisors need a valid email and generated review link before selected send can email them.
+                </p>
+                <div className="mt-3 max-h-36 space-y-1 overflow-y-auto text-sm">
+                  {selectedAdvisorSendPlan.ineligible.map((pe) => (
+                    <div key={pe.id} className="flex justify-between gap-3">
+                      <span>{pe.expert?.name || `Expert #${pe.expertId}`}</span>
+                      <span className="text-muted-foreground">{pe.expert?.email || "No email"}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {selectedAdvisorSendResult && (
+              <div className="rounded-md border p-3">
+                <p className="text-sm font-medium">Send results</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedAdvisorSendResult.summary?.sentCount || 0} sent, {selectedAdvisorSendResult.summary?.skippedCount || 0} skipped, {selectedAdvisorSendResult.summary?.failedCount || 0} failed.
+                </p>
+                <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+                  {(selectedAdvisorSendResult.results || []).map((result) => (
+                    <div key={`${result.invitationId}-${result.status}-${result.message}`} className="rounded-md bg-muted/40 p-2 text-sm">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <span className="font-medium">{result.advisorName || `Invitation #${result.invitationId}`}</span>
+                        <Badge variant={result.status === "sent" ? "default" : result.status === "failed" ? "destructive" : "secondary"}>
+                          {result.status}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-muted-foreground">{result.message}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsSelectedAdvisorSendModalOpen(false)}
+              disabled={sendSelectedAdvisorEmailsMutation.isPending}
+            >
+              Close
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmSelectedAdvisorSend}
+              disabled={
+                sendSelectedAdvisorEmailsMutation.isPending ||
+                selectedAdvisorSendPlan.invitationIds.length === 0 ||
+                selectedAdvisorSendPlan.totalSelected > SELECTED_ADVISOR_SEND_LIMIT
+              }
+              data-testid="button-confirm-selected-advisor-send"
+            >
+              <Send className="h-4 w-4 mr-2" />
+              {sendSelectedAdvisorEmailsMutation.isPending ? "Sending..." : "Send individual emails"}
             </Button>
           </DialogFooter>
         </DialogContent>
