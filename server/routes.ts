@@ -584,10 +584,12 @@ export async function registerRoutes(
       }
 
       const senderProfile = await storage.getUser(user.id);
+      const signatureSenderName = senderProfile?.fullName || senderIdentity.fromName;
+      const signatureSenderEmail = senderProfile?.email || senderIdentity.fromEmail;
       const emailHtml = renderAdvisorEmailHtml({
         body,
-        senderName: senderIdentity.fromName,
-        senderEmail: senderIdentity.fromEmail,
+        senderName: signatureSenderName,
+        senderEmail: signatureSenderEmail,
         signatureName: senderProfile?.signatureName || null,
         jobTitle: senderProfile?.jobTitle || null,
         mobilePhone: senderProfile?.mobilePhone || null,
