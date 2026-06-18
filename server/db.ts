@@ -21,10 +21,16 @@ const compatibilityStatements = [
     email text NOT NULL UNIQUE,
     password_hash text,
     role text NOT NULL DEFAULT 'pm',
+    signature_name text,
+    job_title text,
+    mobile_phone text,
     is_active boolean NOT NULL DEFAULT true,
     must_change_password boolean NOT NULL DEFAULT false,
     created_at timestamp DEFAULT now() NOT NULL
   )`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS signature_name text`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title text`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_phone text`,
   `CREATE TABLE IF NOT EXISTS user_email_connections (
     id serial PRIMARY KEY,
     user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,

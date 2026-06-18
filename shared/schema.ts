@@ -11,6 +11,9 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash"),
   role: text("role").notNull().default("pm"), // admin, pm, ra, finance
+  signatureName: text("signature_name"),
+  jobTitle: text("job_title"),
+  mobilePhone: text("mobile_phone"),
   isActive: boolean("is_active").notNull().default(true),
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),

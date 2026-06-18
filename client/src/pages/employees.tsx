@@ -125,12 +125,18 @@ function EmployeesContent() {
     fullName: "",
     localPart: "",
     role: "ra" as UserRole,
+    signatureName: "",
+    jobTitle: "",
+    mobilePhone: "",
     tempPassword: "",
   });
   
   const [editForm, setEditForm] = useState({
     fullName: "",
     role: "ra" as UserRole,
+    signatureName: "",
+    jobTitle: "",
+    mobilePhone: "",
     isActive: true,
   });
   
@@ -158,7 +164,7 @@ function EmployeesContent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/employees"] });
       setIsCreateOpen(false);
-      setCreateForm({ fullName: "", localPart: "", role: "ra", tempPassword: "" });
+      setCreateForm({ fullName: "", localPart: "", role: "ra", signatureName: "", jobTitle: "", mobilePhone: "", tempPassword: "" });
       toast({ title: "Employee created successfully" });
     },
     onError: (error: any) => {
@@ -219,6 +225,9 @@ function EmployeesContent() {
     setEditForm({
       fullName: employee.fullName,
       role: employee.role as UserRole,
+      signatureName: employee.signatureName || "",
+      jobTitle: employee.jobTitle || "",
+      mobilePhone: employee.mobilePhone || "",
       isActive: employee.isActive ?? true,
     });
     setIsEditOpen(true);
@@ -552,13 +561,14 @@ function EmployeesContent() {
                     )}
                   </button>
                 </TableHead>
+                <TableHead>Signature</TableHead>
                 <TableHead className="w-12"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8">
+                  <TableCell colSpan={6} className="text-center py-8">
                     <div className="flex items-center justify-center">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                     </div>
@@ -566,7 +576,7 @@ function EmployeesContent() {
                 </TableRow>
               ) : employees?.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                     No employees found. Add your first employee to get started.
                   </TableCell>
                 </TableRow>
@@ -601,6 +611,11 @@ function EmployeesContent() {
                         >
                           {employee.isActive !== false ? "Active" : "Inactive"}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        <div className="font-medium text-foreground">{employee.signatureName || employee.fullName}</div>
+                        <div className="max-w-56 truncate">{employee.jobTitle || "Job title not set"}</div>
+                        {employee.mobilePhone && <div>{employee.mobilePhone}</div>}
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>
@@ -707,6 +722,36 @@ function EmployeesContent() {
                 </Select>
               </div>
               <div className="grid gap-2">
+                <Label htmlFor="signatureName">Signature Name</Label>
+                <Input
+                  id="signatureName"
+                  value={createForm.signatureName}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, signatureName: e.target.value }))}
+                  placeholder="Mirae K."
+                  data-testid="input-signature-name"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="jobTitle">Job Title</Label>
+                <Input
+                  id="jobTitle"
+                  value={createForm.jobTitle}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, jobTitle: e.target.value }))}
+                  placeholder="Co Founder & COO | Mirae Connext"
+                  data-testid="input-job-title"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="mobilePhone">Mobile Phone</Label>
+                <Input
+                  id="mobilePhone"
+                  value={createForm.mobilePhone}
+                  onChange={(e) => setCreateForm(prev => ({ ...prev, mobilePhone: e.target.value }))}
+                  placeholder="+55 11 95500 7861"
+                  data-testid="input-mobile-phone"
+                />
+              </div>
+              <div className="grid gap-2">
                 <Label htmlFor="tempPassword">Temporary Password</Label>
                 <Input
                   id="tempPassword"
@@ -783,6 +828,36 @@ function EmployeesContent() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="editSignatureName">Signature Name</Label>
+                <Input
+                  id="editSignatureName"
+                  value={editForm.signatureName}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, signatureName: e.target.value }))}
+                  placeholder="Mirae K."
+                  data-testid="input-edit-signature-name"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="editJobTitle">Job Title</Label>
+                <Input
+                  id="editJobTitle"
+                  value={editForm.jobTitle}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, jobTitle: e.target.value }))}
+                  placeholder="Co Founder & COO | Mirae Connext"
+                  data-testid="input-edit-job-title"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="editMobilePhone">Mobile Phone</Label>
+                <Input
+                  id="editMobilePhone"
+                  value={editForm.mobilePhone}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, mobilePhone: e.target.value }))}
+                  placeholder="+55 11 95500 7861"
+                  data-testid="input-edit-mobile-phone"
+                />
               </div>
             </div>
             <DialogFooter>
