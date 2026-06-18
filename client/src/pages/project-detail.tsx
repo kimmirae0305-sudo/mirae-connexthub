@@ -2307,7 +2307,7 @@ export default function ProjectDetail() {
     const isSubmitted = String(advisorEmailPreview.existingInvitationStatus || "").toLowerCase() === "submitted";
     const modeLabel = getAdvisorEmailModeLabel(advisorEmailPreview.emailMode).toLowerCase();
     const confirmationMessage = isSubmitted
-      ? "This advisor has already submitted a response. Do you still want to send this follow-up email?"
+      ? `This advisor has already submitted a response. Send this ${modeLabel} only if needed?`
       : hasAlreadySent
       ? `An invitation email has already been sent to this advisor. Do you want to send this ${modeLabel}?`
       : `Send this advisor invitation email to ${advisorEmailPreview.advisorEmail}?`;
@@ -3616,6 +3616,18 @@ export default function ProjectDetail() {
                                         View sent history
                                       </DropdownMenuItem>
                                     )}
+                                    {inviteStatus === "submitted" && (
+                                      <>
+                                        <DropdownMenuItem onClick={() => openAdvisorEmailPreview(pe, "follow_up")}>
+                                          <Send className="h-4 w-4 mr-2" />
+                                          Send follow-up anyway
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => openAdvisorEmailPreview(pe, "resend_invite")}>
+                                          <Mail className="h-4 w-4 mr-2" />
+                                          Resend invite anyway
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
                                     <DropdownMenuItem
                                       onClick={() => removeExpertMutation.mutate(pe.id)}
                                       className="text-destructive"
@@ -4850,7 +4862,7 @@ export default function ProjectDetail() {
               </div>
 
               {(advisorEmailPreview.existingSentAt ||
-                String(advisorEmailPreview.existingInvitationStatus || "").toLowerCase() === "sent") && (
+                ["sent", "submitted"].includes(String(advisorEmailPreview.existingInvitationStatus || "").toLowerCase())) && (
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Email mode</label>
                   <div className="flex flex-wrap gap-2">
@@ -4879,6 +4891,12 @@ export default function ProjectDetail() {
               {advisorEmailPreview.error && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                   {advisorEmailPreview.error}
+                </div>
+              )}
+
+              {String(advisorEmailPreview.existingInvitationStatus || "").toLowerCase() === "submitted" && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  This advisor has already submitted a response. Send another email only if needed.
                 </div>
               )}
 
