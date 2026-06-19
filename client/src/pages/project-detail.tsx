@@ -1181,9 +1181,33 @@ export default function ProjectDetail() {
   });
 
   const sendSelectedAdvisorEmailsMutation = useMutation({
-    mutationFn: async (invitationIds: number[]) => {
+    mutationFn: async ({
+      invitationIds,
+      missingInvitationExpertIds,
+    }: {
+      invitationIds: number[];
+      missingInvitationExpertIds: number[];
+    }) => {
+      let resolvedInvitationIds = [...invitationIds];
+      if (missingInvitationExpertIds.length > 0) {
+        const placeholderRes = await apiRequest("POST", `/api/projects/${projectId}/advisor-invitations/create-placeholder`, {
+          expertIds: missingInvitationExpertIds,
+        });
+        const placeholderData = await placeholderRes.json();
+        const createdInvitationIds = Array.isArray(placeholderData?.invitations)
+          ? placeholderData.invitations
+              .map((invitation: AdvisorProjectInvitation) => Number(invitation.id))
+              .filter((invitationId: number) => Number.isInteger(invitationId) && invitationId > 0)
+          : [];
+        resolvedInvitationIds = Array.from(new Set([...resolvedInvitationIds, ...createdInvitationIds]));
+      }
+
+      if (resolvedInvitationIds.length === 0) {
+        throw new Error("No advisor invitations are ready to send.");
+      }
+
       const res = await apiRequest("POST", `/api/projects/${projectId}/advisor-invitations/send-selected`, {
-        invitationIds,
+        invitationIds: resolvedInvitationIds,
       });
       return res.json() as Promise<SelectedAdvisorSendResponse>;
     },
@@ -1940,11 +1964,12 @@ export default function ProjectDetail() {
       excludedSubmitted: [] as EnrichedExpert[],
       ineligible: [] as EnrichedExpert[],
       invitationIds: [] as number[],
+      missingInvitationInitialInviteExpertIds: [] as number[],
     };
 
     selectedAdvisorRows.forEach((pe) => {
       const invitation = advisorInviteByExpertId.get(pe.expertId);
-      const status = String(invitation?.status || "not_sent").toLowerCase();
+      const status = String(invitation?.status || "not_sent").trim().toLowerCase().replace(/\s+/g, "_");
       const email = (invitation?.email || pe.expert?.email || "").trim();
       const hasValidEmail = Boolean(email) && !email.includes(",") && !email.includes(";") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -1954,8 +1979,14 @@ export default function ProjectDetail() {
         return;
       }
 
-      if (!invitation?.id || !hasValidEmail) {
+      if (!hasValidEmail) {
         plan.ineligible.push(pe);
+        return;
+      }
+
+      if (!invitation?.id) {
+        plan.initialInvites.push(pe);
+        plan.missingInvitationInitialInviteExpertIds.push(pe.expertId);
         return;
       }
 
@@ -2345,10 +2376,13 @@ export default function ProjectDetail() {
       });
       return;
     }
-    if (selectedAdvisorSendPlan.invitationIds.length === 0) {
+    const readyCount =
+      selectedAdvisorSendPlan.invitationIds.length +
+      selectedAdvisorSendPlan.missingInvitationInitialInviteExpertIds.length;
+    if (readyCount === 0) {
       toast({
         title: "No selected advisors are ready to email",
-        description: "Generate review links for eligible advisors before using selected send.",
+        description: "Select advisors with valid email addresses before using selected send.",
         variant: "destructive",
       });
       return;
@@ -2358,14 +2392,20 @@ export default function ProjectDetail() {
   };
 
   const handleConfirmSelectedAdvisorSend = () => {
-    if (selectedAdvisorSendPlan.invitationIds.length === 0) {
+    const readyCount =
+      selectedAdvisorSendPlan.invitationIds.length +
+      selectedAdvisorSendPlan.missingInvitationInitialInviteExpertIds.length;
+    if (readyCount === 0) {
       toast({
         title: "No advisor invitations ready to send",
         variant: "destructive",
       });
       return;
     }
-    sendSelectedAdvisorEmailsMutation.mutate(selectedAdvisorSendPlan.invitationIds);
+    sendSelectedAdvisorEmailsMutation.mutate({
+      invitationIds: selectedAdvisorSendPlan.invitationIds,
+      missingInvitationExpertIds: selectedAdvisorSendPlan.missingInvitationInitialInviteExpertIds,
+    });
   };
 
   const handleAdvisorEmailLanguageChange = (language: AdvisorEmailLanguage) => {
@@ -4948,6 +4988,7 @@ export default function ProjectDetail() {
 
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               Each advisor will receive an individual email with their own secure review link. Client name, rate, CU, payout, billing, and internal notes are not included.
+              Review links will be generated automatically when needed.
             </div>
 
             {selectedAdvisorSendPlan.totalSelected > SELECTED_ADVISOR_SEND_LIMIT && (
@@ -5009,7 +5050,8 @@ export default function ProjectDetail() {
               onClick={handleConfirmSelectedAdvisorSend}
               disabled={
                 sendSelectedAdvisorEmailsMutation.isPending ||
-                selectedAdvisorSendPlan.invitationIds.length === 0 ||
+                selectedAdvisorSendPlan.invitationIds.length +
+                  selectedAdvisorSendPlan.missingInvitationInitialInviteExpertIds.length === 0 ||
                 selectedAdvisorSendPlan.totalSelected > SELECTED_ADVISOR_SEND_LIMIT
               }
               data-testid="button-confirm-selected-advisor-send"
