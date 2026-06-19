@@ -736,19 +736,15 @@ export default function ProjectDetail() {
   const { data: allRAs } = useQuery<RAUser[]>({
     queryKey: ["/api/users/ras"],
     queryFn: async () => {
-      console.log("[RA DEBUG] Frontend: Fetching RAs from /api/users/ras");
       const res = await fetch(resolveApiUrl("/api/users/ras"), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
         },
       });
       if (!res.ok) {
-        console.error("[RA DEBUG] Frontend: Failed to fetch RAs, status:", res.status);
         throw new Error("Failed to fetch RAs");
       }
-      const data = await res.json();
-      console.log("[RA DEBUG] Frontend: RAs fetched for project", projectId, ":", data);
-      return data;
+      return res.json();
     },
   });
 
@@ -1254,34 +1250,12 @@ export default function ProjectDetail() {
 
   const bulkInviteMutation = useMutation({
     mutationFn: async (data: { projectExpertIds: number[]; angleIds: number[]; channel?: string }) => {
-      console.log("[INVITES] Frontend: Starting bulk invitation request");
-      try {
-        const res = await apiRequest("POST", `/api/projects/${projectId}/invitations/bulk-send`, data);
-        console.log("[INVITES] Frontend: Response status:", res.status);
-        const result = await res.json();
-        console.log("[INVITES] Bulk invite response", res.status, result);
-        
-        // Check if we have a successful response with at least some invitations sent
-        if (res.ok && result?.summary?.sent > 0) {
-          console.log("[INVITES] Frontend: Success - at least one invitation sent");
-          return result;
-        }
-        
-        // If status is OK but no invitations were sent, still treat as success
-        if (res.ok) {
-          console.log("[INVITES] Frontend: Status OK, returning response");
-          return result;
-        }
-        
-        // If we got here, something went wrong
-        throw new Error(result?.error || "Failed to send invitations");
-      } catch (err) {
-        console.error("[INVITES] Frontend: Error in mutationFn:", err);
-        throw err;
-      }
+      const res = await apiRequest("POST", `/api/projects/${projectId}/invitations/bulk-send`, data);
+      const result = await res.json();
+      if (res.ok) return result;
+      throw new Error(result?.error || "Failed to send invitations");
     },
     onSuccess: (data) => {
-      console.log("[INVITES] Frontend: onSuccess called with data:", data);
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
       setSelectedInternalExpertIds(new Set());
       setBulkInviteAngleIds([]);
@@ -1292,24 +1266,20 @@ export default function ProjectDetail() {
       
       // Always show success if at least one invitation was sent
       if (sent > 0) {
-        console.log("[INVITES] Frontend: Showing success toast - sent:", sent, "failed:", failed);
         toast({ 
           title: `Invitations sent: ${sent}${failed > 0 ? ` (${failed} failed)` : ''}`,
           variant: "default"
         });
       } else if (total > 0) {
-        console.log("[INVITES] Frontend: All invitations failed");
         toast({ 
           title: "Failed to send all invitations",
           variant: "destructive"
         });
       } else {
-        console.log("[INVITES] Frontend: No invitations to send");
         toast({ title: "No invitations sent", variant: "default" });
       }
     },
-    onError: (error) => {
-      console.error("[INVITES] Frontend: onError called with error:", error);
+    onError: () => {
       toast({ title: "Failed to send invitations", variant: "destructive" });
     },
   });

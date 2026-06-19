@@ -420,11 +420,6 @@ export async function registerRoutes(
 
       const config = getZohoOAuthConfig();
       const redirectUriParts = getSafeRedirectUriParts(config.redirectUri);
-      console.info("[zoho-oauth-connect-start]", {
-        provider: "zoho",
-        hasZohoOAuthRedirectUri: Boolean(config.redirectUri),
-        ...redirectUriParts,
-      });
 
       if (!config.isConfigured) {
         return res.status(503).json({ error: "Zoho OAuth is not configured." });
@@ -692,16 +687,6 @@ export async function registerRoutes(
       const senderProfile = await storage.getUser(user.id);
       const signatureSenderName = senderProfile?.fullName || senderIdentity.fromName;
       const signatureSenderEmail = senderProfile?.email || senderIdentity.fromEmail;
-      console.info("[advisor-email-signature-profile]", {
-        senderUserId: user.id,
-        hasSenderProfile: Boolean(senderProfile),
-        hasSignatureName: Boolean(senderProfile?.signatureName),
-        hasJobTitle: Boolean(senderProfile?.jobTitle),
-        hasMobilePhone: Boolean(senderProfile?.mobilePhone),
-        signatureNameLength: String(senderProfile?.signatureName || "").length,
-        jobTitleLength: String(senderProfile?.jobTitle || "").length,
-        mobilePhoneLength: String(senderProfile?.mobilePhone || "").length,
-      });
       const emailHtml = renderAdvisorEmailHtml({
         body,
         senderName: signatureSenderName,
@@ -1109,69 +1094,47 @@ export async function registerRoutes(
 
   // POST /api/auth/change-password - Change password on first login
   app.post("/api/auth/change-password", authMiddleware, async (req: AuthRequest, res) => {
-    const auditBase = {
-      routeVersion: CHANGE_PASSWORD_ROUTE_VERSION,
-      userId: req.user?.id ?? null,
-      email: req.user?.email ?? null,
-    };
-    const logChangePasswordAudit = (event: string, details: Record<string, unknown> = {}) => {
-      console.info("[change-password]", { ...auditBase, event, ...details });
-    };
-
     try {
       const { currentPassword, newPassword, confirmPassword } = req.body;
-      logChangePasswordAudit("route_hit");
       
       if (!currentPassword || !newPassword) {
-        logChangePasswordAudit("validation_failed", { reason: "missing_required_fields" });
         return res.status(400).json({ error: "Current and new passwords are required" });
       }
 
       if (String(newPassword).length < 8) {
-        logChangePasswordAudit("validation_failed", { reason: "new_password_too_short" });
         return res.status(400).json({ error: "New password must be at least 8 characters" });
       }
 
       if (confirmPassword !== undefined && newPassword !== confirmPassword) {
-        logChangePasswordAudit("validation_failed", { reason: "password_confirmation_mismatch" });
         return res.status(400).json({ error: "New password and confirmation do not match" });
       }
 
       if (!req.user) {
-        logChangePasswordAudit("auth_failed", { reason: "missing_authenticated_user" });
         return res.status(401).json({ error: "Unauthorized" });
       }
 
       // Get user from database
       const user = await storage.getUser(req.user.id);
       if (!user || !user.passwordHash) {
-        logChangePasswordAudit("user_lookup_failed", { userFound: Boolean(user) });
         return res.status(404).json({ error: "User not found" });
       }
 
       // Verify current password
       const isValid = await comparePassword(currentPassword, user.passwordHash);
-      logChangePasswordAudit("current_password_checked", { currentPasswordValid: isValid });
       if (!isValid) {
         return res.status(400).json({ error: "Current password is incorrect" });
       }
 
       const isSamePassword = await comparePassword(newPassword, user.passwordHash);
       if (isSamePassword) {
-        logChangePasswordAudit("validation_failed", { reason: "new_password_matches_current" });
         return res.status(400).json({ error: "New password must be different from the current password" });
       }
 
       // Hash new password and update user
       const hashedNewPassword = await hashPassword(newPassword);
-      logChangePasswordAudit("db_update_attempted");
       const updatedUser = await storage.updateUser(req.user.id, {
         passwordHash: hashedNewPassword,
         mustChangePassword: false,
-      });
-      logChangePasswordAudit("db_update_completed", {
-        updateReturnedUser: Boolean(updatedUser),
-        affectedRowCount: updatedUser ? 1 : 0,
       });
 
       if (!updatedUser) {
@@ -1179,10 +1142,6 @@ export async function registerRoutes(
       }
 
       const verifiedUser = await storage.getUser(req.user.id);
-      logChangePasswordAudit("user_reread_after_update", {
-        rereadUserFound: Boolean(verifiedUser),
-        mustChangePasswordFalse: verifiedUser?.mustChangePassword === false,
-      });
       if (!verifiedUser || !verifiedUser.passwordHash) {
         return res.status(500).json({ error: "Password update could not be verified" });
       }
@@ -1190,12 +1149,6 @@ export async function registerRoutes(
       const newPasswordWorks = await comparePassword(newPassword, verifiedUser.passwordHash);
       const oldPasswordStillWorks = await comparePassword(currentPassword, verifiedUser.passwordHash);
       const passwordHashChanged = verifiedUser.passwordHash !== user.passwordHash;
-      logChangePasswordAudit("password_update_verified", {
-        passwordHashChanged,
-        newPasswordWorks,
-        oldPasswordStillWorks,
-        mustChangePasswordFalse: verifiedUser.mustChangePassword === false,
-      });
       const passwordChangePersisted =
         passwordHashChanged &&
         newPasswordWorks &&
@@ -1203,7 +1156,6 @@ export async function registerRoutes(
         verifiedUser.mustChangePassword === false;
 
       if (!passwordChangePersisted) {
-        logChangePasswordAudit("persistence_verification_failed");
         return res.status(500).json({ error: "Password update was not persisted" });
       }
 
@@ -1222,7 +1174,6 @@ export async function registerRoutes(
         user: authUser,
       });
     } catch (error) {
-      logChangePasswordAudit("unexpected_error");
       console.error("Change password error:", error);
       res.status(500).json({ error: "Failed to change password" });
     }
@@ -1244,48 +1195,20 @@ export async function registerRoutes(
   // IMPORTANT: Must be BEFORE /:id route to avoid route matching conflicts
   app.get("/api/users/ras", authMiddleware, async (req, res) => {
     try {
-      console.log("[RA DEBUG] ===== START RAs ENDPOINT =====");
       const users = await storage.getUsers();
-      console.log(`[RA DEBUG] Total users fetched: ${users.length}`);
-      
-      // Log ALL active employees with full details
-      console.log("[RA DEBUG] All active employees:", users.map(u => ({
-        id: u.id,
-        fullName: u.fullName,
-        email: u.email,
-        role: u.role,
-        isActive: u.isActive,
-        isRaRawCheck: u.role === "ra",
-        isResearchAssociateRawCheck: u.role === "Research Associate",
-        isActiveCheck: u.isActive === true,
-      })));
-      
-      console.log(`[RA DEBUG] Users by role:`, users.reduce((acc: any, u: any) => {
-        acc[u.role] = (acc[u.role] || 0) + 1;
-        return acc;
-      }, {}));
-      
-      // Apply filtering with detailed logging
       const ras = users.filter(u => {
         const matchesRole = u.role === "ra" || u.role === "Research Associate";
         const isActive = u.isActive === true;
-        console.log(`[RA DEBUG] User ${u.fullName} (${u.email}): role="${u.role}", matchesRole=${matchesRole}, isActive=${isActive}, passes=${matchesRole && isActive}`);
         return matchesRole && isActive;
       });
-      
-      console.log(`[RA DEBUG] Filtered RAs: ${ras.length} active RAs found`);
-      
       const result = ras.map(ra => ({ 
         id: ra.id, 
         fullName: ra.fullName, 
         email: ra.email 
       }));
-      
-      console.log(`[RA DEBUG] Returning ${result.length} RAs:`, result);
-      console.log("[RA DEBUG] ===== END RAs ENDPOINT =====");
       res.json(result);
     } catch (error) {
-      console.error("[RA DEBUG] Error fetching RAs:", error);
+      console.error("Error fetching RAs:", error);
       res.status(500).json({ error: "Failed to fetch RAs" });
     }
   });
@@ -4091,10 +4014,7 @@ export async function registerRoutes(
     try {
       const projectId = parseInt(req.params.projectId);
       const { projectExpertIds, angleIds, channel } = req.body; // angleIds: array of angle IDs to assign (OPTIONAL)
-      
-      console.log("[API] Bulk-send endpoint triggered from Project Experts view");
-      console.log("[API] Request params - projectId:", projectId, "experts count:", projectExpertIds?.length, "angleIds:", angleIds, "channel:", channel);
-      
+
       if (!Array.isArray(projectExpertIds) || projectExpertIds.length === 0) {
         return res.status(400).json({ error: "projectExpertIds must be a non-empty array" });
       }
@@ -4103,11 +4023,7 @@ export async function registerRoutes(
       if (angleIds && !Array.isArray(angleIds)) {
         return res.status(400).json({ error: "angleIds must be an array" });
       }
-      
-      if (!angleIds || angleIds.length === 0) {
-        console.log("[INVITES] Creating invitations with no angles for project", projectId);
-      }
-      
+
       const project = await storage.getProject(projectId);
       if (!project) {
         return res.status(404).json({ error: "Project not found" });
@@ -4126,9 +4042,7 @@ export async function registerRoutes(
           
           const expert = await storage.getExpert(pe.expertId);
           if (!expert) continue;
-          
-          console.log(`[EMAIL] Sending project invitation to ${expert.email} for project ${projectId}`);
-          
+
           // Determine angles to use: use provided angleIds if given and non-empty, otherwise use existing
           const finalAngleIds = angleIds && angleIds.length > 0 ? angleIds : pe.angleIds;
           
@@ -4156,7 +4070,6 @@ export async function registerRoutes(
           let emailSent = false;
           if (channel === 'email' || channel === 'both' || !channel) {
             try {
-              console.log(`[EMAIL] Calling sendExpertInvitationEmail for ${expert.email}`);
               emailSent = await sendExpertInvitationEmail({
                 expertName: expert.name,
                 expertEmail: expert.email,
@@ -4165,10 +4078,9 @@ export async function registerRoutes(
                 industry: project.industry || undefined,
                 invitationUrl,
                 vettingQuestionsCount: vettingQuestions.length,
-              });
-              console.log(`[EMAIL] Email ${emailSent ? 'SENT' : 'FAILED'} to ${expert.email}`);
-            } catch (emailError) {
-              console.error(`[EMAIL] Error sending to ${expert.email}:`, emailError);
+            });
+          } catch (emailError) {
+              console.error("Failed to send project invitation email:", emailError);
             }
           }
           
@@ -4197,16 +4109,14 @@ export async function registerRoutes(
             emailSent,
           });
         } catch (expertError) {
-          console.error(`[INVITES] Error processing expert ${peId}:`, expertError);
+          console.error("Failed to process project invitation recipient:", expertError);
           // Continue processing other experts even if one fails
         }
       }
       
       const successCount = results.filter(r => r.emailSent).length;
       const failedCount = results.filter(r => !r.emailSent).length;
-      
-      console.log(`[API] Bulk-send complete: ${successCount} sent, ${failedCount} failed`);
-      
+
       // Return 200 with proper summary (success if at least one was sent)
       res.status(200).json({
         message: `Invitations: ${successCount} sent, ${failedCount} failed`,
@@ -4219,7 +4129,7 @@ export async function registerRoutes(
         }
       });
     } catch (error) {
-      console.error("[INVITES] Bulk send invitations error:", error);
+      console.error("Failed to send project invitations:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to send bulk invitations";
       res.status(500).json({ 
         success: false,
@@ -4235,9 +4145,7 @@ export async function registerRoutes(
     try {
       const projectId = parseInt(req.params.projectId);
       const { projectExpertIds, channel } = req.body; // channel: 'email' | 'whatsapp' | 'both'
-      
-      console.log("[Bulk Invite] Starting bulk invitation send from Project Existing Experts tab");
-      
+
       if (!Array.isArray(projectExpertIds) || projectExpertIds.length === 0) {
         return res.status(400).json({ error: "projectExpertIds must be a non-empty array" });
       }
@@ -4259,9 +4167,7 @@ export async function registerRoutes(
         
         const expert = await storage.getExpert(pe.expertId);
         if (!expert) continue;
-        
-        console.log(`[Bulk Invite] Processing expert: ${expert.name} (${expert.email})`);
-        
+
         // ALWAYS create a NEW unique token for each invitation
         const token = generateRecruitmentToken();
         const link = await storage.createExpertInvitationLink({
@@ -4277,8 +4183,7 @@ export async function registerRoutes(
           isActive: true,
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
         });
-        console.log(`[Bulk Invite] Created new invitation token for ${expert.email}`);
-        
+
         // Update project-expert with token and status
         const updatedPe = await storage.updateProjectExpert(peId, {
           status: "invited",
@@ -4295,7 +4200,6 @@ export async function registerRoutes(
         let emailSent = false;
         if (channel === 'email' || channel === 'both' || !channel) {
           try {
-            console.log(`[Bulk Invite] Sending email to ${expert.email}...`);
             emailSent = await sendExpertInvitationEmail({
               expertName: expert.name,
               expertEmail: expert.email,
@@ -4305,18 +4209,11 @@ export async function registerRoutes(
               invitationUrl,
               vettingQuestionsCount: vettingQuestions.length,
             });
-            console.log(`[Bulk Invite] Email ${emailSent ? 'SENT' : 'FAILED'} to ${expert.name} (${expert.email})`);
           } catch (emailError) {
-            console.error(`[Bulk Invite] Email error for ${expert.email}:`, emailError);
+            console.error("Failed to send project invitation email:", emailError);
           }
         }
-        
-        // Log WhatsApp info (manual follow-up for now)
-        if (channel === 'whatsapp' || channel === 'both') {
-          console.log(`[Bulk Invite] [WhatsApp] Manual follow-up needed for ${expert.name} (${expert.phone || expert.whatsapp || 'no phone'})`);
-          console.log(`[Bulk Invite]   Invitation URL: ${invitationUrl}`);
-        }
-        
+
         results.push({
           expertId: expert.id,
           expertName: expert.name,
@@ -4329,9 +4226,7 @@ export async function registerRoutes(
       
       const successCount = results.filter(r => r.emailSent).length;
       const failedCount = results.filter(r => !r.emailSent).length;
-      
-      console.log(`[Bulk Invite] Complete: ${successCount} sent, ${failedCount} failed`);
-      
+
       res.json({
         message: `Invitations: ${successCount} sent, ${failedCount} failed`,
         channel: channel || 'email',
@@ -4343,7 +4238,7 @@ export async function registerRoutes(
         }
       });
     } catch (error) {
-      console.error("[Bulk Invite] Send invitations error:", error);
+      console.error("Failed to send project invitations:", error);
       res.status(500).json({ error: "Failed to send invitations" });
     }
   });
