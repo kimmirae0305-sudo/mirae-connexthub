@@ -208,6 +208,46 @@ const buildSelectedAdvisorEmailContent = ({
     ].join("\n"),
   };
 };
+const ensureAdvisorProjectReviewTokenForSend = async (invitation: any) => {
+  const now = new Date();
+  const currentExpiration = invitation.expiresAt ? new Date(invitation.expiresAt) : null;
+  const hasValidToken = Boolean(
+    invitation.token &&
+    currentExpiration &&
+    !Number.isNaN(currentExpiration.getTime()) &&
+    currentExpiration > now
+  );
+
+  if (hasValidToken) {
+    return {
+      token: String(invitation.token),
+      expiresAt: currentExpiration,
+    };
+  }
+
+  let token: string | null = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = generateAdvisorProjectReviewToken();
+    const existing = await storage.getAdvisorProjectInvitationByToken(candidate);
+    if (!existing) {
+      token = candidate;
+      break;
+    }
+  }
+
+  if (!token) {
+    throw new Error("advisor_review_token_generation_failed");
+  }
+
+  const expiresAt = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  await storage.updateAdvisorProjectInvitation(invitation.id, {
+    token,
+    expiresAt,
+    status: invitation.status === "not_sent" ? "draft" : invitation.status || "draft",
+  });
+
+  return { token, expiresAt };
+};
 const getZohoProviderMessageId = (payload: any) =>
   String(
     payload?.data?.messageId ||
@@ -874,9 +914,9 @@ export async function registerRoutes(
           ineligibleSkippedCount += 1;
           results.push({
             invitationId,
-            status: "failed",
+            status: "skipped",
             emailType: null,
-            message: "Failed: missing invitation/magic link",
+            message: "Skipped: invalid invitation",
           });
           continue;
         }
@@ -895,9 +935,9 @@ export async function registerRoutes(
             expertId: invitation.expertId,
             advisorName,
             advisorEmail: toEmail || null,
-            status: "failed",
+            status: "skipped",
             emailType: null,
-            message: "Failed: missing invitation/magic link",
+            message: "Skipped: invitation is not attached to this project",
           });
           continue;
         }
@@ -925,28 +965,7 @@ export async function registerRoutes(
             advisorEmail: toEmail || null,
             status: "skipped",
             emailType: null,
-            message: "Skipped: invalid email",
-          });
-          continue;
-        }
-
-        const expiresAt = invitation.expiresAt ? new Date(invitation.expiresAt) : null;
-        const hasValidToken = Boolean(
-          invitation.token &&
-          expiresAt &&
-          !Number.isNaN(expiresAt.getTime()) &&
-          expiresAt > new Date()
-        );
-        if (!hasValidToken) {
-          ineligibleSkippedCount += 1;
-          results.push({
-            invitationId,
-            expertId: invitation.expertId,
-            advisorName,
-            advisorEmail: toEmail,
-            status: "failed",
-            emailType: null,
-            message: "Failed: missing invitation/magic link",
+            message: "Skipped: missing or invalid email",
           });
           continue;
         }
@@ -956,7 +975,24 @@ export async function registerRoutes(
         if (emailType === "follow_up") followUpCount += 1;
         else initialInviteCount += 1;
 
-        const reviewUrl = buildPublicAdvisorProjectReviewUrl(invitation.token!, req);
+        let token: string;
+        try {
+          const tokenData = await ensureAdvisorProjectReviewTokenForSend(invitation);
+          token = tokenData.token;
+        } catch {
+          results.push({
+            invitationId,
+            expertId: invitation.expertId,
+            advisorName,
+            advisorEmail: toEmail,
+            status: "failed",
+            emailType,
+            message: "Failed: could not generate review link",
+          });
+          continue;
+        }
+
+        const reviewUrl = buildPublicAdvisorProjectReviewUrl(token, req);
         const { subject, body } = buildSelectedAdvisorEmailContent({
           emailType,
           advisorName,

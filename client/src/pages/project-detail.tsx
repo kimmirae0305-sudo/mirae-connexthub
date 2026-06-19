@@ -1197,7 +1197,9 @@ export default function ProjectDetail() {
         advisorEmail: pe.expert?.email || null,
         status: "skipped",
         emailType: null,
-        message: "Skipped: missing invitation/magic link",
+        message: advisorInviteByExpertId.get(pe.expertId)?.id
+          ? "Skipped: missing or invalid email"
+          : "Skipped: invalid invitation",
       }));
       const mergedSummary = data.summary
         ? {
@@ -1931,7 +1933,6 @@ export default function ProjectDetail() {
   );
 
   const selectedAdvisorSendPlan = useMemo(() => {
-    const now = new Date();
     const plan = {
       totalSelected: selectedAdvisorRows.length,
       initialInvites: [] as EnrichedExpert[],
@@ -1944,15 +1945,8 @@ export default function ProjectDetail() {
     selectedAdvisorRows.forEach((pe) => {
       const invitation = advisorInviteByExpertId.get(pe.expertId);
       const status = String(invitation?.status || "not_sent").toLowerCase();
-      const expiresAt = invitation?.expiresAt ? new Date(invitation.expiresAt) : null;
-      const hasValidReviewLink = Boolean(
-        invitation?.id &&
-        invitation?.token &&
-        expiresAt &&
-        !Number.isNaN(expiresAt.getTime()) &&
-        expiresAt > now
-      );
-      const hasEmail = Boolean((invitation?.email || pe.expert?.email || "").trim());
+      const email = (invitation?.email || pe.expert?.email || "").trim();
+      const hasValidEmail = Boolean(email) && !email.includes(",") && !email.includes(";") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
       if (status === "submitted") {
         if (invitation?.id) plan.invitationIds.push(invitation.id);
@@ -1960,7 +1954,7 @@ export default function ProjectDetail() {
         return;
       }
 
-      if (!invitation?.id || !hasValidReviewLink || !hasEmail) {
+      if (!invitation?.id || !hasValidEmail) {
         plan.ineligible.push(pe);
         return;
       }
@@ -4966,7 +4960,7 @@ export default function ProjectDetail() {
               <div className="rounded-md border p-3">
                 <p className="text-sm font-medium">Ineligible or skipped before send</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  These advisors need a valid email and generated review link before selected send can email them.
+                  These advisors are excluded because they are submitted, missing a valid email, or cannot be safely emailed for this project.
                 </p>
                 <div className="mt-3 max-h-36 space-y-1 overflow-y-auto text-sm">
                   {selectedAdvisorSendPlan.ineligible.map((pe) => (
