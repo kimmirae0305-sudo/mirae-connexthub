@@ -464,6 +464,32 @@ export const billableUsage = pgTable("billable_usage", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const expertPayables = pgTable("expert_payables", {
+  id: serial("id").primaryKey(),
+  consultationId: integer("consultation_id").notNull().references(() => callRecords.id, { onDelete: "restrict" }).unique(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "restrict" }),
+  expertId: integer("expert_id").notNull().references(() => experts.id, { onDelete: "restrict" }),
+  clientOrganizationId: integer("client_organization_id").references(() => clientOrganizations.id, { onDelete: "set null" }),
+  serviceDate: timestamp("service_date").notNull(),
+  durationMinutes: integer("duration_minutes").notNull(),
+  expertHourlyRateSnapshot: decimal("expert_hourly_rate_snapshot", { precision: 10, scale: 2 }).notNull(),
+  payoutCurrency: text("payout_currency").notNull().default("USD"),
+  payableAmount: decimal("payable_amount", { precision: 12, scale: 2 }).notNull(),
+  status: text("status").notNull().default("pending_review"),
+  approvedAt: timestamp("approved_at"),
+  approvedByUserId: integer("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  paidAt: timestamp("paid_at"),
+  paidByUserId: integer("paid_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  paymentMethod: text("payment_method"),
+  paymentReferenceNumber: text("payment_reference_number"),
+  paymentNotes: text("payment_notes"),
+  voidedAt: timestamp("voided_at"),
+  voidedByUserId: integer("voided_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  voidReason: text("void_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Invoices table (Finance invoice lifecycle)
 export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
@@ -805,6 +831,37 @@ export const billableUsageRelations = relations(billableUsage, ({ one }) => ({
   }),
 }));
 
+export const expertPayablesRelations = relations(expertPayables, ({ one }) => ({
+  consultation: one(callRecords, {
+    fields: [expertPayables.consultationId],
+    references: [callRecords.id],
+  }),
+  project: one(projects, {
+    fields: [expertPayables.projectId],
+    references: [projects.id],
+  }),
+  expert: one(experts, {
+    fields: [expertPayables.expertId],
+    references: [experts.id],
+  }),
+  clientOrganization: one(clientOrganizations, {
+    fields: [expertPayables.clientOrganizationId],
+    references: [clientOrganizations.id],
+  }),
+  approver: one(users, {
+    fields: [expertPayables.approvedByUserId],
+    references: [users.id],
+  }),
+  paidBy: one(users, {
+    fields: [expertPayables.paidByUserId],
+    references: [users.id],
+  }),
+  voidedBy: one(users, {
+    fields: [expertPayables.voidedByUserId],
+    references: [users.id],
+  }),
+}));
+
 export const invoicesRelations = relations(invoices, ({ one, many }) => ({
   clientOrganization: one(clientOrganizations, {
     fields: [invoices.clientOrganizationId],
@@ -1042,6 +1099,17 @@ export const insertBillableUsageSchema = createInsertSchema(billableUsage).omit(
   callDate: coerceDateRequired,
 });
 
+export const insertExpertPayableSchema = createInsertSchema(expertPayables).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  serviceDate: coerceDateRequired,
+  approvedAt: coerceDate.optional(),
+  paidAt: coerceDate.optional(),
+  voidedAt: coerceDate.optional(),
+});
+
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({
   id: true,
   createdAt: true,
@@ -1135,6 +1203,8 @@ export type InsertUsageRecord = z.infer<typeof insertUsageRecordSchema>;
 
 export type BillableUsage = typeof billableUsage.$inferSelect;
 export type InsertBillableUsage = z.infer<typeof insertBillableUsageSchema>;
+export type ExpertPayable = typeof expertPayables.$inferSelect;
+export type InsertExpertPayable = z.infer<typeof insertExpertPayableSchema>;
 
 export type Invoice = typeof invoices.$inferSelect;
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
