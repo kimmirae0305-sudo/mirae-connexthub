@@ -25,6 +25,7 @@ import Invoices from "@/pages/invoices";
 import Expenses from "@/pages/expenses";
 import Analytics from "@/pages/analytics";
 import Employees from "@/pages/employees";
+import EmailTemplates from "@/pages/email-templates";
 import ExpertRegister from "@/pages/expert-register";
 import ExpertInvite from "@/pages/expert-invite";
 import ExpertOnboarding from "@/pages/expert-onboarding";
@@ -210,6 +211,9 @@ function Router() {
       </Route>
       <Route path="/employees">
         <MainLayout><Employees /></MainLayout>
+      </Route>
+      <Route path="/email-templates">
+        <MainLayout><EmailTemplates /></MainLayout>
       </Route>
       <Route path="/invites">
         <MainLayout><Invites /></MainLayout>

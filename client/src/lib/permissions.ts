@@ -16,6 +16,7 @@ export type PageKey =
   | "analytics"
   | "pm-performance"
   | "employees"
+  | "email-templates"
   | "invites"
   | "ra-performance"
   | "settings";
@@ -53,6 +54,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "analytics",
     "pm-performance",
     "employees",
+    "email-templates",
     "invites",
     "ra-performance",
     "settings",
@@ -73,6 +75,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "analytics",
     "pm-performance",
     "employees",
+    "email-templates",
     "invites",
     "ra-performance",
     "settings",
@@ -93,6 +96,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, PageKey[]> = {
     "analytics",
     "pm-performance",
     "employees",
+    "email-templates",
     "invites",
     "ra-performance",
     "settings",
@@ -146,6 +150,7 @@ export const PAGE_TO_ROUTE: Record<PageKey, string> = {
   analytics: "/analytics",
   "pm-performance": "/pm-performance",
   employees: "/employees",
+  "email-templates": "/email-templates",
   invites: "/invites",
   "ra-performance": "/ra-performance",
   settings: "/settings",
@@ -167,6 +172,7 @@ export const ROUTE_TO_PAGE: Record<string, PageKey> = {
   "/analytics": "analytics",
   "/pm-performance": "pm-performance",
   "/employees": "employees",
+  "/email-templates": "email-templates",
   "/invites": "invites",
   "/ra-performance": "ra-performance",
   "/settings": "settings",

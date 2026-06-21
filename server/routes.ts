@@ -40,7 +40,20 @@ import { startOfMonth, addMonths } from "date-fns";
 import { sendExpertInvitationEmail, verifySmtpConnection } from "./email";
 import { resolveEmailSenderIdentity } from "./emailSenderIdentity";
 import { decryptEmailToken, encryptEmailToken, getEmailTokenEncryptionKeyStatus } from "./emailTokenCrypto";
-import { renderAdvisorEmailHtml } from "./advisorEmailTemplate";
+import {
+  ADVISOR_EMAIL_ALLOWED_VARIABLES,
+  ADVISOR_EMAIL_TEMPLATE_LANGUAGES,
+  ADVISOR_EMAIL_TEMPLATE_TYPES,
+  findUnsupportedAdvisorTemplateVariables,
+  getDefaultAdvisorEmailTemplate,
+  normalizeAdvisorTemplateLanguage,
+  normalizeAdvisorTemplateType,
+  renderAdvisorEmailHtml,
+  renderAdvisorTemplateContent,
+  type AdvisorManagedTemplateLanguage,
+  type AdvisorManagedTemplateType,
+  type AdvisorTemplateVariableContext,
+} from "./advisorEmailTemplate";
 import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
@@ -147,66 +160,92 @@ const getFirstNameForEmail = (name?: string | null) => {
   const firstName = String(name || "").trim().split(/\s+/)[0];
   return firstName || "";
 };
-const buildSelectedAdvisorEmailContent = ({
-  emailType,
-  advisorName,
-  reviewUrl,
-  senderName,
-}: {
-  emailType: "initial_invite" | "follow_up";
-  advisorName?: string | null;
-  reviewUrl: string;
-  senderName?: string | null;
-}) => {
-  const advisorFirstName = getFirstNameForEmail(advisorName);
-  const senderFirstName = getFirstNameForEmail(senderName) || "Mirae Connext";
-  const greeting = advisorFirstName ? `Hi ${advisorFirstName},` : "Hello,";
-  const intro = `This is ${senderFirstName} from Mirae Connext.`;
-  const closing = `Best regards,\n${senderFirstName}`;
-
-  if (emailType === "follow_up") {
+const mapAdvisorEmailTypeToTemplateType = (emailType?: string | null): AdvisorManagedTemplateType => {
+  if (emailType === "follow_up") return "advisor_follow_up";
+  if (emailType === "resend_invite") return "advisor_resend";
+  return "advisor_initial_invite";
+};
+const getAdvisorTemplateSafeFields = (template: any, source = "managed") => ({
+  id: template.id ?? null,
+  templateType: template.templateType,
+  language: template.language,
+  subject: template.subject,
+  body: template.body,
+  description: template.description ?? null,
+  isActive: template.isActive !== false,
+  updatedAt: template.updatedAt ?? null,
+  updatedBy: template.updatedBy ?? null,
+  source,
+});
+const getAdvisorEmailTemplateForSend = async (
+  templateType: AdvisorManagedTemplateType,
+  language: AdvisorManagedTemplateLanguage
+) => {
+  const managedTemplate = await storage.getEmailTemplate(templateType, language);
+  if (managedTemplate?.isActive && managedTemplate.subject && managedTemplate.body) {
     return {
-      subject: "Follow-up: Expert consultation invitation from Mirae Connext",
-      body: [
-        greeting,
-        "",
-        intro,
-        "",
-        "I wanted to follow up on the expert consultation opportunity we shared with you.",
-        "",
-        "When convenient, could you please review the brief and answer the short screening questions through the secure link below?",
-        "",
-        reviewUrl,
-        "",
-        "Your responses will help us confirm whether the consultation is a good fit before moving forward.",
-        "",
-        "Thank you.",
-        "",
-        closing,
-      ].join("\n"),
+      template: managedTemplate,
+      source: "managed" as const,
     };
   }
 
+  if (language !== "en") {
+    const englishTemplate = await storage.getEmailTemplate(templateType, "en");
+    if (englishTemplate?.isActive && englishTemplate.subject && englishTemplate.body) {
+      return {
+        template: englishTemplate,
+        source: "managed_english_fallback" as const,
+      };
+    }
+  }
+
+  const defaultTemplate = getDefaultAdvisorEmailTemplate(templateType, language);
   return {
-    subject: "Mirae Connext | Expert consultation opportunity",
-    body: [
-      greeting,
-      "",
-      intro,
-      "",
-      "Mirae Connext is currently reviewing a potential expert consultation opportunity that may be relevant to your professional background.",
-      "",
-      "Could you please review the brief and answer a few short screening questions through the secure link below?",
-      "",
-      reviewUrl,
-      "",
-      "Your responses will help us confirm whether the consultation is a good fit before moving forward.",
-      "",
-      "Please note that this is an initial review step and does not yet represent a confirmed consultation.",
-      "",
-      closing,
-    ].join("\n"),
+    template: {
+      id: null,
+      templateType,
+      language,
+      subject: defaultTemplate.subject,
+      body: defaultTemplate.body,
+      description: defaultTemplate.description,
+      isActive: true,
+    },
+    source: "default" as const,
   };
+};
+const resolveAdvisorEmailTemplateForSend = async ({
+  templateType,
+  language,
+  context,
+}: {
+  templateType: AdvisorManagedTemplateType;
+  language: AdvisorManagedTemplateLanguage;
+  context: AdvisorTemplateVariableContext;
+}) => {
+  const { template, source } = await getAdvisorEmailTemplateForSend(templateType, language);
+  return {
+    ...renderAdvisorTemplateContent(template, context),
+    templateSource: source,
+  };
+};
+const ensureDefaultAdvisorEmailTemplates = async () => {
+  for (const templateType of ADVISOR_EMAIL_TEMPLATE_TYPES) {
+    for (const language of ADVISOR_EMAIL_TEMPLATE_LANGUAGES) {
+      const existing = await storage.getEmailTemplate(templateType, language);
+      if (existing) continue;
+
+      const defaults = getDefaultAdvisorEmailTemplate(templateType, language);
+      await storage.upsertEmailTemplate({
+        templateType,
+        language,
+        subject: defaults.subject,
+        body: defaults.body,
+        description: defaults.description,
+        isActive: true,
+        updatedBy: null,
+      });
+    }
+  }
 };
 const ensureAdvisorProjectReviewTokenForSend = async (invitation: any) => {
   const now = new Date();
@@ -365,6 +404,178 @@ export async function registerRoutes(
       isValid: senderIdentity.isValid,
       reason: senderIdentity.reason,
     });
+  });
+
+  app.get("/api/email/templates", authMiddleware, requireRoles("admin", "ceo", "coo"), async (_req, res) => {
+    try {
+      await ensureDefaultAdvisorEmailTemplates();
+      const managedTemplates = await storage.getEmailTemplates();
+      const managedByKey = new Map(
+        managedTemplates.map((template) => [`${template.templateType}:${template.language}`, template])
+      );
+      const templates = ADVISOR_EMAIL_TEMPLATE_TYPES.flatMap((templateType) =>
+        ADVISOR_EMAIL_TEMPLATE_LANGUAGES.map((language) => {
+          const managed = managedByKey.get(`${templateType}:${language}`);
+          if (managed) return getAdvisorTemplateSafeFields(managed, "managed");
+          const defaults = getDefaultAdvisorEmailTemplate(templateType, language);
+          return getAdvisorTemplateSafeFields({
+            id: null,
+            templateType,
+            language,
+            subject: defaults.subject,
+            body: defaults.body,
+            description: defaults.description,
+            isActive: true,
+          }, "default");
+        })
+      );
+
+      res.json({
+        templates,
+        templateTypes: ADVISOR_EMAIL_TEMPLATE_TYPES,
+        languages: ADVISOR_EMAIL_TEMPLATE_LANGUAGES,
+        allowedVariables: ADVISOR_EMAIL_ALLOWED_VARIABLES,
+      });
+    } catch (error) {
+      console.error("Error fetching email templates:", error);
+      res.status(500).json({ error: "Failed to fetch email templates" });
+    }
+  });
+
+  app.get("/api/email/templates/:templateType/:language", authMiddleware, async (req, res) => {
+    try {
+      const templateType = normalizeAdvisorTemplateType(req.params.templateType);
+      const language = normalizeAdvisorTemplateLanguage(req.params.language);
+      if (!templateType) {
+        return res.status(400).json({ error: "Invalid email template type." });
+      }
+
+      const { template, source } = await getAdvisorEmailTemplateForSend(templateType, language);
+      res.json({
+        template: getAdvisorTemplateSafeFields(template, source),
+        allowedVariables: ADVISOR_EMAIL_ALLOWED_VARIABLES,
+      });
+    } catch (error) {
+      console.error("Error fetching email template:", error);
+      res.status(500).json({ error: "Failed to fetch email template" });
+    }
+  });
+
+  app.patch("/api/email/templates/:id", authMiddleware, requireRoles("admin", "ceo", "coo"), async (req: AuthRequest, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid email template id." });
+      }
+
+      const existing = await storage.getEmailTemplateById(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Email template not found." });
+      }
+
+      const subject = String(req.body?.subject || "").trim();
+      const body = String(req.body?.body || "").trim();
+      const description = req.body?.description === undefined ? existing.description : String(req.body.description || "").trim() || null;
+      const isActive = req.body?.isActive === undefined ? existing.isActive : Boolean(req.body.isActive);
+
+      if (!subject || !body) {
+        return res.status(400).json({ error: "Subject and body are required." });
+      }
+      if (subject.length > 300 || body.length > 20000) {
+        return res.status(400).json({ error: "Subject or body is too long." });
+      }
+
+      const unsupportedVariables = findUnsupportedAdvisorTemplateVariables(subject, body);
+      if (unsupportedVariables.length > 0) {
+        return res.status(400).json({
+          error: `Unsupported variable${unsupportedVariables.length === 1 ? "" : "s"}: ${unsupportedVariables.join(", ")}`,
+          unsupportedVariables,
+        });
+      }
+
+      const updated = await storage.updateEmailTemplate(id, {
+        subject,
+        body,
+        description,
+        isActive,
+        updatedBy: req.user!.id,
+      });
+      if (!updated) {
+        return res.status(404).json({ error: "Email template not found." });
+      }
+      res.json({ template: getAdvisorTemplateSafeFields(updated, "managed") });
+    } catch (error) {
+      console.error("Error updating email template:", error);
+      res.status(500).json({ error: "Failed to update email template" });
+    }
+  });
+
+  app.post("/api/email/templates", authMiddleware, requireRoles("admin", "ceo", "coo"), async (req: AuthRequest, res) => {
+    try {
+      const templateType = normalizeAdvisorTemplateType(req.body?.templateType);
+      const language = normalizeAdvisorTemplateLanguage(req.body?.language);
+      const subject = String(req.body?.subject || "").trim();
+      const body = String(req.body?.body || "").trim();
+      const description = String(req.body?.description || "").trim() || null;
+      const isActive = req.body?.isActive === undefined ? true : Boolean(req.body.isActive);
+
+      if (!templateType) {
+        return res.status(400).json({ error: "Invalid email template type." });
+      }
+      if (!subject || !body) {
+        return res.status(400).json({ error: "Subject and body are required." });
+      }
+      if (subject.length > 300 || body.length > 20000) {
+        return res.status(400).json({ error: "Subject or body is too long." });
+      }
+
+      const unsupportedVariables = findUnsupportedAdvisorTemplateVariables(subject, body);
+      if (unsupportedVariables.length > 0) {
+        return res.status(400).json({
+          error: `Unsupported variable${unsupportedVariables.length === 1 ? "" : "s"}: ${unsupportedVariables.join(", ")}`,
+          unsupportedVariables,
+        });
+      }
+
+      const template = await storage.upsertEmailTemplate({
+        templateType,
+        language,
+        subject,
+        body,
+        description,
+        isActive,
+        updatedBy: req.user!.id,
+      });
+      res.json({ template: getAdvisorTemplateSafeFields(template, "managed") });
+    } catch (error) {
+      console.error("Error saving email template:", error);
+      res.status(500).json({ error: "Failed to save email template" });
+    }
+  });
+
+  app.post("/api/email/templates/reset-default", authMiddleware, requireRoles("admin", "ceo", "coo"), async (req: AuthRequest, res) => {
+    try {
+      const templateType = normalizeAdvisorTemplateType(req.body?.templateType);
+      const language = normalizeAdvisorTemplateLanguage(req.body?.language);
+      if (!templateType) {
+        return res.status(400).json({ error: "Invalid email template type." });
+      }
+
+      const defaults = getDefaultAdvisorEmailTemplate(templateType, language);
+      const template = await storage.upsertEmailTemplate({
+        templateType,
+        language,
+        subject: defaults.subject,
+        body: defaults.body,
+        description: defaults.description,
+        isActive: true,
+        updatedBy: req.user!.id,
+      });
+      res.json({ template: getAdvisorTemplateSafeFields(template, "managed") });
+    } catch (error) {
+      console.error("Error resetting email template:", error);
+      res.status(500).json({ error: "Failed to reset email template" });
+    }
   });
 
   app.get("/api/email/zoho/status", authMiddleware, async (req: AuthRequest, res) => {
@@ -610,6 +821,10 @@ export async function registerRoutes(
       if (subject.length > 300 || body.length > 20000) {
         return res.status(400).json({ error: "Subject or body is too long to send safely." });
       }
+      const unsupportedVariables = findUnsupportedAdvisorTemplateVariables(subject, body);
+      if (unsupportedVariables.length > 0) {
+        return res.status(400).json({ error: "Email contains unsupported template variables." });
+      }
 
       const config = getZohoOAuthConfig();
       if (!config.isConfigured) {
@@ -687,8 +902,21 @@ export async function registerRoutes(
       const senderProfile = await storage.getUser(user.id);
       const signatureSenderName = senderProfile?.fullName || senderIdentity.fromName;
       const signatureSenderEmail = senderProfile?.email || senderIdentity.fromEmail;
+      const tokenData = await ensureAdvisorProjectReviewTokenForSend(invitation);
+      const reviewUrl = buildPublicAdvisorProjectReviewUrl(tokenData.token, req);
+      const renderedEmail = renderAdvisorTemplateContent(
+        { subject, body },
+        {
+          advisorName: getFirstNameForEmail(expert.name) || expert.name,
+          senderName: getFirstNameForEmail(signatureSenderName) || signatureSenderName,
+          senderTitle: senderProfile?.jobTitle || null,
+          senderEmail: signatureSenderEmail,
+          senderMobile: senderProfile?.mobilePhone || null,
+          reviewLink: reviewUrl,
+        }
+      );
       const emailHtml = renderAdvisorEmailHtml({
-        body,
+        body: renderedEmail.body,
         senderName: signatureSenderName,
         senderEmail: signatureSenderEmail,
         signatureName: senderProfile?.signatureName || null,
@@ -706,7 +934,7 @@ export async function registerRoutes(
         body: JSON.stringify({
           fromAddress: senderIdentity.fromEmail,
           toAddress: toEmail,
-          subject,
+          subject: renderedEmail.subject,
           content: emailHtml,
           mailFormat: "html",
         }),
@@ -733,8 +961,8 @@ export async function registerRoutes(
         fromEmail: senderIdentity.fromEmail,
         fromName: senderIdentity.fromName || null,
         toEmail,
-        subject,
-        body,
+        subject: renderedEmail.subject,
+        body: renderedEmail.body,
         emailType,
         provider: "zoho",
         providerMessageId,
@@ -978,11 +1206,17 @@ export async function registerRoutes(
         }
 
         const reviewUrl = buildPublicAdvisorProjectReviewUrl(token, req);
-        const { subject, body } = buildSelectedAdvisorEmailContent({
-          emailType,
-          advisorName,
-          reviewUrl,
-          senderName,
+        const { subject, body } = await resolveAdvisorEmailTemplateForSend({
+          templateType: mapAdvisorEmailTypeToTemplateType(emailType),
+          language: "en",
+          context: {
+            advisorName: getFirstNameForEmail(advisorName) || advisorName,
+            senderName: getFirstNameForEmail(senderName) || senderName,
+            senderTitle: senderProfile?.jobTitle || null,
+            senderEmail,
+            senderMobile: senderProfile?.mobilePhone || null,
+            reviewLink: reviewUrl,
+          },
         });
         const emailHtml = renderAdvisorEmailHtml({
           body,

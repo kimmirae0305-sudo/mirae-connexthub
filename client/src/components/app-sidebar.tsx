@@ -13,6 +13,7 @@ import {
   LogOut,
   UsersRound,
   Award,
+  Mail,
 } from "lucide-react";
 import {
   Sidebar,
@@ -149,6 +150,12 @@ const adminItems: NavItem[] = [
     url: "/employees",
     icon: UsersRound,
     pageKey: "employees",
+  },
+  {
+    title: "Email Templates",
+    url: "/email-templates",
+    icon: Mail,
+    pageKey: "email-templates",
   },
 ];
 

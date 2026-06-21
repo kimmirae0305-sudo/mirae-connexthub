@@ -49,6 +49,19 @@ export const emailOauthStates = pgTable("email_oauth_states", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const emailTemplates = pgTable("email_templates", {
+  id: serial("id").primaryKey(),
+  templateType: text("template_type").notNull(),
+  language: text("language").notNull(),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Clients table (Internal CRM - managed by employees)
 export const clients = pgTable("clients", {
   id: serial("id").primaryKey(),
@@ -875,6 +888,12 @@ export const insertEmailOauthStateSchema = createInsertSchema(emailOauthStates).
   usedAt: coerceDate.optional(),
 });
 
+export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertClientSchema = createInsertSchema(clients).omit({
   id: true,
   createdAt: true,
@@ -1064,6 +1083,8 @@ export type UserEmailConnection = typeof userEmailConnections.$inferSelect;
 export type InsertUserEmailConnection = z.infer<typeof insertUserEmailConnectionSchema>;
 export type EmailOauthState = typeof emailOauthStates.$inferSelect;
 export type InsertEmailOauthState = z.infer<typeof insertEmailOauthStateSchema>;
+export type EmailTemplate = typeof emailTemplates.$inferSelect;
+export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
 
 export type Client = typeof clients.$inferSelect;
 export type InsertClient = z.infer<typeof insertClientSchema>;
