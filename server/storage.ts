@@ -5,6 +5,7 @@ import {
   projectExperts,
   usageRecords,
   billableUsage,
+  expertPayables,
   invoices,
   invoiceLineItems,
   expenses,
@@ -70,6 +71,8 @@ import {
   type Expense,
   type InsertExpense,
   type BillableUsage,
+  type ExpertPayable,
+  type InsertExpertPayable,
   calculateCU,
 } from "@shared/schema";
 import { db } from "./db";
@@ -160,6 +163,49 @@ export interface BillableUsageRateRefreshResult {
   updatedCount: number;
   skippedCount: number;
   stillMissingRateCount: number;
+}
+
+export interface ExpertPayableListRow extends ExpertPayable {
+  expertName: string;
+  expertEmail: string | null;
+  projectName: string;
+  clientName: string;
+  clientOrganizationName: string | null;
+  approvedByName: string | null;
+  paidByName: string | null;
+  voidedByName: string | null;
+}
+
+export interface EligibleExpertPayableConsultationRow {
+  consultationId: number;
+  projectId: number;
+  projectName: string;
+  expertId: number;
+  expertName: string;
+  expertEmail: string | null;
+  clientOrganizationId: number | null;
+  clientName: string;
+  clientOrganizationName: string | null;
+  serviceDate: Date;
+  durationMinutes: number;
+  expertHourlyRate: string;
+  rateSource: "project_expert" | "expert_profile";
+  payoutCurrency: string;
+  estimatedPayableAmount: string;
+}
+
+export interface CreateExpertPayableResult extends ExpertPayableListRow {
+  rateSource: "project_expert" | "expert_profile";
+}
+
+export interface MarkExpertPayablePaidInput {
+  paymentMethod?: string | null;
+  paymentReferenceNumber?: string | null;
+  paymentNotes?: string | null;
+}
+
+export interface VoidExpertPayableInput {
+  voidReason?: string | null;
 }
 
 export interface InvoiceListRow {
@@ -657,6 +703,15 @@ export interface IStorage {
   syncBillableUsageFromCompletedCalls(): Promise<BillableUsageSyncResult>;
   refreshMissingBillableUsageRates(): Promise<BillableUsageRateRefreshResult>;
 
+  // Expert Payables (Finance AP)
+  getExpertPayables(filters?: { status?: string; search?: string }): Promise<ExpertPayableListRow[]>;
+  getExpertPayableById(id: number): Promise<ExpertPayableListRow | undefined>;
+  getEligibleExpertPayableConsultations(): Promise<EligibleExpertPayableConsultationRow[]>;
+  createExpertPayableFromConsultation(consultationId: number, createdByUserId?: number): Promise<CreateExpertPayableResult>;
+  approveExpertPayable(id: number, approvedByUserId: number): Promise<ExpertPayableListRow>;
+  markExpertPayablePaid(id: number, paidByUserId: number, input: MarkExpertPayablePaidInput): Promise<ExpertPayableListRow>;
+  voidExpertPayable(id: number, voidedByUserId: number, input: VoidExpertPayableInput): Promise<ExpertPayableListRow>;
+
   // Invoices (Finance draft layer)
   getInvoices(): Promise<InvoiceListRow[]>;
   getInvoiceById(id: number): Promise<InvoiceDetail | undefined>;
@@ -705,6 +760,25 @@ function normalizeCompanyName(value: unknown) {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function parseMoneyToCents(value: unknown): number | null {
+  const text = String(value ?? "").replace(/,/g, "").trim();
+  if (!text) return null;
+  const numeric = Number(text);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return Math.round(numeric * 100);
+}
+
+function formatCents(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+function calculateExpertPayableAmount(durationMinutes: number, hourlyRate: unknown): string | null {
+  if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) return null;
+  const rateCents = parseMoneyToCents(hourlyRate);
+  if (rateCents === null) return null;
+  return formatCents(Math.round((durationMinutes * rateCents) / 60));
 }
 
 function extractDomain(value: unknown) {
@@ -2603,6 +2677,360 @@ export class DatabaseStorage implements IStorage {
       skippedCount: protectedMissingRateRows.length,
       stillMissingRateCount,
     };
+  }
+
+  async getExpertPayables(filters: { status?: string; search?: string } = {}): Promise<ExpertPayableListRow[]> {
+    const conditions = [];
+    const status = String(filters.status || "").trim().toLowerCase();
+    const search = String(filters.search || "").trim();
+
+    if (status && status !== "all") {
+      conditions.push(eq(expertPayables.status, status));
+    }
+    if (search) {
+      const searchPattern = `%${search}%`;
+      conditions.push(
+        or(
+          ilike(experts.name, searchPattern),
+          ilike(projects.name, searchPattern),
+          ilike(projects.clientName, searchPattern),
+          ilike(clientOrganizations.name, searchPattern)
+        )
+      );
+    }
+
+    const query = db
+      .select({
+        id: expertPayables.id,
+        consultationId: expertPayables.consultationId,
+        projectId: expertPayables.projectId,
+        expertId: expertPayables.expertId,
+        clientOrganizationId: expertPayables.clientOrganizationId,
+        serviceDate: expertPayables.serviceDate,
+        durationMinutes: expertPayables.durationMinutes,
+        expertHourlyRateSnapshot: expertPayables.expertHourlyRateSnapshot,
+        payoutCurrency: expertPayables.payoutCurrency,
+        payableAmount: expertPayables.payableAmount,
+        status: expertPayables.status,
+        approvedAt: expertPayables.approvedAt,
+        approvedByUserId: expertPayables.approvedByUserId,
+        paidAt: expertPayables.paidAt,
+        paidByUserId: expertPayables.paidByUserId,
+        paymentMethod: expertPayables.paymentMethod,
+        paymentReferenceNumber: expertPayables.paymentReferenceNumber,
+        paymentNotes: expertPayables.paymentNotes,
+        voidedAt: expertPayables.voidedAt,
+        voidedByUserId: expertPayables.voidedByUserId,
+        voidReason: expertPayables.voidReason,
+        createdAt: expertPayables.createdAt,
+        updatedAt: expertPayables.updatedAt,
+        expertName: experts.name,
+        expertEmail: experts.email,
+        projectName: projects.name,
+        clientName: projects.clientName,
+        clientOrganizationName: clientOrganizations.name,
+      })
+      .from(expertPayables)
+      .innerJoin(experts, eq(expertPayables.expertId, experts.id))
+      .innerJoin(projects, eq(expertPayables.projectId, projects.id))
+      .leftJoin(clientOrganizations, eq(expertPayables.clientOrganizationId, clientOrganizations.id));
+
+    const rows = await (conditions.length > 0 ? query.where(and(...conditions)) : query)
+      .orderBy(desc(expertPayables.createdAt));
+
+    const userIds = Array.from(new Set(rows.flatMap((row) => [
+      row.approvedByUserId,
+      row.paidByUserId,
+      row.voidedByUserId,
+    ]).filter((id): id is number => Number.isInteger(id))));
+    const approverRows = userIds.length > 0
+      ? await db.select({ id: users.id, fullName: users.fullName }).from(users).where(inArray(users.id, userIds))
+      : [];
+    const userNameById = new Map(approverRows.map((user) => [user.id, user.fullName]));
+
+    return rows.map((row) => ({
+      ...row,
+      expertEmail: row.expertEmail || null,
+      clientOrganizationName: row.clientOrganizationName || null,
+      approvedByName: row.approvedByUserId ? userNameById.get(row.approvedByUserId) || null : null,
+      paidByName: row.paidByUserId ? userNameById.get(row.paidByUserId) || null : null,
+      voidedByName: row.voidedByUserId ? userNameById.get(row.voidedByUserId) || null : null,
+    }));
+  }
+
+  async getExpertPayableById(id: number): Promise<ExpertPayableListRow | undefined> {
+    const rows = await this.getExpertPayables({});
+    return rows.find((row) => row.id === id);
+  }
+
+  async getEligibleExpertPayableConsultations(): Promise<EligibleExpertPayableConsultationRow[]> {
+    const rows = await db
+      .select({
+        consultationId: callRecords.id,
+        projectId: callRecords.projectId,
+        projectName: projects.name,
+        expertId: callRecords.expertId,
+        expertName: experts.name,
+        expertEmail: experts.email,
+        clientOrganizationId: projects.clientOrganizationId,
+        clientName: projects.clientName,
+        clientOrganizationName: clientOrganizations.name,
+        serviceDate: sql<Date>`coalesce(${callRecords.completedAt}, ${callRecords.callDate})`,
+        durationMinutes: callRecords.durationMinutes,
+        actualDurationMinutes: callRecords.actualDurationMinutes,
+        projectExpertId: callRecords.projectExpertId,
+        projectExpertRate: projectExperts.expectedHourlyRateUsd,
+        expertHourlyRate: experts.hourlyRate,
+        existingPayableId: expertPayables.id,
+      })
+      .from(callRecords)
+      .innerJoin(projects, eq(callRecords.projectId, projects.id))
+      .innerJoin(experts, eq(callRecords.expertId, experts.id))
+      .leftJoin(projectExperts, eq(callRecords.projectExpertId, projectExperts.id))
+      .leftJoin(clientOrganizations, eq(projects.clientOrganizationId, clientOrganizations.id))
+      .leftJoin(expertPayables, eq(expertPayables.consultationId, callRecords.id))
+      .where(
+        and(
+          eq(callRecords.status, "completed"),
+          sql`${expertPayables.id} IS NULL`,
+          sql`coalesce(${callRecords.actualDurationMinutes}, ${callRecords.durationMinutes}) > 0`
+        )
+      )
+      .orderBy(desc(sql`coalesce(${callRecords.completedAt}, ${callRecords.callDate})`));
+
+    const eligibleRows: EligibleExpertPayableConsultationRow[] = [];
+    for (const row of rows) {
+      let rate = row.projectExpertRate;
+      let rateSource: "project_expert" | "expert_profile" = "project_expert";
+
+      if ((!rate || Number(rate) <= 0) && !row.projectExpertId) {
+        const [assignment] = await db
+          .select({ expectedHourlyRateUsd: projectExperts.expectedHourlyRateUsd })
+          .from(projectExperts)
+          .where(
+            and(
+              eq(projectExperts.projectId, row.projectId),
+              eq(projectExperts.expertId, row.expertId),
+              sql`${projectExperts.expectedHourlyRateUsd} IS NOT NULL`
+            )
+          )
+          .limit(1);
+        rate = assignment?.expectedHourlyRateUsd || rate;
+      }
+
+      if (!rate || Number(rate) <= 0) {
+        rate = row.expertHourlyRate;
+        rateSource = "expert_profile";
+      }
+
+      const durationMinutes = Number(row.actualDurationMinutes || row.durationMinutes || 0);
+      const estimatedPayableAmount = calculateExpertPayableAmount(durationMinutes, rate);
+      if (!estimatedPayableAmount || !rate || Number(rate) <= 0) continue;
+
+      eligibleRows.push({
+        consultationId: row.consultationId,
+        projectId: row.projectId,
+        projectName: row.projectName,
+        expertId: row.expertId,
+        expertName: row.expertName,
+        expertEmail: row.expertEmail || null,
+        clientOrganizationId: row.clientOrganizationId || null,
+        clientName: row.clientOrganizationName || row.clientName || "-",
+        clientOrganizationName: row.clientOrganizationName || null,
+        serviceDate: row.serviceDate,
+        durationMinutes,
+        expertHourlyRate: Number(rate).toFixed(2),
+        rateSource,
+        payoutCurrency: "USD",
+        estimatedPayableAmount,
+      });
+    }
+
+    return eligibleRows;
+  }
+
+  async createExpertPayableFromConsultation(
+    consultationId: number,
+    _createdByUserId?: number
+  ): Promise<CreateExpertPayableResult> {
+    if (!Number.isInteger(consultationId) || consultationId <= 0) {
+      throw new Error("Invalid consultation id.");
+    }
+
+    const created = await db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: expertPayables.id })
+        .from(expertPayables)
+        .where(eq(expertPayables.consultationId, consultationId));
+      if (existing) {
+        throw new Error("An expert payable already exists for this consultation.");
+      }
+
+      const [row] = await tx
+        .select({
+          consultationId: callRecords.id,
+          projectId: callRecords.projectId,
+          expertId: callRecords.expertId,
+          clientOrganizationId: projects.clientOrganizationId,
+          serviceDate: sql<Date>`coalesce(${callRecords.completedAt}, ${callRecords.callDate})`,
+          durationMinutes: callRecords.durationMinutes,
+          actualDurationMinutes: callRecords.actualDurationMinutes,
+          status: callRecords.status,
+          projectExpertId: callRecords.projectExpertId,
+          projectExpertRate: projectExperts.expectedHourlyRateUsd,
+          expertHourlyRate: experts.hourlyRate,
+        })
+        .from(callRecords)
+        .innerJoin(projects, eq(callRecords.projectId, projects.id))
+        .innerJoin(experts, eq(callRecords.expertId, experts.id))
+        .leftJoin(projectExperts, eq(callRecords.projectExpertId, projectExperts.id))
+        .where(eq(callRecords.id, consultationId));
+
+      if (!row) throw new Error("Consultation not found.");
+      if (row.status !== "completed") throw new Error("Only completed consultations can create expert payables.");
+
+      const durationMinutes = Number(row.actualDurationMinutes || row.durationMinutes || 0);
+      if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
+        throw new Error("Consultation duration is required before creating an expert payable.");
+      }
+
+      let rate = row.projectExpertRate;
+      let rateSource: "project_expert" | "expert_profile" = "project_expert";
+      if ((!rate || Number(rate) <= 0) && !row.projectExpertId) {
+        const [assignment] = await tx
+          .select({ expectedHourlyRateUsd: projectExperts.expectedHourlyRateUsd })
+          .from(projectExperts)
+          .where(
+            and(
+              eq(projectExperts.projectId, row.projectId),
+              eq(projectExperts.expertId, row.expertId),
+              sql`${projectExperts.expectedHourlyRateUsd} IS NOT NULL`
+            )
+          )
+          .limit(1);
+        rate = assignment?.expectedHourlyRateUsd || rate;
+      }
+      if (!rate || Number(rate) <= 0) {
+        rate = row.expertHourlyRate;
+        rateSource = "expert_profile";
+      }
+
+      const payableAmount = calculateExpertPayableAmount(durationMinutes, rate);
+      const rateCents = parseMoneyToCents(rate);
+      if (!payableAmount || rateCents === null) {
+        throw new Error("Expert hourly rate is required before creating an expert payable.");
+      }
+
+      const [inserted] = await tx
+        .insert(expertPayables)
+        .values({
+          consultationId: row.consultationId,
+          projectId: row.projectId,
+          expertId: row.expertId,
+          clientOrganizationId: row.clientOrganizationId || null,
+          serviceDate: row.serviceDate,
+          durationMinutes,
+          expertHourlyRateSnapshot: formatCents(rateCents),
+          payoutCurrency: "USD",
+          payableAmount,
+          status: "pending_review",
+        } as InsertExpertPayable)
+        .onConflictDoNothing({ target: expertPayables.consultationId })
+        .returning();
+
+      if (!inserted) {
+        throw new Error("An expert payable already exists for this consultation.");
+      }
+
+      return { id: inserted.id, rateSource };
+    });
+
+    const payable = await this.getExpertPayableById(created.id);
+    if (!payable) throw new Error("Expert payable could not be loaded after creation.");
+    return { ...payable, rateSource: created.rateSource };
+  }
+
+  async approveExpertPayable(id: number, approvedByUserId: number): Promise<ExpertPayableListRow> {
+    const updatedId = await db.transaction(async (tx) => {
+      const now = new Date();
+      const [updated] = await tx
+        .update(expertPayables)
+        .set({
+          status: "approved",
+          approvedAt: now,
+          approvedByUserId,
+          updatedAt: now,
+        })
+        .where(and(eq(expertPayables.id, id), eq(expertPayables.status, "pending_review")))
+        .returning({ id: expertPayables.id });
+      if (!updated) throw new Error("Only pending review payables can be approved.");
+      return updated.id;
+    });
+
+    const payable = await this.getExpertPayableById(updatedId);
+    if (!payable) throw new Error("Expert payable not found after approval.");
+    return payable;
+  }
+
+  async markExpertPayablePaid(
+    id: number,
+    paidByUserId: number,
+    input: MarkExpertPayablePaidInput
+  ): Promise<ExpertPayableListRow> {
+    const updatedId = await db.transaction(async (tx) => {
+      const now = new Date();
+      const [updated] = await tx
+        .update(expertPayables)
+        .set({
+          status: "paid",
+          paidAt: now,
+          paidByUserId,
+          paymentMethod: String(input.paymentMethod || "").trim() || null,
+          paymentReferenceNumber: String(input.paymentReferenceNumber || "").trim() || null,
+          paymentNotes: String(input.paymentNotes || "").trim() || null,
+          updatedAt: now,
+        })
+        .where(and(eq(expertPayables.id, id), eq(expertPayables.status, "approved")))
+        .returning({ id: expertPayables.id });
+      if (!updated) throw new Error("Only approved payables can be marked as paid.");
+      return updated.id;
+    });
+
+    const payable = await this.getExpertPayableById(updatedId);
+    if (!payable) throw new Error("Expert payable not found after payment update.");
+    return payable;
+  }
+
+  async voidExpertPayable(
+    id: number,
+    voidedByUserId: number,
+    input: VoidExpertPayableInput
+  ): Promise<ExpertPayableListRow> {
+    const voidReason = String(input.voidReason || "").trim();
+    if (!voidReason) {
+      throw new Error("Void reason is required.");
+    }
+
+    const updatedId = await db.transaction(async (tx) => {
+      const now = new Date();
+      const [updated] = await tx
+        .update(expertPayables)
+        .set({
+          status: "void",
+          voidedAt: now,
+          voidedByUserId,
+          voidReason,
+          updatedAt: now,
+        })
+        .where(and(eq(expertPayables.id, id), inArray(expertPayables.status, ["pending_review", "approved"])))
+        .returning({ id: expertPayables.id });
+      if (!updated) throw new Error("Only pending review or approved payables can be voided.");
+      return updated.id;
+    });
+
+    const payable = await this.getExpertPayableById(updatedId);
+    if (!payable) throw new Error("Expert payable not found after void.");
+    return payable;
   }
 
   async getInvoices(): Promise<InvoiceListRow[]> {

@@ -5881,6 +5881,118 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== EXPERT PAYABLES (FINANCE AP) ====================
+  app.get("/api/expert-payables", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const rows = await storage.getExpertPayables({
+        status: typeof req.query.status === "string" ? req.query.status : undefined,
+        search: typeof req.query.search === "string" ? req.query.search : undefined,
+      });
+      res.json({ rows });
+    } catch (error) {
+      console.error("Failed to fetch expert payables:", error);
+      res.status(500).json({ error: "Failed to fetch expert payables" });
+    }
+  });
+
+  app.get("/api/expert-payables/eligible-consultations", authMiddleware, requireRoles("admin", "finance"), async (_req, res) => {
+    try {
+      const rows = await storage.getEligibleExpertPayableConsultations();
+      res.json({ rows });
+    } catch (error) {
+      console.error("Failed to fetch eligible expert payable consultations:", error);
+      res.status(500).json({ error: "Failed to fetch eligible consultations" });
+    }
+  });
+
+  app.post("/api/expert-payables", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const consultationId = Number(req.body?.consultationId);
+      if (!Number.isInteger(consultationId) || consultationId <= 0) {
+        return res.status(400).json({ error: "Valid consultationId is required." });
+      }
+
+      const payable = await storage.createExpertPayableFromConsultation(consultationId, req.user?.id);
+      res.status(201).json(payable);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create expert payable";
+      console.error("Failed to create expert payable:", error);
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.get("/api/expert-payables/:id", authMiddleware, requireRoles("admin", "finance"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid expert payable id." });
+      }
+
+      const payable = await storage.getExpertPayableById(id);
+      if (!payable) {
+        return res.status(404).json({ error: "Expert payable not found." });
+      }
+      res.json(payable);
+    } catch (error) {
+      console.error("Failed to fetch expert payable:", error);
+      res.status(500).json({ error: "Failed to fetch expert payable" });
+    }
+  });
+
+  app.post("/api/expert-payables/:id/approve", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid expert payable id." });
+      }
+
+      const payable = await storage.approveExpertPayable(id, req.user!.id);
+      res.json(payable);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to approve expert payable";
+      console.error("Failed to approve expert payable:", error);
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.post("/api/expert-payables/:id/mark-paid", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid expert payable id." });
+      }
+
+      const payable = await storage.markExpertPayablePaid(id, req.user!.id, {
+        paymentMethod: req.body?.paymentMethod,
+        paymentReferenceNumber: req.body?.paymentReferenceNumber,
+        paymentNotes: req.body?.paymentNotes,
+      });
+      res.json(payable);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to mark expert payable as paid";
+      console.error("Failed to mark expert payable as paid:", error);
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.post("/api/expert-payables/:id/void", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid expert payable id." });
+      }
+
+      const payable = await storage.voidExpertPayable(id, req.user!.id, {
+        voidReason: req.body?.voidReason,
+      });
+      res.json(payable);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to void expert payable";
+      console.error("Failed to void expert payable:", error);
+      res.status(400).json({ error: message });
+    }
+  });
+
   // ==================== INVOICES (FINANCE DRAFT LAYER) ====================
   const normalizeInvoiceDateOnly = (value: Date | string | null | undefined) => {
     if (!value) return "";

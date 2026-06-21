@@ -125,6 +125,12 @@ const financeItems: NavItem[] = [
     pageKey: "billable-usage",
   },
   {
+    title: "Expert Payables",
+    url: "/expert-payables",
+    icon: Receipt,
+    pageKey: "expert-payables",
+  },
+  {
     title: "Contracts",
     url: "/contracts",
     icon: Briefcase,
