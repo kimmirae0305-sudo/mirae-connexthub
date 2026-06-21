@@ -22,6 +22,7 @@ import {
   advisorProjectInvitationEmailSends,
   userEmailConnections,
   emailOauthStates,
+  emailTemplates,
   projectActivities,
   projectAngles,
   type Project,
@@ -60,6 +61,8 @@ import {
   type InsertUserEmailConnection,
   type EmailOauthState,
   type InsertEmailOauthState,
+  type EmailTemplate,
+  type InsertEmailTemplate,
   type ProjectActivity,
   type InsertProjectActivity,
   type ProjectAngle,
@@ -628,6 +631,11 @@ export interface IStorage {
   createEmailOauthState(state: InsertEmailOauthState): Promise<EmailOauthState>;
   getEmailOauthState(state: string): Promise<EmailOauthState | undefined>;
   markEmailOauthStateUsed(id: number, usedAt?: Date): Promise<EmailOauthState | undefined>;
+  getEmailTemplates(): Promise<EmailTemplate[]>;
+  getEmailTemplate(templateType: string, language: string): Promise<EmailTemplate | undefined>;
+  getEmailTemplateById(id: number): Promise<EmailTemplate | undefined>;
+  upsertEmailTemplate(template: InsertEmailTemplate): Promise<EmailTemplate>;
+  updateEmailTemplate(id: number, template: Partial<InsertEmailTemplate>): Promise<EmailTemplate | undefined>;
   createAdvisorProjectInvitationPlaceholders(
     projectId: number,
     expertIds: number[],
@@ -4055,6 +4063,69 @@ export class DatabaseStorage implements IStorage {
       .update(emailOauthStates)
       .set({ usedAt } as any)
       .where(eq(emailOauthStates.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getEmailTemplates(): Promise<EmailTemplate[]> {
+    return db
+      .select()
+      .from(emailTemplates)
+      .orderBy(emailTemplates.templateType, emailTemplates.language);
+  }
+
+  async getEmailTemplate(templateType: string, language: string): Promise<EmailTemplate | undefined> {
+    const [template] = await db
+      .select()
+      .from(emailTemplates)
+      .where(
+        and(
+          eq(emailTemplates.templateType, templateType),
+          eq(emailTemplates.language, language)
+        )
+      );
+    return template || undefined;
+  }
+
+  async getEmailTemplateById(id: number): Promise<EmailTemplate | undefined> {
+    const [template] = await db
+      .select()
+      .from(emailTemplates)
+      .where(eq(emailTemplates.id, id));
+    return template || undefined;
+  }
+
+  async upsertEmailTemplate(template: InsertEmailTemplate): Promise<EmailTemplate> {
+    const existing = await this.getEmailTemplate(template.templateType, template.language);
+    const now = new Date();
+
+    if (existing) {
+      const [updated] = await db
+        .update(emailTemplates)
+        .set({
+          ...(template as any),
+          updatedAt: now,
+        })
+        .where(eq(emailTemplates.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db
+      .insert(emailTemplates)
+      .values(template as any)
+      .returning();
+    return created;
+  }
+
+  async updateEmailTemplate(id: number, template: Partial<InsertEmailTemplate>): Promise<EmailTemplate | undefined> {
+    const [updated] = await db
+      .update(emailTemplates)
+      .set({
+        ...(template as any),
+        updatedAt: new Date(),
+      })
+      .where(eq(emailTemplates.id, id))
       .returning();
     return updated || undefined;
   }

@@ -8,9 +8,198 @@ type AdvisorEmailRenderOptions = {
   logoUrl?: string | null;
 };
 
+export type AdvisorManagedTemplateType = "advisor_initial_invite" | "advisor_follow_up" | "advisor_resend";
+export type AdvisorManagedTemplateLanguage = "en" | "pt-BR" | "es";
+
+export type AdvisorTemplateVariableContext = {
+  advisorName?: string | null;
+  senderName?: string | null;
+  senderTitle?: string | null;
+  senderEmail?: string | null;
+  senderMobile?: string | null;
+  reviewLink?: string | null;
+};
+
 const BRAND_NAME = "Mirae Connext";
 const WEBSITE_URL = "http://www.miraeconnext.com";
 const WEBSITE_LABEL = "www.miraeconnext.com";
+export const ADVISOR_EMAIL_TEMPLATE_TYPES: AdvisorManagedTemplateType[] = [
+  "advisor_initial_invite",
+  "advisor_follow_up",
+  "advisor_resend",
+];
+export const ADVISOR_EMAIL_TEMPLATE_LANGUAGES: AdvisorManagedTemplateLanguage[] = ["en", "pt-BR", "es"];
+export const ADVISOR_EMAIL_ALLOWED_VARIABLES = [
+  "advisorName",
+  "senderName",
+  "senderTitle",
+  "senderEmail",
+  "senderMobile",
+  "reviewLink",
+  "companyName",
+  "platformName",
+  "brandName",
+] as const;
+const ALLOWED_VARIABLE_SET = new Set<string>(ADVISOR_EMAIL_ALLOWED_VARIABLES);
+
+export const ADVISOR_EMAIL_DEFAULT_TEMPLATES: Record<
+  AdvisorManagedTemplateType,
+  Record<AdvisorManagedTemplateLanguage, { subject: string; body: string; description: string }>
+> = {
+  advisor_initial_invite: {
+    en: {
+      description: "Initial advisor project review invitation.",
+      subject: "Mirae Connext | Expert consultation opportunity",
+      body: `Hi {{advisorName}},
+
+This is {{senderName}} from {{brandName}}.
+
+We are currently reviewing a potential expert consultation opportunity that may be relevant to your professional background.
+
+Could you please review the brief and answer a few short screening questions through the secure link below?
+
+{{reviewLink}}
+
+Your responses will help us confirm whether the consultation is a good fit before moving forward.
+
+This is an initial review step and does not yet represent a confirmed consultation.`,
+    },
+    "pt-BR": {
+      description: "Initial advisor project review invitation in Portuguese.",
+      subject: "Mirae Connext | Oportunidade de consulta especializada",
+      body: `Ola {{advisorName}},
+
+Aqui e {{senderName}} da {{brandName}}.
+
+Estamos avaliando uma possivel oportunidade de consulta especializada que pode ser relevante para a sua experiencia profissional.
+
+Voce poderia revisar o resumo e responder a algumas perguntas rapidas de qualificacao por meio do link seguro abaixo?
+
+{{reviewLink}}
+
+Suas respostas nos ajudarao a confirmar se a consulta e adequada antes de avancarmos.
+
+Esta e uma etapa inicial de avaliacao e ainda nao representa uma consulta confirmada.`,
+    },
+    es: {
+      description: "Initial advisor project review invitation in Spanish.",
+      subject: "Mirae Connext | Oportunidad de consulta especializada",
+      body: `Hola {{advisorName}},
+
+Soy {{senderName}} de {{brandName}}.
+
+Estamos evaluando una posible oportunidad de consulta especializada que podria ser relevante para su experiencia profesional.
+
+Podria revisar el resumen y responder algunas preguntas breves de evaluacion a traves del enlace seguro a continuacion?
+
+{{reviewLink}}
+
+Sus respuestas nos ayudaran a confirmar si la consulta es adecuada antes de avanzar.
+
+Esta es una etapa inicial de evaluacion y aun no representa una consulta confirmada.`,
+    },
+  },
+  advisor_follow_up: {
+    en: {
+      description: "Advisor project review follow-up.",
+      subject: "Follow-up: Expert consultation invitation from Mirae Connext",
+      body: `Hi {{advisorName}},
+
+This is {{senderName}} from {{brandName}}.
+
+I wanted to follow up on Mirae Connext's invitation to review a potential expert consultation opportunity.
+
+When you have a moment, please review the brief and answer the short screening questions through the secure link below:
+
+{{reviewLink}}
+
+Thank you for your time.`,
+    },
+    "pt-BR": {
+      description: "Advisor project review follow-up in Portuguese.",
+      subject: "Acompanhamento: convite para consulta especializada da Mirae Connext",
+      body: `Ola {{advisorName}},
+
+Aqui e {{senderName}} da {{brandName}}.
+
+Gostaria de fazer um breve acompanhamento sobre o convite da Mirae Connext para revisar uma possivel oportunidade de consulta especializada.
+
+Quando puder, por favor revise o resumo e responda as perguntas rapidas pelo link seguro abaixo:
+
+{{reviewLink}}
+
+Obrigado pela sua atencao.`,
+    },
+    es: {
+      description: "Advisor project review follow-up in Spanish.",
+      subject: "Seguimiento: invitacion de Mirae Connext para consulta especializada",
+      body: `Hola {{advisorName}},
+
+Soy {{senderName}} de {{brandName}}.
+
+Quisiera hacer un breve seguimiento sobre la invitacion de Mirae Connext para revisar una posible oportunidad de consulta especializada.
+
+Cuando pueda, por favor revise el resumen y responda las preguntas breves a traves del enlace seguro a continuacion:
+
+{{reviewLink}}
+
+Gracias por su atencion.`,
+    },
+  },
+  advisor_resend: {
+    en: {
+      description: "Resend advisor project review invitation.",
+      subject: "Mirae Connext | Expert consultation opportunity",
+      body: `Hi {{advisorName}},
+
+This is {{senderName}} from {{brandName}}.
+
+We are currently reviewing a potential expert consultation opportunity that may be relevant to your professional background.
+
+Could you please review the brief and answer a few short screening questions through the secure link below?
+
+{{reviewLink}}
+
+Your responses will help us confirm whether the consultation is a good fit before moving forward.
+
+This is an initial review step and does not yet represent a confirmed consultation.`,
+    },
+    "pt-BR": {
+      description: "Resend advisor project review invitation in Portuguese.",
+      subject: "Mirae Connext | Oportunidade de consulta especializada",
+      body: `Ola {{advisorName}},
+
+Aqui e {{senderName}} da {{brandName}}.
+
+Estamos avaliando uma possivel oportunidade de consulta especializada que pode ser relevante para a sua experiencia profissional.
+
+Voce poderia revisar o resumo e responder a algumas perguntas rapidas de qualificacao por meio do link seguro abaixo?
+
+{{reviewLink}}
+
+Suas respostas nos ajudarao a confirmar se a consulta e adequada antes de avancarmos.
+
+Esta e uma etapa inicial de avaliacao e ainda nao representa uma consulta confirmada.`,
+    },
+    es: {
+      description: "Resend advisor project review invitation in Spanish.",
+      subject: "Mirae Connext | Oportunidad de consulta especializada",
+      body: `Hola {{advisorName}},
+
+Soy {{senderName}} de {{brandName}}.
+
+Estamos evaluando una posible oportunidad de consulta especializada que podria ser relevante para su experiencia profesional.
+
+Podria revisar el resumen y responder algunas preguntas breves de evaluacion a traves del enlace seguro a continuacion?
+
+{{reviewLink}}
+
+Sus respuestas nos ayudaran a confirmar si la consulta es adecuada antes de avanzar.
+
+Esta es una etapa inicial de evaluacion y aun no representa una consulta confirmada.`,
+    },
+  },
+};
 
 function escapeHtml(value: string) {
   return value
@@ -19,6 +208,78 @@ function escapeHtml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+export function normalizeAdvisorTemplateLanguage(language?: string | null): AdvisorManagedTemplateLanguage {
+  const normalized = String(language || "").trim();
+  if (normalized === "pt" || normalized.toLowerCase() === "pt-br") return "pt-BR";
+  if (normalized === "es") return "es";
+  return "en";
+}
+
+export function normalizeAdvisorTemplateType(templateType?: string | null): AdvisorManagedTemplateType | null {
+  const normalized = String(templateType || "").trim();
+  if (normalized === "initial_invite") return "advisor_initial_invite";
+  if (normalized === "follow_up") return "advisor_follow_up";
+  if (normalized === "resend_invite") return "advisor_resend";
+  if (ADVISOR_EMAIL_TEMPLATE_TYPES.includes(normalized as AdvisorManagedTemplateType)) {
+    return normalized as AdvisorManagedTemplateType;
+  }
+  return null;
+}
+
+export function getDefaultAdvisorEmailTemplate(
+  templateType: AdvisorManagedTemplateType,
+  language: AdvisorManagedTemplateLanguage
+) {
+  return ADVISOR_EMAIL_DEFAULT_TEMPLATES[templateType]?.[language] ||
+    ADVISOR_EMAIL_DEFAULT_TEMPLATES[templateType]?.en ||
+    ADVISOR_EMAIL_DEFAULT_TEMPLATES.advisor_initial_invite.en;
+}
+
+export function findUnsupportedAdvisorTemplateVariables(subject: string, body: string) {
+  const unsupported = new Set<string>();
+  const variablePattern = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g;
+  const text = `${subject || ""}\n${body || ""}`;
+  let match: RegExpExecArray | null;
+
+  while ((match = variablePattern.exec(text)) !== null) {
+    const variableName = match[1];
+    if (!ALLOWED_VARIABLE_SET.has(variableName)) {
+      unsupported.add(variableName);
+    }
+  }
+
+  return Array.from(unsupported);
+}
+
+export function renderAdvisorTemplateText(templateText: string, context: AdvisorTemplateVariableContext) {
+  const values: Record<string, string> = {
+    advisorName: String(context.advisorName || "").trim() || "there",
+    senderName: String(context.senderName || "").trim() || BRAND_NAME,
+    senderTitle: String(context.senderTitle || "").trim(),
+    senderEmail: String(context.senderEmail || "").trim(),
+    senderMobile: String(context.senderMobile || "").trim(),
+    reviewLink: String(context.reviewLink || "").trim(),
+    companyName: BRAND_NAME,
+    platformName: BRAND_NAME,
+    brandName: BRAND_NAME,
+  };
+
+  return String(templateText || "").replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_match, variableName) => {
+    if (!ALLOWED_VARIABLE_SET.has(variableName)) return "";
+    return values[variableName] || "";
+  });
+}
+
+export function renderAdvisorTemplateContent(
+  template: { subject: string; body: string },
+  context: AdvisorTemplateVariableContext
+) {
+  return {
+    subject: renderAdvisorTemplateText(template.subject, context).trim(),
+    body: renderAdvisorTemplateText(template.body, context).trim(),
+  };
 }
 
 export function getSenderFirstName(senderName?: string | null, senderEmail?: string | null) {

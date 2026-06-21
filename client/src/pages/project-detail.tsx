@@ -448,8 +448,70 @@ When you have a moment, please review the brief and answer the short screening q
 
 ${reviewLink}
 
-Thank you for your time.`,
+    Thank you for your time.`,
   };
+}
+
+function getAdvisorTemplateTypeForMode(mode: AdvisorEmailMode) {
+  if (mode === "follow_up") return "advisor_follow_up";
+  if (mode === "resend_invite") return "advisor_resend";
+  return "advisor_initial_invite";
+}
+
+function getAdvisorTemplateLanguage(language: AdvisorEmailLanguage) {
+  return language === "pt" ? "pt-BR" : language;
+}
+
+function renderAdvisorTemplateVariables(
+  text: string,
+  advisorName: string,
+  reviewLink: string,
+  senderName?: string | null,
+  senderEmail?: string | null
+) {
+  const senderFirstName = getFirstName(senderName) || "Mirae";
+  const advisorFirstName = getFirstName(advisorName) || "there";
+  const values: Record<string, string> = {
+    advisorName: advisorFirstName,
+    senderName: senderFirstName,
+    senderTitle: "",
+    senderEmail: senderEmail || "",
+    senderMobile: "",
+    reviewLink,
+    companyName: "Mirae Connext",
+    platformName: "Mirae Connext",
+    brandName: "Mirae Connext",
+  };
+
+  return String(text || "").replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_match, variableName) => values[variableName] || "");
+}
+
+async function getAdvisorEmailTemplateForPreview(
+  mode: AdvisorEmailMode,
+  language: AdvisorEmailLanguage,
+  advisorName: string,
+  reviewLink: string,
+  senderName?: string | null,
+  senderEmail?: string | null
+) {
+  const fallback = getAdvisorEmailTemplate(mode, language, advisorName, reviewLink, senderName);
+
+  try {
+    const res = await apiRequest(
+      "GET",
+      `/api/email/templates/${getAdvisorTemplateTypeForMode(mode)}/${getAdvisorTemplateLanguage(language)}`
+    );
+    const data = await res.json();
+    const template = data?.template;
+    if (!template?.subject || !template?.body) return fallback;
+
+    return {
+      subject: renderAdvisorTemplateVariables(template.subject, advisorName, reviewLink, senderName, senderEmail),
+      body: renderAdvisorTemplateVariables(template.body, advisorName, reviewLink, senderName, senderEmail),
+    };
+  } catch {
+    return fallback;
+  }
 }
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -2276,6 +2338,7 @@ export default function ProjectDetail() {
     const invitation = advisorInviteByExpertId.get(pe.expertId);
     const initialMode = requestedMode || getDefaultAdvisorEmailMode(invitation);
     const senderTemplateName = senderIdentity?.fromName || senderIdentity?.fromEmail;
+    const senderTemplateEmail = senderIdentity?.fromEmail;
     const initialTemplate = getAdvisorEmailTemplate(initialMode, "en", advisorName, "", senderTemplateName);
 
     setAdvisorEmailPreview({
@@ -2301,7 +2364,6 @@ export default function ProjectDetail() {
       setAdvisorEmailPreview((current) => {
         const language = current?.language || "en";
         const emailMode = requestedMode || current?.emailMode || getDefaultAdvisorEmailMode(advisorInviteByExpertId.get(pe.expertId));
-        const template = getAdvisorEmailTemplate(emailMode, language, advisorName, linkData.publicReviewUrl, senderTemplateName);
         return {
           invitationId: linkData.invitationId,
           expertId: linkData.expertId,
@@ -2314,12 +2376,25 @@ export default function ProjectDetail() {
           existingSentBy: linkData.existingSentBy,
           emailMode,
           language,
-          subject: template.subject,
-          body: template.body,
+          subject: current?.subject || "",
+          body: current?.body || "",
           isLoadingLink: false,
           error: advisorEmail ? null : "Advisor email is missing from this expert profile.",
         };
       });
+      const template = await getAdvisorEmailTemplateForPreview(
+        requestedMode || getDefaultAdvisorEmailMode(advisorInviteByExpertId.get(pe.expertId)),
+        "en",
+        advisorName,
+        linkData.publicReviewUrl,
+        senderTemplateName,
+        senderTemplateEmail
+      );
+      setAdvisorEmailPreview((current) => current ? {
+        ...current,
+        subject: template.subject,
+        body: template.body,
+      } : current);
     } catch (error: any) {
       setAdvisorEmailPreview((current) => current ? {
         ...current,
@@ -2378,30 +2453,44 @@ export default function ProjectDetail() {
     });
   };
 
-  const handleAdvisorEmailLanguageChange = (language: AdvisorEmailLanguage) => {
-    setAdvisorEmailPreview((current) => {
-      if (!current) return current;
-      const template = getAdvisorEmailTemplate(current.emailMode, language, current.advisorName, current.publicReviewUrl, senderIdentity?.fromName || senderIdentity?.fromEmail);
-      return {
-        ...current,
-        language,
-        subject: template.subject,
-        body: template.body,
-      };
-    });
+  const handleAdvisorEmailLanguageChange = async (language: AdvisorEmailLanguage) => {
+    const current = advisorEmailPreview;
+    if (!current) return;
+    setAdvisorEmailPreview({ ...current, language });
+    const template = await getAdvisorEmailTemplateForPreview(
+      current.emailMode,
+      language,
+      current.advisorName,
+      current.publicReviewUrl,
+      senderIdentity?.fromName || senderIdentity?.fromEmail,
+      senderIdentity?.fromEmail
+    );
+    setAdvisorEmailPreview((latest) => latest ? {
+      ...latest,
+      language,
+      subject: template.subject,
+      body: template.body,
+    } : latest);
   };
 
-  const handleAdvisorEmailModeChange = (emailMode: AdvisorEmailMode) => {
-    setAdvisorEmailPreview((current) => {
-      if (!current) return current;
-      const template = getAdvisorEmailTemplate(emailMode, current.language, current.advisorName, current.publicReviewUrl, senderIdentity?.fromName || senderIdentity?.fromEmail);
-      return {
-        ...current,
-        emailMode,
-        subject: template.subject,
-        body: template.body,
-      };
-    });
+  const handleAdvisorEmailModeChange = async (emailMode: AdvisorEmailMode) => {
+    const current = advisorEmailPreview;
+    if (!current) return;
+    setAdvisorEmailPreview({ ...current, emailMode });
+    const template = await getAdvisorEmailTemplateForPreview(
+      emailMode,
+      current.language,
+      current.advisorName,
+      current.publicReviewUrl,
+      senderIdentity?.fromName || senderIdentity?.fromEmail,
+      senderIdentity?.fromEmail
+    );
+    setAdvisorEmailPreview((latest) => latest ? {
+      ...latest,
+      emailMode,
+      subject: template.subject,
+      body: template.body,
+    } : latest);
   };
 
   const handleCopyAdvisorEmailBody = async () => {
