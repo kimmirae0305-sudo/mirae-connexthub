@@ -186,7 +186,7 @@ export interface EligibleExpertPayableConsultationRow {
   clientOrganizationId: number | null;
   clientName: string;
   clientOrganizationName: string | null;
-  serviceDate: Date;
+  serviceDate: string;
   durationMinutes: number;
   expertHourlyRate: string;
   rateSource: "project_expert" | "expert_profile";
@@ -779,6 +779,41 @@ function calculateExpertPayableAmount(durationMinutes: number, hourlyRate: unkno
   const rateCents = parseMoneyToCents(hourlyRate);
   if (rateCents === null) return null;
   return formatCents(Math.round((durationMinutes * rateCents) / 60));
+}
+
+const CRM_TIME_ZONE = "America/Sao_Paulo";
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function normalizeExpertPayableDateOnly(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (DATE_ONLY_PATTERN.test(trimmed)) return trimmed;
+
+    const unzonedTimestamp = trimmed.match(/^(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/);
+    if (unzonedTimestamp) return unzonedTimestamp[1];
+  }
+
+  const date = value instanceof Date ? value : new Date(String(value || ""));
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: CRM_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return year && month && day ? `${year}-${month}-${day}` : null;
+}
+
+function toExpertPayableServiceDate(value: unknown): Date | null {
+  const dateOnly = normalizeExpertPayableDateOnly(value);
+  if (!dateOnly) return null;
+
+  // Noon UTC preserves the calendar date in BRT and avoids date-only UTC boundary shifts.
+  return new Date(`${dateOnly}T12:00:00.000Z`);
 }
 
 function extractDomain(value: unknown) {
@@ -2826,6 +2861,8 @@ export class DatabaseStorage implements IStorage {
       const durationMinutes = Number(row.actualDurationMinutes || row.durationMinutes || 0);
       const estimatedPayableAmount = calculateExpertPayableAmount(durationMinutes, rate);
       if (!estimatedPayableAmount || !rate || Number(rate) <= 0) continue;
+      const serviceDate = normalizeExpertPayableDateOnly(row.serviceDate);
+      if (!serviceDate) continue;
 
       eligibleRows.push({
         consultationId: row.consultationId,
@@ -2837,7 +2874,7 @@ export class DatabaseStorage implements IStorage {
         clientOrganizationId: row.clientOrganizationId || null,
         clientName: row.clientOrganizationName || row.clientName || "-",
         clientOrganizationName: row.clientOrganizationName || null,
-        serviceDate: row.serviceDate,
+        serviceDate,
         durationMinutes,
         expertHourlyRate: Number(rate).toFixed(2),
         rateSource,
@@ -2920,6 +2957,10 @@ export class DatabaseStorage implements IStorage {
       if (!payableAmount || rateCents === null) {
         throw new Error("Expert hourly rate is required before creating an expert payable.");
       }
+      const serviceDate = toExpertPayableServiceDate(row.serviceDate);
+      if (!serviceDate) {
+        throw new Error("Consultation service date is invalid.");
+      }
 
       const [inserted] = await tx
         .insert(expertPayables)
@@ -2928,7 +2969,7 @@ export class DatabaseStorage implements IStorage {
           projectId: row.projectId,
           expertId: row.expertId,
           clientOrganizationId: row.clientOrganizationId || null,
-          serviceDate: row.serviceDate,
+          serviceDate,
           durationMinutes,
           expertHourlyRateSnapshot: formatCents(rateCents),
           payoutCurrency: "USD",
