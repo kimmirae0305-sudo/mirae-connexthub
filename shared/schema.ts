@@ -490,6 +490,30 @@ export const expertPayables = pgTable("expert_payables", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const expertPaymentDetailRequests = pgTable("expert_payment_detail_requests", {
+  id: serial("id").primaryKey(),
+  expertPayableId: integer("expert_payable_id").notNull().references(() => expertPayables.id, { onDelete: "cascade" }).unique(),
+  expertId: integer("expert_id").notNull().references(() => experts.id, { onDelete: "restrict" }),
+  email: text("email").notNull(),
+  token: text("token").notNull().unique(),
+  status: text("status").notNull().default("link_generated"),
+  expiresAt: timestamp("expires_at").notNull(),
+  requestedAt: timestamp("requested_at").notNull(),
+  requestedByUserId: integer("requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  sentAt: timestamp("sent_at"),
+  sentByUserId: integer("sent_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  submittedAt: timestamp("submitted_at"),
+  preferredPaymentMethod: text("preferred_payment_method"),
+  accountHolderName: text("account_holder_name"),
+  paymentIdentifier: text("payment_identifier"),
+  country: text("country"),
+  paymentDetails: text("payment_details"),
+  notes: text("notes"),
+  confirmationAccepted: boolean("confirmation_accepted").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Invoices table (Finance invoice lifecycle)
 export const invoices = pgTable("invoices", {
   id: serial("id").primaryKey(),
@@ -862,6 +886,25 @@ export const expertPayablesRelations = relations(expertPayables, ({ one }) => ({
   }),
 }));
 
+export const expertPaymentDetailRequestsRelations = relations(expertPaymentDetailRequests, ({ one }) => ({
+  expertPayable: one(expertPayables, {
+    fields: [expertPaymentDetailRequests.expertPayableId],
+    references: [expertPayables.id],
+  }),
+  expert: one(experts, {
+    fields: [expertPaymentDetailRequests.expertId],
+    references: [experts.id],
+  }),
+  requestedBy: one(users, {
+    fields: [expertPaymentDetailRequests.requestedByUserId],
+    references: [users.id],
+  }),
+  sentBy: one(users, {
+    fields: [expertPaymentDetailRequests.sentByUserId],
+    references: [users.id],
+  }),
+}));
+
 export const invoicesRelations = relations(invoices, ({ one, many }) => ({
   clientOrganization: one(clientOrganizations, {
     fields: [invoices.clientOrganizationId],
@@ -1110,6 +1153,17 @@ export const insertExpertPayableSchema = createInsertSchema(expertPayables).omit
   voidedAt: coerceDate.optional(),
 });
 
+export const insertExpertPaymentDetailRequestSchema = createInsertSchema(expertPaymentDetailRequests).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  expiresAt: coerceDateRequired,
+  requestedAt: coerceDateRequired,
+  sentAt: coerceDate.optional(),
+  submittedAt: coerceDate.optional(),
+});
+
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({
   id: true,
   createdAt: true,
@@ -1205,6 +1259,8 @@ export type BillableUsage = typeof billableUsage.$inferSelect;
 export type InsertBillableUsage = z.infer<typeof insertBillableUsageSchema>;
 export type ExpertPayable = typeof expertPayables.$inferSelect;
 export type InsertExpertPayable = z.infer<typeof insertExpertPayableSchema>;
+export type ExpertPaymentDetailRequest = typeof expertPaymentDetailRequests.$inferSelect;
+export type InsertExpertPaymentDetailRequest = z.infer<typeof insertExpertPaymentDetailRequestSchema>;
 
 export type Invoice = typeof invoices.$inferSelect;
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;

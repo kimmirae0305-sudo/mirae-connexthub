@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { AlertCircle, CheckCircle2, Eye, RefreshCw, Search, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Copy, Eye, Link2, Mail, RefreshCw, Search, XCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,6 +87,24 @@ interface EligibleConsultationRow {
   estimatedPayableAmount: string;
 }
 
+interface PaymentDetailsRequest {
+  id: number | null;
+  status: "not_requested" | "link_generated" | "sent" | "submitted" | "expired";
+  hasActiveLink: boolean;
+  magicLink: string | null;
+  expiresAt: string | null;
+  requestedAt: string | null;
+  sentAt: string | null;
+  submittedAt: string | null;
+  preferredPaymentMethod: string | null;
+  accountHolderName: string | null;
+  paymentIdentifier: string | null;
+  country: string | null;
+  paymentDetails: string | null;
+  notes: string | null;
+  confirmationAccepted: boolean;
+}
+
 const statusOptions: Array<{ value: PayableStatus; label: string }> = [
   { value: "all", label: "All Statuses" },
   { value: "pending_review", label: "Pending Review" },
@@ -142,6 +160,14 @@ const formatStatus = (status: string | null | undefined) => {
   return status || "-";
 };
 
+const formatPaymentDetailsRequestStatus = (status?: string | null) => {
+  if (status === "link_generated") return "Link Generated";
+  if (status === "sent") return "Sent";
+  if (status === "submitted") return "Submitted";
+  if (status === "expired") return "Expired";
+  return "Not Requested";
+};
+
 const statusBadgeClassName = (status: string | null | undefined) => {
   const normalized = String(status || "").trim().toLowerCase();
   if (normalized === "pending_review") return "border-amber-200 bg-amber-50 text-amber-700";
@@ -182,6 +208,7 @@ export default function ExpertPayables() {
   const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
   const [paymentNotes, setPaymentNotes] = useState("");
   const [voidReason, setVoidReason] = useState("");
+  const [markPaidPaymentDetails, setMarkPaidPaymentDetails] = useState<PaymentDetailsRequest | null>(null);
 
   const payablesUrl = useMemo(() => {
     const params = new URLSearchParams();
@@ -197,6 +224,15 @@ export default function ExpertPayables() {
 
   const { data: eligibleData, isLoading: isEligibleLoading } = useQuery<{ rows: EligibleConsultationRow[] }>({
     queryKey: ["/api/expert-payables/eligible-consultations"],
+  });
+
+  const paymentDetailsRequestUrl = viewingPayable
+    ? `/api/expert-payables/${viewingPayable.id}/payment-details-request`
+    : "";
+  const { data: paymentDetailsRequest, isLoading: isPaymentDetailsRequestLoading } = useQuery<PaymentDetailsRequest>({
+    queryKey: [paymentDetailsRequestUrl],
+    enabled: Boolean(paymentDetailsRequestUrl),
+    staleTime: 0,
   });
 
   const refreshLists = () => {
@@ -280,14 +316,58 @@ export default function ExpertPayables() {
     },
   });
 
+  const generatePaymentDetailsLinkMutation = useMutation({
+    mutationFn: async (payableId: number) => {
+      const response = await apiRequest("POST", `/api/expert-payables/${payableId}/payment-details-request/generate`);
+      return response.json() as Promise<PaymentDetailsRequest>;
+    },
+    onSuccess: (request) => {
+      if (viewingPayable) queryClient.setQueryData([paymentDetailsRequestUrl], request);
+      toast({ title: "Secure link ready", description: "The payment details link is ready to copy or send." });
+    },
+    onError: (error: Error) => toast({ title: "Could not generate link", description: error.message, variant: "destructive" }),
+  });
+
+  const sendPaymentDetailsRequestMutation = useMutation({
+    mutationFn: async (payableId: number) => {
+      const response = await apiRequest("POST", `/api/expert-payables/${payableId}/payment-details-request/send`);
+      return response.json() as Promise<PaymentDetailsRequest>;
+    },
+    onSuccess: (request) => {
+      if (viewingPayable) queryClient.setQueryData([paymentDetailsRequestUrl], request);
+      toast({ title: "Payment details request sent", description: "The expert received an individual secure-link email through Zoho Mail." });
+    },
+    onError: (error: Error) => toast({ title: "Could not send request", description: error.message, variant: "destructive" }),
+  });
+
   const payables = payablesData?.rows || [];
   const eligibleConsultations = eligibleData?.rows || [];
 
-  const openMarkPaidDialog = (payable: ExpertPayableRow) => {
+  const openMarkPaidDialog = async (payable: ExpertPayableRow) => {
+    let submittedRequest: PaymentDetailsRequest | null = null;
+    try {
+      submittedRequest = await queryClient.fetchQuery<PaymentDetailsRequest>({
+        queryKey: [`/api/expert-payables/${payable.id}/payment-details-request`],
+        staleTime: 0,
+      });
+    } catch {
+      submittedRequest = null;
+    }
+    setMarkPaidPaymentDetails(submittedRequest?.status === "submitted" ? submittedRequest : null);
     setMarkingPaidPayable(payable);
-    setPaymentMethod(payable.paymentMethod || "");
+    setPaymentMethod(payable.paymentMethod || submittedRequest?.preferredPaymentMethod || "");
     setPaymentReferenceNumber(payable.paymentReferenceNumber || "");
     setPaymentNotes(payable.paymentNotes || "");
+  };
+
+  const copyPaymentDetailsLink = async (magicLink: string | null) => {
+    if (!magicLink) return;
+    try {
+      await navigator.clipboard.writeText(magicLink);
+      toast({ title: "Link copied", description: "The secure payment details link was copied." });
+    } catch {
+      toast({ title: "Copy failed", description: "Copy the link manually and try again.", variant: "destructive" });
+    }
   };
 
   const openVoidDialog = (payable: ExpertPayableRow) => {
@@ -592,6 +672,66 @@ export default function ExpertPayables() {
                   )}
                 </AlertDescription>
               </Alert>
+              <div className="space-y-4 rounded-md border p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold">Payment Details Request</h3>
+                    <p className="text-sm text-muted-foreground">Secure magic-link collection for manual Finance review.</p>
+                  </div>
+                  <Badge variant="outline">{formatPaymentDetailsRequestStatus(paymentDetailsRequest?.status)}</Badge>
+                </div>
+                {isPaymentDetailsRequestLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading payment details request...</p>
+                ) : paymentDetailsRequest?.status === "submitted" ? (
+                  <>
+                    <Alert>
+                      <CheckCircle2 className="h-4 w-4" />
+                      <AlertTitle>Payment Details Submitted</AlertTitle>
+                      <AlertDescription>
+                        Submitted {formatDateTime(paymentDetailsRequest.submittedAt)}. Finance must still complete payment manually outside the CRM and then use Mark as Paid.
+                      </AlertDescription>
+                    </Alert>
+                    <div className="grid gap-3 text-sm md:grid-cols-2">
+                      <Detail label="Preferred Payment Method" value={paymentDetailsRequest.preferredPaymentMethod || "-"} />
+                      <Detail label="Account Holder / Beneficiary" value={paymentDetailsRequest.accountHolderName || "-"} />
+                      <Detail label="Payment Identifier" value={paymentDetailsRequest.paymentIdentifier || "-"} />
+                      <Detail label="Country" value={paymentDetailsRequest.country || "-"} />
+                      <Detail label="Payment Details" value={paymentDetailsRequest.paymentDetails || "-"} />
+                      <Detail label="Notes" value={paymentDetailsRequest.notes || "-"} />
+                      <Detail label="Confirmation Accepted" value={paymentDetailsRequest.confirmationAccepted ? "Yes" : "No"} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {(paymentDetailsRequest?.requestedAt || paymentDetailsRequest?.expiresAt) && (
+                      <div className="grid gap-3 text-sm md:grid-cols-2">
+                        <Detail label="Requested At" value={formatDateTime(paymentDetailsRequest.requestedAt)} />
+                        <Detail label="Expires At" value={formatDateTime(paymentDetailsRequest.expiresAt)} />
+                        <Detail label="Sent At" value={formatDateTime(paymentDetailsRequest.sentAt)} />
+                      </div>
+                    )}
+                    {!(["paid", "void"].includes(String(viewingPayable.status).toLowerCase())) && (
+                      <div className="flex flex-wrap gap-2">
+                        {(paymentDetailsRequest?.status === "not_requested" || paymentDetailsRequest?.status === "expired" || !paymentDetailsRequest) && (
+                          <Button variant="outline" className="gap-2" onClick={() => generatePaymentDetailsLinkMutation.mutate(viewingPayable.id)} disabled={generatePaymentDetailsLinkMutation.isPending}>
+                            <Link2 className="h-4 w-4" />
+                            {paymentDetailsRequest?.status === "expired" ? "Regenerate Link" : "Generate Magic Link"}
+                          </Button>
+                        )}
+                        {paymentDetailsRequest?.magicLink && (
+                          <Button variant="outline" className="gap-2" onClick={() => copyPaymentDetailsLink(paymentDetailsRequest.magicLink)}>
+                            <Copy className="h-4 w-4" /> Copy Magic Link
+                          </Button>
+                        )}
+                        <Button className="gap-2" onClick={() => sendPaymentDetailsRequestMutation.mutate(viewingPayable.id)} disabled={sendPaymentDetailsRequestMutation.isPending}>
+                          <Mail className="h-4 w-4" />
+                          {sendPaymentDetailsRequestMutation.isPending ? "Sending..." : "Send Payment Details Request Email"}
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
               <div className="grid gap-3 rounded-md border p-4 text-sm md:grid-cols-2">
                 <Detail
                   label="Approved"
@@ -632,7 +772,12 @@ export default function ExpertPayables() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!markingPaidPayable} onOpenChange={(open) => !open && setMarkingPaidPayable(null)}>
+      <Dialog open={!!markingPaidPayable} onOpenChange={(open) => {
+        if (!open) {
+          setMarkingPaidPayable(null);
+          setMarkPaidPaymentDetails(null);
+        }
+      }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Mark Payable as Paid</DialogTitle>
@@ -649,6 +794,14 @@ export default function ExpertPayables() {
                   {formatMoney(markingPaidPayable.payableAmount, markingPaidPayable.payoutCurrency)} for {markingPaidPayable.expertName}
                 </AlertDescription>
               </Alert>
+              {markPaidPaymentDetails && (
+                <div className="space-y-2 rounded-md border bg-muted/30 p-4 text-sm">
+                  <div className="font-medium">Submitted payment details</div>
+                  <div>Submitted payment method: {markPaidPaymentDetails.preferredPaymentMethod || "-"}</div>
+                  <div>Beneficiary: {markPaidPaymentDetails.accountHolderName || "-"}</div>
+                  <div className="break-words">Identifier: {markPaidPaymentDetails.paymentIdentifier || "-"}</div>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="payment-method">Payment Method</Label>
                 <Select value={paymentMethod || undefined} onValueChange={setPaymentMethod}>
