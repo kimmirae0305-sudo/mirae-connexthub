@@ -95,6 +95,18 @@ const statusOptions: Array<{ value: PayableStatus; label: string }> = [
   { value: "void", label: "Void" },
 ];
 
+const paymentMethodOptions = [
+  "PayPal",
+  "Wise",
+  "Pix",
+  "International Wire Transfer",
+  "Local Bank Transfer",
+  "ACH",
+  "SWIFT",
+  "Payoneer",
+  "Other",
+] as const;
+
 const formatDateOnly = (value: string | null | undefined) => {
   if (!value) return "-";
   const rawValue = String(value);
@@ -590,7 +602,7 @@ export default function ExpertPayables() {
                   value={viewingPayable.paidAt ? `${formatDateTime(viewingPayable.paidAt)} by ${viewingPayable.paidByName || "Unknown"}` : "-"}
                 />
                 <Detail label="Payment Method" value={viewingPayable.paymentMethod || "-"} />
-                <Detail label="Reference Number" value={viewingPayable.paymentReferenceNumber || "-"} />
+                <Detail label="Payment Reference / Transaction ID" value={viewingPayable.paymentReferenceNumber || "-"} />
                 <Detail label="Payment Notes" value={viewingPayable.paymentNotes || "-"} />
                 <Detail
                   label="Voided"
@@ -639,11 +651,27 @@ export default function ExpertPayables() {
               </Alert>
               <div className="space-y-2">
                 <Label htmlFor="payment-method">Payment Method</Label>
-                <Input id="payment-method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} placeholder="Optional" />
+                <Select value={paymentMethod || undefined} onValueChange={setPaymentMethod}>
+                  <SelectTrigger id="payment-method">
+                    <SelectValue placeholder="Select a payment method (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentMethodOptions.map((method) => (
+                      <SelectItem key={method} value={method}>
+                        {method}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="payment-reference">Reference Number</Label>
-                <Input id="payment-reference" value={paymentReferenceNumber} onChange={(event) => setPaymentReferenceNumber(event.target.value)} placeholder="Optional" />
+                <Label htmlFor="payment-reference">Payment Reference / Transaction ID</Label>
+                <Input
+                  id="payment-reference"
+                  value={paymentReferenceNumber}
+                  onChange={(event) => setPaymentReferenceNumber(event.target.value)}
+                  placeholder="PayPal transaction ID, Wise transfer ID, Pix E2E ID, wire reference, or receipt note"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="payment-notes">Notes</Label>
