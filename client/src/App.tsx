@@ -32,6 +32,7 @@ import ExpertInvite from "@/pages/expert-invite";
 import ExpertOnboarding from "@/pages/expert-onboarding";
 import ExpertProjectInvite from "@/pages/expert-project-invite";
 import AdvisorProjectReview from "@/pages/advisor-project-review";
+import ExpertPaymentDetails from "@/pages/expert-payment-details";
 import QuickInviteOnboarding from "@/pages/quick-invite-onboarding";
 import QuickInviteDecision from "@/pages/quick-invite-decision";
 import ExpertProfile from "@/pages/expert-profile";
@@ -101,6 +102,9 @@ function Router() {
       </Route>
       <Route path="/public/advisor-project-review/:token">
         {(params) => <AdvisorProjectReview />}
+      </Route>
+      <Route path="/public/expert-payment-details/:token">
+        {(params) => <ExpertPaymentDetails />}
       </Route>
       <Route path="/invite/onboarding/:token">
         {(params) => <QuickInviteOnboarding />}
@@ -239,9 +243,26 @@ function isPublicAdvisorProjectReviewPath(pathname: string) {
   return pathname === "/public/advisor-project-review" || pathname.startsWith("/public/advisor-project-review/");
 }
 
+function isPublicExpertPaymentDetailsPath(pathname: string) {
+  return pathname === "/public/expert-payment-details" || pathname.startsWith("/public/expert-payment-details/");
+}
+
 function App() {
   const isPublicAdvisorReview =
     typeof window !== "undefined" && isPublicAdvisorProjectReviewPath(window.location.pathname);
+  const isPublicPaymentDetails =
+    typeof window !== "undefined" && isPublicExpertPaymentDetailsPath(window.location.pathname);
+
+  if (isPublicPaymentDetails) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <ExpertPaymentDetails />
+          <Toaster />
+        </TooltipProvider>
+      </QueryClientProvider>
+    );
+  }
 
   if (isPublicAdvisorReview) {
     return (

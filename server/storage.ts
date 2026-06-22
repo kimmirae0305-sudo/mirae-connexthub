@@ -6,6 +6,7 @@ import {
   usageRecords,
   billableUsage,
   expertPayables,
+  expertPaymentDetailRequests,
   invoices,
   invoiceLineItems,
   expenses,
@@ -73,6 +74,8 @@ import {
   type BillableUsage,
   type ExpertPayable,
   type InsertExpertPayable,
+  type ExpertPaymentDetailRequest,
+  type InsertExpertPaymentDetailRequest,
   calculateCU,
 } from "@shared/schema";
 import { db } from "./db";
@@ -206,6 +209,16 @@ export interface MarkExpertPayablePaidInput {
 
 export interface VoidExpertPayableInput {
   voidReason?: string | null;
+}
+
+export interface ExpertPaymentDetailsSubmissionInput {
+  preferredPaymentMethod: string;
+  accountHolderName: string;
+  paymentIdentifier: string;
+  country?: string | null;
+  paymentDetails?: string | null;
+  notes?: string | null;
+  confirmationAccepted: boolean;
 }
 
 export interface InvoiceListRow {
@@ -711,6 +724,11 @@ export interface IStorage {
   approveExpertPayable(id: number, approvedByUserId: number): Promise<ExpertPayableListRow>;
   markExpertPayablePaid(id: number, paidByUserId: number, input: MarkExpertPayablePaidInput): Promise<ExpertPayableListRow>;
   voidExpertPayable(id: number, voidedByUserId: number, input: VoidExpertPayableInput): Promise<ExpertPayableListRow>;
+  getExpertPaymentDetailRequestByPayableId(payableId: number): Promise<ExpertPaymentDetailRequest | undefined>;
+  getExpertPaymentDetailRequestByToken(token: string): Promise<ExpertPaymentDetailRequest | undefined>;
+  upsertExpertPaymentDetailRequest(input: InsertExpertPaymentDetailRequest): Promise<ExpertPaymentDetailRequest>;
+  markExpertPaymentDetailRequestSent(id: number, sentByUserId: number): Promise<ExpertPaymentDetailRequest>;
+  submitExpertPaymentDetails(id: number, input: ExpertPaymentDetailsSubmissionInput): Promise<ExpertPaymentDetailRequest>;
 
   // Invoices (Finance draft layer)
   getInvoices(): Promise<InvoiceListRow[]>;
@@ -3072,6 +3090,94 @@ export class DatabaseStorage implements IStorage {
     const payable = await this.getExpertPayableById(updatedId);
     if (!payable) throw new Error("Expert payable not found after void.");
     return payable;
+  }
+
+  async getExpertPaymentDetailRequestByPayableId(payableId: number): Promise<ExpertPaymentDetailRequest | undefined> {
+    const [request] = await db
+      .select()
+      .from(expertPaymentDetailRequests)
+      .where(eq(expertPaymentDetailRequests.expertPayableId, payableId));
+    return request;
+  }
+
+  async getExpertPaymentDetailRequestByToken(token: string): Promise<ExpertPaymentDetailRequest | undefined> {
+    const [request] = await db
+      .select()
+      .from(expertPaymentDetailRequests)
+      .where(eq(expertPaymentDetailRequests.token, token));
+    return request;
+  }
+
+  async upsertExpertPaymentDetailRequest(input: InsertExpertPaymentDetailRequest): Promise<ExpertPaymentDetailRequest> {
+    const [request] = await db
+      .insert(expertPaymentDetailRequests)
+      .values(input)
+      .onConflictDoUpdate({
+        target: expertPaymentDetailRequests.expertPayableId,
+        set: {
+          expertId: input.expertId,
+          email: input.email,
+          token: input.token,
+          status: input.status || "link_generated",
+          expiresAt: input.expiresAt,
+          requestedAt: input.requestedAt,
+          requestedByUserId: input.requestedByUserId || null,
+          sentAt: null,
+          sentByUserId: null,
+          submittedAt: null,
+          preferredPaymentMethod: null,
+          accountHolderName: null,
+          paymentIdentifier: null,
+          country: null,
+          paymentDetails: null,
+          notes: null,
+          confirmationAccepted: false,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return request;
+  }
+
+  async markExpertPaymentDetailRequestSent(id: number, sentByUserId: number): Promise<ExpertPaymentDetailRequest> {
+    const [request] = await db
+      .update(expertPaymentDetailRequests)
+      .set({ status: "sent", sentAt: new Date(), sentByUserId, updatedAt: new Date() })
+      .where(and(
+        eq(expertPaymentDetailRequests.id, id),
+        inArray(expertPaymentDetailRequests.status, ["link_generated", "sent"]),
+      ))
+      .returning();
+    if (!request) throw new Error("Payment details request cannot be marked sent.");
+    return request;
+  }
+
+  async submitExpertPaymentDetails(
+    id: number,
+    input: ExpertPaymentDetailsSubmissionInput
+  ): Promise<ExpertPaymentDetailRequest> {
+    const [request] = await db
+      .update(expertPaymentDetailRequests)
+      .set({
+        status: "submitted",
+        submittedAt: new Date(),
+        preferredPaymentMethod: input.preferredPaymentMethod,
+        accountHolderName: input.accountHolderName,
+        paymentIdentifier: input.paymentIdentifier,
+        country: String(input.country || "").trim() || null,
+        paymentDetails: String(input.paymentDetails || "").trim() || null,
+        notes: String(input.notes || "").trim() || null,
+        confirmationAccepted: input.confirmationAccepted,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(expertPaymentDetailRequests.id, id),
+        inArray(expertPaymentDetailRequests.status, ["link_generated", "sent"]),
+        sql`${expertPaymentDetailRequests.expiresAt} > now()`,
+      ))
+      .returning();
+    if (!request) throw new Error("Payment details request is expired or already submitted.");
+    return request;
   }
 
   async getInvoices(): Promise<InvoiceListRow[]> {

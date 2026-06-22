@@ -58,6 +58,7 @@ import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
 const generateAdvisorProjectReviewToken = () => `apr_${crypto.randomBytes(32).toString("hex")}`;
+const generateExpertPaymentDetailsToken = () => `epd_${crypto.randomBytes(32).toString("hex")}`;
 const trimTrailingSlashes = (value: string) => value.replace(/\/+$/, "");
 const getRequestBaseUrl = (req: AuthRequest) => {
   const forwardedProto = req.headers["x-forwarded-proto"];
@@ -81,6 +82,8 @@ const getInviteBaseUrl = (req: AuthRequest) => {
 const buildPublicRecruitmentUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/r/${token}`;
 const buildPublicAdvisorProjectReviewUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/advisor-project-review/${token}`;
+const buildPublicExpertPaymentDetailsUrl = (token: string, req: AuthRequest) =>
+  `${getInviteBaseUrl(req)}/public/expert-payment-details/${token}`;
 const getEmailAssetBaseUrl = (req: AuthRequest) =>
   trimTrailingSlashes(process.env.EMAIL_ASSET_BASE_URL?.trim() || getRequestBaseUrl(req));
 const buildAdvisorEmailLogoUrl = (req: AuthRequest) =>
@@ -154,6 +157,23 @@ const getSafeRedirectUriParts = (redirectUri: string) => {
 const normalizeEmailForMatch = (email?: string | null) => String(email || "").trim().toLowerCase();
 const isSingleRecipientEmail = (email: string) =>
   Boolean(email) && !email.includes(",") && !email.includes(";") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const expertPaymentMethods = new Set([
+  "PayPal",
+  "Wise",
+  "Pix",
+  "International Wire Transfer",
+  "Local Bank Transfer",
+  "ACH",
+  "SWIFT",
+  "Payoneer",
+  "Other",
+]);
+const escapeEmailHtml = (value: unknown) => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&#39;");
 const advisorEmailTypes = new Set(["initial_invite", "follow_up", "resend_invite"]);
 const SELECTED_ADVISOR_SEND_LIMIT = 20;
 const getFirstNameForEmail = (name?: string | null) => {
@@ -5989,6 +6009,248 @@ export async function registerRoutes(
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to void expert payable";
       console.error("Failed to void expert payable:", error);
+      res.status(400).json({ error: message });
+    }
+  });
+
+  const getPaymentDetailsRequestStatus = (request: any) => {
+    if (!request) return "not_requested";
+    if (request.status === "submitted" || request.submittedAt) return "submitted";
+    const expiresAt = request.expiresAt ? new Date(request.expiresAt) : null;
+    if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date()) return "expired";
+    return request.status === "sent" ? "sent" : "link_generated";
+  };
+
+  const getInternalPaymentDetailsRequest = (request: any, authReq: AuthRequest) => {
+    const status = getPaymentDetailsRequestStatus(request);
+    const canUseLink = request && status !== "expired" && status !== "submitted";
+    return {
+      id: request?.id || null,
+      status,
+      hasActiveLink: Boolean(canUseLink),
+      magicLink: canUseLink ? buildPublicExpertPaymentDetailsUrl(request.token, authReq) : null,
+      expiresAt: request?.expiresAt || null,
+      requestedAt: request?.requestedAt || null,
+      sentAt: request?.sentAt || null,
+      submittedAt: request?.submittedAt || null,
+      preferredPaymentMethod: request?.preferredPaymentMethod || null,
+      accountHolderName: request?.accountHolderName || null,
+      paymentIdentifier: request?.paymentIdentifier || null,
+      country: request?.country || null,
+      paymentDetails: request?.paymentDetails || null,
+      notes: request?.notes || null,
+      confirmationAccepted: Boolean(request?.confirmationAccepted),
+    };
+  };
+
+  const ensureExpertPaymentDetailsRequest = async (payable: any, userId: number) => {
+    const existing = await storage.getExpertPaymentDetailRequestByPayableId(payable.id);
+    const existingStatus = getPaymentDetailsRequestStatus(existing);
+    if (existingStatus === "submitted") return existing!;
+    if (existing && existingStatus !== "expired") return existing;
+
+    if (["paid", "void"].includes(String(payable.status || "").toLowerCase())) {
+      throw new Error("Payment details cannot be requested for paid or void payables.");
+    }
+    const email = normalizeEmailForMatch(payable.expertEmail);
+    if (!isSingleRecipientEmail(email)) {
+      throw new Error("Expert must have a valid email before requesting payment details.");
+    }
+
+    let token = "";
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const candidate = generateExpertPaymentDetailsToken();
+      if (!(await storage.getExpertPaymentDetailRequestByToken(candidate))) {
+        token = candidate;
+        break;
+      }
+    }
+    if (!token) throw new Error("Unable to generate a secure payment details link.");
+
+    const now = new Date();
+    return storage.upsertExpertPaymentDetailRequest({
+      expertPayableId: payable.id,
+      expertId: payable.expertId,
+      email,
+      token,
+      status: "link_generated",
+      expiresAt: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000),
+      requestedAt: now,
+      requestedByUserId: userId,
+      confirmationAccepted: false,
+    });
+  };
+
+  app.get("/api/expert-payables/:id/payment-details-request", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const payableId = Number(req.params.id);
+      if (!Number.isInteger(payableId) || payableId <= 0) return res.status(400).json({ error: "Invalid expert payable id." });
+      const payable = await storage.getExpertPayableById(payableId);
+      if (!payable) return res.status(404).json({ error: "Expert payable not found." });
+      const request = await storage.getExpertPaymentDetailRequestByPayableId(payableId);
+      res.json(getInternalPaymentDetailsRequest(request, req));
+    } catch (error) {
+      console.error("Failed to fetch expert payment details request:", error);
+      res.status(500).json({ error: "Failed to fetch payment details request." });
+    }
+  });
+
+  app.post("/api/expert-payables/:id/payment-details-request/generate", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const payableId = Number(req.params.id);
+      if (!Number.isInteger(payableId) || payableId <= 0) return res.status(400).json({ error: "Invalid expert payable id." });
+      const payable = await storage.getExpertPayableById(payableId);
+      if (!payable) return res.status(404).json({ error: "Expert payable not found." });
+      const request = await ensureExpertPaymentDetailsRequest(payable, req.user!.id);
+      if (getPaymentDetailsRequestStatus(request) === "submitted") {
+        return res.status(409).json({ error: "Payment details have already been submitted." });
+      }
+      res.json(getInternalPaymentDetailsRequest(request, req));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate payment details link.";
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.post("/api/expert-payables/:id/payment-details-request/send", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+    try {
+      const payableId = Number(req.params.id);
+      if (!Number.isInteger(payableId) || payableId <= 0) return res.status(400).json({ error: "Invalid expert payable id." });
+      const payable = await storage.getExpertPayableById(payableId);
+      if (!payable) return res.status(404).json({ error: "Expert payable not found." });
+
+      const user = req.user!;
+      const senderIdentity = resolveEmailSenderIdentity(user);
+      if (!senderIdentity.isValid) return res.status(400).json({ error: senderIdentity.reason });
+      const request = await ensureExpertPaymentDetailsRequest(payable, user.id);
+      if (getPaymentDetailsRequestStatus(request) === "submitted") {
+        return res.status(409).json({ error: "Payment details have already been submitted." });
+      }
+
+      const config = getZohoOAuthConfig();
+      if (!config.isConfigured) return res.status(503).json({ error: "Zoho OAuth is not configured." });
+      const connection = await storage.getUserEmailConnection(user.id, ZOHO_MAIL_PROVIDER);
+      if (!connection || connection.status !== "connected") {
+        return res.status(403).json({ error: "Connect your Zoho Mail account before sending this request." });
+      }
+      if (normalizeEmailForMatch(connection.providerEmail) !== senderIdentity.fromEmail) {
+        return res.status(403).json({ error: "Connected Zoho Mail account does not match your CRM sender identity." });
+      }
+
+      const accessToken = await getZohoAccessTokenForConnection(connection, config);
+      let accountId = String(connection.providerAccountId || "").trim();
+      if (!accountId) {
+        const accountsRes = await fetch(`${config.mailApiBaseUrl}/api/accounts`, {
+          headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+        });
+        const accountsPayload: any = await accountsRes.json().catch(() => ({}));
+        if (!accountsRes.ok) return res.status(502).json({ error: "Unable to verify Zoho Mail account before sending." });
+        const matchingAccount = extractZohoAccounts(accountsPayload).find(
+          (account) => getZohoAccountEmail(account) === senderIdentity.fromEmail
+        );
+        accountId = getZohoAccountId(matchingAccount);
+        if (!accountId) return res.status(403).json({ error: "Connected Zoho Mail account does not match your CRM sender identity." });
+      }
+
+      const magicLink = buildPublicExpertPaymentDetailsUrl(request.token, req);
+      const expertFirstName = getFirstNameForEmail(payable.expertName) || "there";
+      const subject = "Thank you for your participation - payment details request";
+      const content = `
+        <div style="font-family:Arial,sans-serif;color:#202124;line-height:1.6;max-width:640px">
+          <p>Hi ${escapeEmailHtml(expertFirstName)},</p>
+          <p>Thank you for participating in the consultation with Mirae Connext.</p>
+          <p>To help us process your compensation, please submit your preferred payment details through the secure link below:</p>
+          <p><a href="${escapeEmailHtml(magicLink)}" style="color:#166534">Submit payment details securely</a></p>
+          <p>You may provide details for PayPal, Wise, Pix, bank transfer, or another preferred method.</p>
+          <p><strong>Please do not reply to this email with sensitive payment information.</strong> For security, payment details should be submitted through the secure form only.</p>
+          <p>Best regards,<br />Mirae Connext</p>
+        </div>`;
+
+      const zohoRes = await fetch(`${config.mailApiBaseUrl}/api/accounts/${encodeURIComponent(accountId)}/messages`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromAddress: senderIdentity.fromEmail,
+          toAddress: request.email,
+          subject,
+          content,
+          mailFormat: "html",
+        }),
+      });
+      if (!zohoRes.ok) {
+        return res.status(502).json({ error: "Zoho Mail could not send the payment details request." });
+      }
+
+      const updated = await storage.markExpertPaymentDetailRequestSent(request.id, user.id);
+      res.json(getInternalPaymentDetailsRequest(updated, req));
+    } catch (error: any) {
+      const message = String(error?.message || "");
+      if (message === "zoho_refresh_token_missing" || message === "zoho_access_token_refresh_failed") {
+        return res.status(403).json({ error: "Zoho Mail connection needs to be reconnected before sending." });
+      }
+      console.error("Failed to send expert payment details request:", error);
+      res.status(500).json({ error: "Failed to send payment details request." });
+    }
+  });
+
+  app.get("/api/public/expert-payment-details/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      const request = token ? await storage.getExpertPaymentDetailRequestByToken(token) : undefined;
+      if (!request) return res.status(404).json({ error: "Invalid payment details link." });
+      const payable = await storage.getExpertPayableById(request.expertPayableId);
+      if (!payable || payable.expertId !== request.expertId) return res.status(404).json({ error: "Invalid payment details link." });
+
+      res.json({
+        status: getPaymentDetailsRequestStatus(request),
+        expertName: payable.expertName,
+        payableAmount: payable.payableAmount,
+        currency: payable.payoutCurrency,
+        serviceDate: payable.serviceDate,
+        durationMinutes: payable.durationMinutes,
+        expiresAt: request.expiresAt,
+        submittedAt: request.submittedAt,
+      });
+    } catch (error) {
+      console.error("Failed to load public expert payment details request:", error);
+      res.status(500).json({ error: "Unable to load this payment details request." });
+    }
+  });
+
+  app.post("/api/public/expert-payment-details/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      const request = token ? await storage.getExpertPaymentDetailRequestByToken(token) : undefined;
+      if (!request) return res.status(404).json({ error: "Invalid payment details link." });
+      const status = getPaymentDetailsRequestStatus(request);
+      if (status === "expired") return res.status(410).json({ error: "This payment details link has expired." });
+      if (status === "submitted") return res.status(409).json({ error: "Payment details have already been submitted." });
+
+      const preferredPaymentMethod = String(req.body?.preferredPaymentMethod || "").trim();
+      const accountHolderName = String(req.body?.accountHolderName || "").trim();
+      const paymentIdentifier = String(req.body?.paymentIdentifier || "").trim();
+      if (!expertPaymentMethods.has(preferredPaymentMethod)) return res.status(400).json({ error: "Select a valid payment method." });
+      if (!accountHolderName || accountHolderName.length > 200) return res.status(400).json({ error: "Account holder or beneficiary name is required." });
+      if (!paymentIdentifier || paymentIdentifier.length > 500) return res.status(400).json({ error: "Payment identifier is required." });
+      if (req.body?.confirmationAccepted !== true) return res.status(400).json({ error: "Confirmation is required before submitting." });
+
+      const submitted = await storage.submitExpertPaymentDetails(request.id, {
+        preferredPaymentMethod,
+        accountHolderName,
+        paymentIdentifier,
+        country: String(req.body?.country || "").slice(0, 200),
+        paymentDetails: String(req.body?.paymentDetails || "").slice(0, 5000),
+        notes: String(req.body?.notes || "").slice(0, 2000),
+        confirmationAccepted: true,
+      });
+      res.json({
+        success: true,
+        status: submitted.status,
+        submittedAt: submitted.submittedAt,
+        message: "Thank you. Your payment details have been submitted securely.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to submit payment details.";
       res.status(400).json({ error: message });
     }
   });
