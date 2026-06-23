@@ -168,12 +168,6 @@ const expertPaymentMethods = new Set([
   "Payoneer",
   "Other",
 ]);
-const escapeEmailHtml = (value: unknown) => String(value ?? "")
-  .replace(/&/g, "&amp;")
-  .replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;")
-  .replace(/"/g, "&quot;")
-  .replace(/'/g, "&#39;");
 const advisorEmailTypes = new Set(["initial_invite", "follow_up", "resend_invite"]);
 const SELECTED_ADVISOR_SEND_LIMIT = 20;
 const getFirstNameForEmail = (name?: string | null) => {
@@ -6218,16 +6212,29 @@ export async function registerRoutes(
       const magicLink = buildPublicExpertPaymentDetailsUrl(request.token, req);
       const expertFirstName = getFirstNameForEmail(payable.expertName) || "there";
       const subject = "Thank you for your participation - payment details request";
-      const content = `
-        <div style="font-family:Arial,sans-serif;color:#202124;line-height:1.6;max-width:640px">
-          <p>Hi ${escapeEmailHtml(expertFirstName)},</p>
-          <p>Thank you for participating in the consultation with Mirae Connext.</p>
-          <p>To help us process your compensation, please submit your preferred payment details through the secure link below:</p>
-          <p><a href="${escapeEmailHtml(magicLink)}" style="color:#166534">Submit payment details securely</a></p>
-          <p>You may provide details for PayPal, Wise, Pix, bank transfer, or another preferred method.</p>
-          <p><strong>Please do not reply to this email with sensitive payment information.</strong> For security, payment details should be submitted through the secure form only.</p>
-          <p>Best regards,<br />Mirae Connext</p>
-        </div>`;
+      const body = `Hi ${expertFirstName},
+
+Thank you for participating in the consultation with Mirae Connext.
+
+To help us process your compensation, please submit your preferred payment details through the secure link below:
+
+${magicLink}
+
+You may provide details for PayPal, Wise, Pix, bank transfer, or another preferred method.
+
+Please do not reply to this email with sensitive payment information. For security, payment details should be submitted through the secure form only.`;
+      const senderProfile = await storage.getUser(user.id);
+      const signatureSenderName = senderProfile?.fullName || senderIdentity.fromName;
+      const signatureSenderEmail = senderProfile?.email || senderIdentity.fromEmail;
+      const emailHtml = renderAdvisorEmailHtml({
+        body,
+        senderName: signatureSenderName,
+        senderEmail: signatureSenderEmail,
+        signatureName: senderProfile?.signatureName || null,
+        jobTitle: senderProfile?.jobTitle || null,
+        mobilePhone: senderProfile?.mobilePhone || null,
+        logoUrl: buildAdvisorEmailLogoUrl(req),
+      });
 
       const zohoRes = await fetch(`${config.mailApiBaseUrl}/api/accounts/${encodeURIComponent(accountId)}/messages`, {
         method: "POST",
@@ -6236,7 +6243,7 @@ export async function registerRoutes(
           fromAddress: senderIdentity.fromEmail,
           toAddress: request.email,
           subject,
-          content,
+          content: emailHtml,
           mailFormat: "html",
         }),
       });
