@@ -2008,6 +2008,14 @@ export async function registerRoutes(
     return false;
   }
 
+  function canManageProjectPaymentDetails(project: any, user: any): boolean {
+    const role = String(user?.role || "").toLowerCase();
+    if (["admin", "ceo", "coo", "finance"].includes(role)) return true;
+    if (role === "pm") return !project.createdByPmId || project.createdByPmId === user.id;
+    if (role === "ra" || role === "research associate") return raHasProjectAccess(project, user.id);
+    return false;
+  }
+
   app.get("/api/projects/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -6043,15 +6051,37 @@ export async function registerRoutes(
     };
   };
 
+  const getProjectPaymentDetailsRequest = (request: any, authReq: AuthRequest) => {
+    const internal = getInternalPaymentDetailsRequest(request, authReq);
+    return {
+      id: internal.id,
+      status: internal.status,
+      hasActiveLink: internal.hasActiveLink,
+      magicLink: internal.magicLink,
+      expiresAt: internal.expiresAt,
+      requestedAt: internal.requestedAt,
+      sentAt: internal.sentAt,
+      submittedAt: internal.submittedAt,
+    };
+  };
+
+  const canViewSensitiveExpertPaymentDetails = (user: any) =>
+    ["admin", "finance"].includes(String(user?.role || "").toLowerCase());
+
+  const canAccessPayablePaymentDetails = async (payable: any, user: any) => {
+    const project = await storage.getProject(payable.projectId);
+    return Boolean(project && canManageProjectPaymentDetails(project, user));
+  };
+
   const ensureExpertPaymentDetailsRequest = async (payable: any, userId: number) => {
+    if (["paid", "void"].includes(String(payable.status || "").toLowerCase())) {
+      throw new Error("Payment details cannot be requested for paid or void payables.");
+    }
     const existing = await storage.getExpertPaymentDetailRequestByPayableId(payable.id);
     const existingStatus = getPaymentDetailsRequestStatus(existing);
     if (existingStatus === "submitted") return existing!;
     if (existing && existingStatus !== "expired") return existing;
 
-    if (["paid", "void"].includes(String(payable.status || "").toLowerCase())) {
-      throw new Error("Payment details cannot be requested for paid or void payables.");
-    }
     const email = normalizeEmailForMatch(payable.expertEmail);
     if (!isSingleRecipientEmail(email)) {
       throw new Error("Expert must have a valid email before requesting payment details.");
@@ -6081,43 +6111,76 @@ export async function registerRoutes(
     });
   };
 
-  app.get("/api/expert-payables/:id/payment-details-request", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+  app.get("/api/projects/:projectId/payment-details-requests", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const projectId = Number(req.params.projectId);
+      if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ error: "Invalid project id." });
+      const project = await storage.getProject(projectId);
+      if (!project) return res.status(404).json({ error: "Project not found." });
+      if (!canManageProjectPaymentDetails(project, req.user)) return res.status(403).json({ error: "Access denied for this project." });
+
+      const projectPayables = (await storage.getExpertPayables({})).filter((payable) => payable.projectId === projectId);
+      const rows = await Promise.all(projectPayables.map(async (payable) => {
+        const request = await storage.getExpertPaymentDetailRequestByPayableId(payable.id);
+        return {
+          consultationId: payable.consultationId,
+          payableId: payable.id,
+          expertId: payable.expertId,
+          payableStatus: payable.status,
+          ...getProjectPaymentDetailsRequest(request, req),
+        };
+      }));
+      res.json({ rows });
+    } catch (error) {
+      console.error("Failed to fetch project payment details request statuses:", error);
+      res.status(500).json({ error: "Failed to fetch payment details request statuses." });
+    }
+  });
+
+  app.get("/api/expert-payables/:id/payment-details-request", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const payableId = Number(req.params.id);
       if (!Number.isInteger(payableId) || payableId <= 0) return res.status(400).json({ error: "Invalid expert payable id." });
       const payable = await storage.getExpertPayableById(payableId);
       if (!payable) return res.status(404).json({ error: "Expert payable not found." });
+      if (!(await canAccessPayablePaymentDetails(payable, req.user))) return res.status(403).json({ error: "Access denied for this project." });
       const request = await storage.getExpertPaymentDetailRequestByPayableId(payableId);
-      res.json(getInternalPaymentDetailsRequest(request, req));
+      res.json(canViewSensitiveExpertPaymentDetails(req.user)
+        ? getInternalPaymentDetailsRequest(request, req)
+        : getProjectPaymentDetailsRequest(request, req));
     } catch (error) {
       console.error("Failed to fetch expert payment details request:", error);
       res.status(500).json({ error: "Failed to fetch payment details request." });
     }
   });
 
-  app.post("/api/expert-payables/:id/payment-details-request/generate", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+  app.post("/api/expert-payables/:id/payment-details-request/generate", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const payableId = Number(req.params.id);
       if (!Number.isInteger(payableId) || payableId <= 0) return res.status(400).json({ error: "Invalid expert payable id." });
       const payable = await storage.getExpertPayableById(payableId);
       if (!payable) return res.status(404).json({ error: "Expert payable not found." });
+      if (!(await canAccessPayablePaymentDetails(payable, req.user))) return res.status(403).json({ error: "Access denied for this project." });
       const request = await ensureExpertPaymentDetailsRequest(payable, req.user!.id);
       if (getPaymentDetailsRequestStatus(request) === "submitted") {
         return res.status(409).json({ error: "Payment details have already been submitted." });
       }
-      res.json(getInternalPaymentDetailsRequest(request, req));
+      res.json(canViewSensitiveExpertPaymentDetails(req.user)
+        ? getInternalPaymentDetailsRequest(request, req)
+        : getProjectPaymentDetailsRequest(request, req));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to generate payment details link.";
       res.status(400).json({ error: message });
     }
   });
 
-  app.post("/api/expert-payables/:id/payment-details-request/send", authMiddleware, requireRoles("admin", "finance"), async (req: AuthRequest, res) => {
+  app.post("/api/expert-payables/:id/payment-details-request/send", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const payableId = Number(req.params.id);
       if (!Number.isInteger(payableId) || payableId <= 0) return res.status(400).json({ error: "Invalid expert payable id." });
       const payable = await storage.getExpertPayableById(payableId);
       if (!payable) return res.status(404).json({ error: "Expert payable not found." });
+      if (!(await canAccessPayablePaymentDetails(payable, req.user))) return res.status(403).json({ error: "Access denied for this project." });
 
       const user = req.user!;
       const senderIdentity = resolveEmailSenderIdentity(user);
@@ -6182,7 +6245,9 @@ export async function registerRoutes(
       }
 
       const updated = await storage.markExpertPaymentDetailRequestSent(request.id, user.id);
-      res.json(getInternalPaymentDetailsRequest(updated, req));
+      res.json(canViewSensitiveExpertPaymentDetails(req.user)
+        ? getInternalPaymentDetailsRequest(updated, req)
+        : getProjectPaymentDetailsRequest(updated, req));
     } catch (error: any) {
       const message = String(error?.message || "");
       if (message === "zoho_refresh_token_missing" || message === "zoho_access_token_refresh_failed") {

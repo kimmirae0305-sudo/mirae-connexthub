@@ -335,6 +335,29 @@ function getAdvisorGreeting(advisorName: string, language: AdvisorEmailLanguage)
   return advisorFirstName ? `Hi ${advisorFirstName},` : "Hello,";
 }
 
+interface ProjectPaymentDetailsRequest {
+  consultationId: number;
+  payableId: number;
+  expertId: number;
+  payableStatus: string;
+  id: number | null;
+  status: "not_requested" | "link_generated" | "sent" | "submitted" | "expired";
+  hasActiveLink: boolean;
+  magicLink: string | null;
+  expiresAt: string | null;
+  requestedAt: string | null;
+  sentAt: string | null;
+  submittedAt: string | null;
+}
+
+const formatProjectPaymentDetailsStatus = (status?: string | null) => {
+  if (status === "link_generated") return "Link Generated";
+  if (status === "sent") return "Sent";
+  if (status === "submitted") return "Submitted";
+  if (status === "expired") return "Expired";
+  return "Not Requested";
+};
+
 function getAdvisorEmailTemplate(
   mode: AdvisorEmailMode,
   language: AdvisorEmailLanguage,
@@ -837,6 +860,25 @@ export default function ProjectDetail() {
     },
     enabled: !!projectId,
   });
+
+  const { data: projectPaymentDetailsData } = useQuery<{ rows: ProjectPaymentDetailsRequest[] }>({
+    queryKey: ["/api/projects", projectId, "payment-details-requests"],
+    queryFn: async () => {
+      const res = await fetch(resolveApiUrl(`/api/projects/${projectId}/payment-details-requests`), {
+        headers: { Authorization: `Bearer ${localStorage.getItem("authToken")}` },
+      });
+      if (!res.ok) throw new Error("Failed to fetch payment details request statuses");
+      return res.json();
+    },
+    enabled: !!projectId,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+
+  const paymentDetailsByConsultationId = useMemo(
+    () => new Map((projectPaymentDetailsData?.rows || []).map((row) => [row.consultationId, row])),
+    [projectPaymentDetailsData]
+  );
 
   const { data: insights = [] } = useQuery<Insight[]>({
     queryKey: ["/api/insights", projectId],
@@ -1427,6 +1469,40 @@ export default function ProjectDetail() {
       toast({ title: "Failed to schedule consultation", variant: "destructive" });
     },
   });
+
+  const generateProjectPaymentDetailsLinkMutation = useMutation({
+    mutationFn: async (payableId: number) => {
+      const response = await apiRequest("POST", `/api/expert-payables/${payableId}/payment-details-request/generate`);
+      return response.json() as Promise<ProjectPaymentDetailsRequest>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "payment-details-requests"] });
+      toast({ title: "Payment details link ready" });
+    },
+    onError: (error: Error) => toast({ title: "Could not generate payment details link", description: error.message, variant: "destructive" }),
+  });
+
+  const sendProjectPaymentDetailsRequestMutation = useMutation({
+    mutationFn: async (payableId: number) => {
+      const response = await apiRequest("POST", `/api/expert-payables/${payableId}/payment-details-request/send`);
+      return response.json() as Promise<ProjectPaymentDetailsRequest>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "payment-details-requests"] });
+      toast({ title: "Payment details request sent", description: "The expert received an individual secure-link email." });
+    },
+    onError: (error: Error) => toast({ title: "Could not send payment details request", description: error.message, variant: "destructive" }),
+  });
+
+  const copyProjectPaymentDetailsLink = async (magicLink: string | null) => {
+    if (!magicLink) return;
+    try {
+      await navigator.clipboard.writeText(magicLink);
+      toast({ title: "Payment details link copied" });
+    } catch {
+      toast({ title: "Could not copy payment details link", variant: "destructive" });
+    }
+  };
 
   const completeCallMutation = useMutation({
     mutationFn: (data: { actualDurationMinutes: number; recordingUrl?: string; notes?: string }) =>
@@ -4415,7 +4491,7 @@ export default function ProjectDetail() {
             </CardHeader>
             <CardContent>
               {callRecordsLoading ? (
-                <DataTableSkeleton columns={7} rows={3} />
+                <DataTableSkeleton columns={8} rows={3} />
               ) : !filteredProjectCalls || filteredProjectCalls.length === 0 ? (
                 <EmptyState
                   icon={Phone}
@@ -4444,6 +4520,7 @@ export default function ProjectDetail() {
                         <TableHead>Duration</TableHead>
                         <TableHead>CU</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead>Payment Details</TableHead>
                         <TableHead>Zoom Link</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
@@ -4488,6 +4565,33 @@ export default function ProjectDetail() {
                                 Completed {format(new Date(record.completedAt), "MMM dd")}
                               </p>
                             )}
+                          </TableCell>
+                          <TableCell className="min-w-[170px]">
+                            {record.status !== "completed" ? (
+                              <span className="text-sm text-muted-foreground">Not eligible</span>
+                            ) : (() => {
+                              const request = paymentDetailsByConsultationId.get(record.id);
+                              if (!request) return <span className="text-sm text-muted-foreground">No payable</span>;
+                              const canRequest = !["paid", "void"].includes(String(request.payableStatus).toLowerCase()) && request.status !== "submitted";
+                              return (
+                                <div className="space-y-1.5">
+                                  <Badge variant="outline">{formatProjectPaymentDetailsStatus(request.status)}</Badge>
+                                  {request.status === "submitted" ? (
+                                    <p className="text-xs text-emerald-600">Payment Details Submitted</p>
+                                  ) : canRequest ? (
+                                    <Button
+                                      variant="link"
+                                      size="sm"
+                                      className="h-auto p-0 text-xs"
+                                      onClick={() => sendProjectPaymentDetailsRequestMutation.mutate(request.payableId)}
+                                      disabled={sendProjectPaymentDetailsRequestMutation.isPending}
+                                    >
+                                      {request.status === "sent" ? "Resend Request" : "Request Payment Details"}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell className="max-w-[220px] text-sm">
                             <div className="space-y-1">
@@ -4568,6 +4672,30 @@ export default function ProjectDetail() {
                                     Generate Insight Draft
                                   </DropdownMenuItem>
                                 )}
+                                {record.status === "completed" && (() => {
+                                  const request = paymentDetailsByConsultationId.get(record.id);
+                                  if (!request || request.status === "submitted" || ["paid", "void"].includes(String(request.payableStatus).toLowerCase())) return null;
+                                  return (
+                                    <>
+                                      {(request.status === "not_requested" || request.status === "expired") && (
+                                        <DropdownMenuItem onClick={() => generateProjectPaymentDetailsLinkMutation.mutate(request.payableId)}>
+                                          <Link2 className="h-4 w-4 mr-2" />
+                                          {request.status === "expired" ? "Regenerate Payment Details Link" : "Generate Payment Details Link"}
+                                        </DropdownMenuItem>
+                                      )}
+                                      {request.magicLink && (
+                                        <DropdownMenuItem onClick={() => copyProjectPaymentDetailsLink(request.magicLink)}>
+                                          <Copy className="h-4 w-4 mr-2" />
+                                          Copy Payment Details Link
+                                        </DropdownMenuItem>
+                                      )}
+                                      <DropdownMenuItem onClick={() => sendProjectPaymentDetailsRequestMutation.mutate(request.payableId)}>
+                                        <Mail className="h-4 w-4 mr-2" />
+                                        {request.status === "sent" ? "Resend Payment Details Request" : "Send Payment Details Request"}
+                                      </DropdownMenuItem>
+                                    </>
+                                  );
+                                })()}
                                 {(record.status === "pending" || record.status === "scheduled") && !isRA && (
                                   <DropdownMenuItem
                                     onClick={() => cancelCallMutation.mutate(record.id)}
