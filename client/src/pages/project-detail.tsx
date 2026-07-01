@@ -106,6 +106,9 @@ import { useAuth } from "@/lib/auth";
 interface EnrichedExpert extends ProjectExpert {
   expert?: Expert;
   sourcedByRa?: { id: number; fullName: string; email?: string } | null;
+  hasSubmittedAdvisorResponse?: boolean;
+  submittedAdvisorResponseAt?: string | Date | null;
+  submittedAdvisorInvitationId?: number | null;
 }
 
 type AdvisorSubmittedAnswer = {
@@ -2100,13 +2103,36 @@ export default function ProjectDetail() {
     return angleNames;
   };
 
+  const hasSubmittedAdvisorApplication = (pe: EnrichedExpert) =>
+    pe.applicationStatus === "submitted" ||
+    Boolean(pe.acceptedAt) ||
+    Boolean(pe.respondedAt) ||
+    (Array.isArray(pe.vqAnswers) && pe.vqAnswers.length > 0);
+
+  const hasSubmittedAdvisorState = (
+    pe: EnrichedExpert,
+    invitation?: AdvisorProjectInvitationWithEmail | null
+  ) => {
+    const invitationStatus = String(invitation?.status || "").trim().toLowerCase();
+    return (
+      pe.hasSubmittedAdvisorResponse === true ||
+      invitationStatus === "submitted" ||
+      Boolean(invitation?.submittedAt) ||
+      hasSubmittedAdvisorApplication(pe)
+    );
+  };
+
   const projectAdvisors = useMemo(() => {
-    if (projectDetail?.projectAdvisors) return projectDetail.projectAdvisors;
-    const byId = new Map<number, EnrichedExpert>();
-    [...(projectDetail?.internalExperts || []), ...(projectDetail?.raSourcedExperts || [])].forEach((advisor) => {
-      byId.set(advisor.id, advisor);
+    const advisors = projectDetail?.projectAdvisors ||
+      [...(projectDetail?.internalExperts || []), ...(projectDetail?.raSourcedExperts || [])];
+    const byExpertId = new Map<number, EnrichedExpert>();
+    advisors.forEach((advisor) => {
+      const existing = byExpertId.get(advisor.expertId);
+      if (!existing || (!hasSubmittedAdvisorState(existing) && hasSubmittedAdvisorState(advisor))) {
+        byExpertId.set(advisor.expertId, advisor);
+      }
     });
-    return Array.from(byId.values());
+    return Array.from(byExpertId.values());
   }, [projectDetail?.projectAdvisors, projectDetail?.internalExperts, projectDetail?.raSourcedExperts]);
 
   const projectAdvisorOptions = useMemo(() => {
@@ -2167,7 +2193,7 @@ export default function ProjectDetail() {
       const email = (invitation?.email || pe.expert?.email || "").trim();
       const hasValidEmail = Boolean(email) && !email.includes(",") && !email.includes(";") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-      if (status === "submitted") {
+      if (hasSubmittedAdvisorState(pe, invitation)) {
         if (invitation?.id) plan.invitationIds.push(invitation.id);
         plan.excludedSubmitted.push(pe);
         return;
@@ -2198,7 +2224,7 @@ export default function ProjectDetail() {
   const visibleEligibleAdvisorRows = useMemo(
     () => filteredInternalExperts.filter((pe) => {
       const invitation = advisorInviteByExpertId.get(pe.expertId);
-      return String(invitation?.status || "not_sent").toLowerCase() !== "submitted";
+      return !hasSubmittedAdvisorState(pe, invitation);
     }),
     [advisorInviteByExpertId, filteredInternalExperts]
   );
@@ -2340,6 +2366,7 @@ export default function ProjectDetail() {
   };
 
   const hasReviewableApplication = (pe: EnrichedExpert) =>
+    pe.hasSubmittedAdvisorResponse === true ||
     pe.applicationStatus === "submitted" ||
     Boolean(pe.acceptedAt) ||
     Boolean(pe.expectedHourlyRateUsd) ||
@@ -2752,6 +2779,15 @@ export default function ProjectDetail() {
   };
 
   const handleProjectInviteIndicatorClick = (pe: EnrichedExpert, invitation?: AdvisorProjectInvitationWithEmail) => {
+    if (hasSubmittedAdvisorState(pe, invitation)) {
+      if (pe.hasSubmittedAdvisorResponse || String(invitation?.status || "").toLowerCase() === "submitted" || invitation?.submittedAt) {
+        setSubmittedResponseExpertId(pe.expertId);
+        return;
+      }
+      setReviewingApplication(pe);
+      return;
+    }
+
     const status = String(invitation?.status || "not_sent").toLowerCase();
     if (status === "submitted") {
       setSubmittedResponseExpertId(pe.expertId);
@@ -2766,7 +2802,14 @@ export default function ProjectDetail() {
     openAdvisorEmailPreview(pe, "initial_invite");
   };
 
-  const getProjectInviteIndicator = (invitation?: AdvisorProjectInvitationWithEmail) => {
+  const getProjectInviteIndicator = (pe: EnrichedExpert, invitation?: AdvisorProjectInvitationWithEmail) => {
+    if (hasSubmittedAdvisorState(pe, invitation)) {
+      return {
+        icon: <Check className="h-3 w-3 text-emerald-600" />,
+        label: "Submitted",
+      };
+    }
+
     const status = String(invitation?.status || "not_sent").toLowerCase();
 
     if (status === "submitted") {
@@ -2810,7 +2853,11 @@ export default function ProjectDetail() {
     };
   };
 
-  const getAdvisorEmailActionLabel = (invitation?: AdvisorProjectInvitationWithEmail | null) => {
+  const getAdvisorEmailActionLabel = (
+    pe: EnrichedExpert,
+    invitation?: AdvisorProjectInvitationWithEmail | null
+  ) => {
+    if (hasSubmittedAdvisorState(pe, invitation)) return "View response";
     const status = String(invitation?.status || "not_sent").toLowerCase();
     if (status === "submitted") return "View response";
     if (status === "sent" || invitation?.sentAt || invitation?.latestEmailSend?.sentAt) return "Send follow-up";
@@ -2877,7 +2924,7 @@ export default function ProjectDetail() {
       targetTab: "existing-experts",
     },
     {
-      label: "Applications Submitted",
+      label: "Advisor Responses",
       value: String(projectApplications.length),
       helper: "Reviewable applications",
       targetTab: "applications",
@@ -2946,7 +2993,7 @@ export default function ProjectDetail() {
       actionLabel: projectAdvisors.length > 0 || raSourcedCount > 0 ? "In Progress" : "Needs Action",
     },
     {
-      label: "Applications Review",
+      label: "Advisor Responses",
       isComplete: projectApplications.length > 0,
       evidence: `${projectApplications.length} submitted`,
       actionLabel: projectApplications.length > 0 ? "In Progress" : "Pending",
@@ -3240,7 +3287,7 @@ export default function ProjectDetail() {
             RA Sourcing {projectDetail.raSourcedExperts?.length ? `(${projectDetail.raSourcedExperts.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="applications" data-testid="tab-applications">
-            Applications {projectApplications.length ? `(${projectApplications.length})` : ""}
+            Advisor Responses {projectApplications.length ? `(${projectApplications.length})` : ""}
           </TabsTrigger>
           <TabsTrigger value="consultations" data-testid="tab-consultations">
             Consultations {projectCallRecords?.length ? `(${projectCallRecords.length})` : ""}
@@ -3937,13 +3984,15 @@ export default function ProjectDetail() {
                     <TableBody>
                       {filteredInternalExperts.map((pe) => {
                         const advisorInvitation = advisorInviteByExpertId.get(pe.expertId);
-                        const inviteIndicator = getProjectInviteIndicator(advisorInvitation);
-                        const inviteStatus = String(advisorInvitation?.status || "not_sent").toLowerCase();
+                        const inviteIndicator = getProjectInviteIndicator(pe, advisorInvitation);
+                        const inviteStatus = hasSubmittedAdvisorState(pe, advisorInvitation)
+                          ? "submitted"
+                          : String(advisorInvitation?.status || "not_sent").toLowerCase();
                         const sentAtDisplay = formatAdvisorInviteSentAt(
                           advisorInvitation?.sentAt || advisorInvitation?.latestEmailSend?.sentAt
                         );
                         const sentByDisplay = advisorInvitation?.latestEmailSend?.sentBy || null;
-                        const advisorActionLabel = getAdvisorEmailActionLabel(advisorInvitation);
+                        const advisorActionLabel = getAdvisorEmailActionLabel(pe, advisorInvitation);
                         const expertName = pe.expert?.name || `Expert #${pe.expertId}`;
                         return (
                           <TableRow key={pe.id} data-testid={`row-existing-expert-${pe.id}`}>
@@ -4397,7 +4446,7 @@ export default function ProjectDetail() {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <ClipboardList className="h-4 w-4" />
-                Project Applications
+                Advisor Responses
               </CardTitle>
               <CardDescription>
                 Review submitted onboarding forms and project VQ answers from RA-sourced experts or existing advisors.

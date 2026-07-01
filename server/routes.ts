@@ -2165,13 +2165,21 @@ export async function registerRoutes(
       }
 
       // Fetch related data
-      const [projectExperts, vettingQuestions, activities, inviteLinks, angles] = await Promise.all([
+      const [projectExperts, vettingQuestions, activities, inviteLinks, angles, advisorResponses] = await Promise.all([
         storage.getProjectExpertsByProject(id),
         storage.getVettingQuestionsByProject(id),
         storage.getProjectActivities(id),
         storage.getExpertInvitationLinksByProject(id),
         storage.getProjectAngles(id),
+        storage.getAdvisorProjectResponsesByProject(id),
       ]);
+
+      const advisorResponseByExpertId = new Map<number, typeof advisorResponses[number]>();
+      advisorResponses.forEach((response) => {
+        if (!advisorResponseByExpertId.has(response.expertId)) {
+          advisorResponseByExpertId.set(response.expertId, response);
+        }
+      });
 
       // Enrich project experts with expert details
       const enrichedExperts = await Promise.all(
@@ -2187,10 +2195,14 @@ export async function registerRoutes(
               ? await storage.getUser(pe.sourcedByRaId || inviteLink!.raId!)
               : await storage.getUserByEmail(inviteLink!.recruitedBy);
           }
+          const submittedAdvisorResponse = advisorResponseByExpertId.get(pe.expertId);
           return {
             ...pe,
             expert,
             sourcedByRa: sourcedByRa ? { id: sourcedByRa.id, fullName: sourcedByRa.fullName, email: sourcedByRa.email } : null,
+            hasSubmittedAdvisorResponse: Boolean(submittedAdvisorResponse),
+            submittedAdvisorResponseAt: submittedAdvisorResponse?.submittedAt || null,
+            submittedAdvisorInvitationId: submittedAdvisorResponse?.invitationId || null,
           };
         })
       );
@@ -2215,6 +2227,7 @@ export async function registerRoutes(
       }
 
       const isReviewableApplication = (assignment: typeof enrichedExperts[number]) =>
+        assignment.hasSubmittedAdvisorResponse === true ||
         assignment.applicationStatus === "submitted" ||
         Boolean(assignment.acceptedAt) ||
         Boolean(assignment.expectedHourlyRateUsd) ||
