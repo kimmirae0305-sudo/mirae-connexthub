@@ -132,6 +132,13 @@ type ConsultationInvitationPreview = {
   canSend: boolean;
 };
 
+function formatDateTimeLocalInput(value?: string | Date | null) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return format(date, "yyyy-MM-dd'T'HH:mm");
+}
+
 type AdvisorEmailLanguage = "en" | "pt" | "es";
 type AdvisorEmailMode = "initial_invite" | "follow_up" | "resend_invite";
 
@@ -1557,7 +1564,7 @@ export default function ProjectDetail() {
    * CU formula: ceil(durationMinutes / 15) * 0.25
    */
   const editCallMutation = useMutation({
-    mutationFn: (data: { durationMinutes: number; cuUsed: string }) =>
+    mutationFn: (data: Partial<InsertCallRecord> & { cuUsed?: string }) =>
       apiRequest("PATCH", `/api/call-records/${selectedCallRecord?.id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
@@ -1669,7 +1676,11 @@ export default function ProjectDetail() {
    * CU Used must be >= 0 and in 0.25 increments
    */
   const editCallFormSchema = z.object({
+    scheduledStartTime: z.string().min(1, "Scheduled date and time is required"),
+    timezone: z.string().min(1, "Time zone is required"),
     durationMinutes: z.number().min(1, "Duration must be greater than 0"),
+    meetingProvider: z.enum(["zoom", "manual", "other"]),
+    zoomLink: z.string().url("Enter a valid meeting URL").optional().or(z.literal("")),
     cuUsed: z.number().min(0, "CU Used must be 0 or greater").refine(
       (val) => val % 0.25 === 0,
       "CU Used must be in 0.25 increments (e.g., 0.25, 0.50, 0.75, 1.00)"
@@ -1681,7 +1692,11 @@ export default function ProjectDetail() {
   const editCallForm = useForm<EditCallFormData>({
     resolver: zodResolver(editCallFormSchema),
     defaultValues: {
+      scheduledStartTime: "",
+      timezone: "America/Sao_Paulo",
       durationMinutes: 30,
+      meetingProvider: "zoom",
+      zoomLink: "",
       cuUsed: 0.5,
     },
   });
@@ -1781,8 +1796,16 @@ export default function ProjectDetail() {
   };
 
   const onEditCallSubmit = (data: EditCallFormData) => {
+    const scheduledStart = new Date(data.scheduledStartTime);
+    const scheduledEnd = new Date(scheduledStart.getTime() + data.durationMinutes * 60 * 1000);
     editCallMutation.mutate({
+      callDate: scheduledStart,
+      scheduledStartTime: scheduledStart,
+      scheduledEndTime: scheduledEnd,
+      timezone: data.timezone,
       durationMinutes: data.durationMinutes,
+      meetingProvider: data.meetingProvider,
+      zoomLink: data.zoomLink?.trim() || null,
       cuUsed: data.cuUsed.toString(),
     });
   };
@@ -4725,14 +4748,24 @@ export default function ProjectDetail() {
                                   <DropdownMenuItem
                                     onClick={() => {
                                       setSelectedCallRecord(record);
+                                      editCallForm.setValue(
+                                        "scheduledStartTime",
+                                        formatDateTimeLocalInput(record.scheduledStartTime || record.callDate)
+                                      );
+                                      editCallForm.setValue("timezone", record.timezone || "America/Sao_Paulo");
                                       editCallForm.setValue("durationMinutes", record.durationMinutes || 30);
+                                      editCallForm.setValue(
+                                        "meetingProvider",
+                                        (record.meetingProvider === "manual" || record.meetingProvider === "other" ? record.meetingProvider : "zoom") as "zoom" | "manual" | "other"
+                                      );
+                                      editCallForm.setValue("zoomLink", record.zoomLink || "");
                                       editCallForm.setValue("cuUsed", parseFloat(record.cuUsed || "0.5"));
                                       setIsEditCallModalOpen(true);
                                     }}
                                     data-testid={`button-edit-call-${record.id}`}
                                   >
                                     <Pencil className="h-4 w-4 mr-2" />
-                                    Edit Call
+                                    Edit Schedule / Meeting Details
                                   </DropdownMenuItem>
                                 )}
                                 {(record.status === "pending" || record.status === "scheduled") && !isRA && (
@@ -7353,16 +7386,49 @@ export default function ProjectDetail() {
 
       {/* Edit Call Modal */}
       <Dialog open={isEditCallModalOpen} onOpenChange={setIsEditCallModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Edit Consultation</DialogTitle>
+            <DialogTitle>Edit Schedule / Meeting Details</DialogTitle>
             <DialogDescription>
-              Update the duration and CU usage for this consultation.
-              CU auto-calculates based on duration (1 CU = 60 min, billed in 0.25 CU / 15 min increments).
+              Update the scheduled time, meeting link, planned duration, and CU usage for this consultation.
             </DialogDescription>
           </DialogHeader>
           <Form {...editCallForm}>
             <form onSubmit={editCallForm.handleSubmit(onEditCallSubmit)} className="space-y-4">
+              <FormField
+                control={editCallForm.control}
+                name="scheduledStartTime"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Scheduled Date and Time</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="datetime-local"
+                        {...field}
+                        data-testid="input-edit-scheduled-start"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={editCallForm.control}
+                name="timezone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Time Zone</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="America/Sao_Paulo"
+                        {...field}
+                        data-testid="input-edit-timezone"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={editCallForm.control}
                 name="durationMinutes"
@@ -7384,6 +7450,48 @@ export default function ProjectDetail() {
                         data-testid="input-edit-duration"
                       />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={editCallForm.control}
+                name="meetingProvider"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Meeting Provider</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-edit-meeting-provider">
+                          <SelectValue placeholder="Select provider" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="zoom">Zoom</SelectItem>
+                        <SelectItem value="manual">Manual</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={editCallForm.control}
+                name="zoomLink"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Meeting Link</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="https://..."
+                        {...field}
+                        data-testid="input-edit-meeting-link"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Paste the Zoom URL or another meeting URL. This link is used by Calendar and invitation previews.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

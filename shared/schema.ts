@@ -300,6 +300,7 @@ export const callRecords = pgTable("call_records", {
   cuUsed: decimal("cu_used", { precision: 10, scale: 2 }).notNull(),
   status: text("status").notNull().default("pending"), // pending, scheduled, completed, cancelled, no_show
   completedAt: timestamp("completed_at"),
+  meetingProvider: text("meeting_provider"),
   zoomLink: text("zoom_link"),
   recordingUrl: text("recording_url"),
   notes: text("notes"),

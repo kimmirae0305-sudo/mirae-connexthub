@@ -131,6 +131,7 @@ export interface ConsultationCalendarEventRow {
   durationMinutes: number;
   status: string;
   meetingLink: string | null;
+  meetingProvider: string | null;
   expertInvitationStatus: string;
   expertInvitationSentAt: Date | null;
   expertInvitationRecipientEmails: string[] | null;
@@ -2018,6 +2019,7 @@ export class DatabaseStorage implements IStorage {
         durationMinutes: callRecords.durationMinutes,
         status: callRecords.status,
         meetingLink: callRecords.zoomLink,
+        meetingProvider: callRecords.meetingProvider,
         expertInvitationStatus: callRecords.expertInvitationStatus,
         expertInvitationSentAt: callRecords.expertInvitationSentAt,
         expertInvitationRecipientEmails: callRecords.expertInvitationRecipientEmails,
