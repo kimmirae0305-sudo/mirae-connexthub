@@ -4636,6 +4636,41 @@ export async function registerRoutes(
   });
 
   // ==================== CALL RECORDS ====================
+  app.get("/api/dashboard/consultation-calendar", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const user = req.user!;
+      const role = normalizeSourcingRole(user.role);
+      const canViewAll = ["admin", "ceo", "coo"].includes(role);
+      const canViewOwn = role === "pm";
+
+      if (!canViewAll && !canViewOwn) {
+        return res.json({ events: [] });
+      }
+
+      const parseDateParam = (value: unknown, endOfDay = false) => {
+        if (typeof value !== "string" || !value.trim()) return undefined;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return undefined;
+        if (endOfDay) date.setHours(23, 59, 59, 999);
+        return date;
+      };
+
+      const startDate = parseDateParam(req.query.start);
+      const endDate = parseDateParam(req.query.end, true);
+      const events = await storage.getConsultationCalendarEvents({
+        startDate,
+        endDate,
+        userId: user.id,
+        includeAll: canViewAll,
+      });
+
+      res.json({ events });
+    } catch (error) {
+      console.error("Failed to fetch consultation calendar:", error);
+      res.status(500).json({ error: "Failed to fetch consultation calendar" });
+    }
+  });
+
   app.get("/api/call-records", authMiddleware, async (req, res) => {
     try {
       const projectId = req.query.projectId ? parseInt(req.query.projectId as string) : null;
