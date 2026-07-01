@@ -690,6 +690,7 @@ const compatibilityStatements = [
   `ALTER TABLE call_records ADD COLUMN IF NOT EXISTS cu_used numeric(10,2) DEFAULT 0`,
   `ALTER TABLE call_records ADD COLUMN IF NOT EXISTS status text DEFAULT 'pending'`,
   `ALTER TABLE call_records ADD COLUMN IF NOT EXISTS completed_at timestamp`,
+  `ALTER TABLE call_records ADD COLUMN IF NOT EXISTS meeting_provider text`,
   `ALTER TABLE call_records ADD COLUMN IF NOT EXISTS zoom_link text`,
   `ALTER TABLE call_records ADD COLUMN IF NOT EXISTS recording_url text`,
   `ALTER TABLE call_records ADD COLUMN IF NOT EXISTS notes text`,

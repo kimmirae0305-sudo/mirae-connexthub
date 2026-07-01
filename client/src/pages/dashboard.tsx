@@ -82,6 +82,7 @@ interface ConsultationCalendarEvent {
   durationMinutes: number;
   status: string;
   meetingLink: string | null;
+  meetingProvider: string | null;
   expertInvitationStatus: string;
   expertInvitationSentAt: string | null;
   expertInvitationRecipientEmails: string[] | null;
@@ -680,6 +681,7 @@ function ConsultationCalendarSection() {
                     )
                   }
                 />
+                <CalendarDetail label="Meeting Provider" value={selectedEvent.meetingProvider || "Not set"} />
                 <CalendarDetail label="Status" value={<StatusBadge status={selectedEvent.status} type="call" />} />
                 <CalendarDetail
                   label="Expert Invitation"
