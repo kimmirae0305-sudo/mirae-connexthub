@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay, isSameMonth, startOfMonth, startOfWeek, subMonths } from "date-fns";
 import { Briefcase, ArrowRight, Plus, TrendingUp, Phone, DollarSign, AlertCircle, ClipboardList, UserPlus, CalendarDays, ChevronLeft, ChevronRight, Clock, List, Video } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -27,7 +28,9 @@ import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { useAuth } from "@/lib/auth";
 import { normalizeRole } from "@/lib/permissions";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 import type { Project } from "@shared/schema";
 
 interface KPICall {
@@ -79,10 +82,27 @@ interface ConsultationCalendarEvent {
   durationMinutes: number;
   status: string;
   meetingLink: string | null;
+  expertInvitationStatus: string;
+  expertInvitationSentAt: string | null;
+  expertInvitationRecipientEmails: string[] | null;
+  clientInvitationStatus: string;
+  clientInvitationSentAt: string | null;
+  clientInvitationRecipientEmails: string[] | null;
   pmId: number | null;
   pmName: string | null;
   scheduledByUserId: number | null;
   scheduledByUserName: string | null;
+}
+
+interface ConsultationInvitationPreview {
+  audience: "expert" | "client";
+  templateType: "expert_invitation" | "client_invitation";
+  recipientName: string | null;
+  recipientEmail: string;
+  subject: string;
+  body: string;
+  missingFields: string[];
+  canSend: boolean;
 }
 
 function formatBrazilDate(isoString: string): string {
@@ -374,8 +394,13 @@ function CalendarDetail({ label, value }: { label: string; value?: ReactNode }) 
 
 function ConsultationCalendarSection() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [selectedEvent, setSelectedEvent] = useState<ConsultationCalendarEvent | null>(null);
+  const [invitationPreview, setInvitationPreview] = useState<ConsultationInvitationPreview | null>(null);
+  const [isInvitationPreviewOpen, setIsInvitationPreviewOpen] = useState(false);
+  const [inviteSubject, setInviteSubject] = useState("");
+  const [inviteBody, setInviteBody] = useState("");
 
   const { data, isLoading, error } = useQuery<{ events: ConsultationCalendarEvent[] }>({
     queryKey: ["/api/dashboard/consultation-calendar"],
@@ -401,6 +426,52 @@ function ConsultationCalendarSection() {
 
   const normalizedRole = normalizeRole(user?.role);
   const canViewClientOrganization = normalizedRole ? ["admin", "ceo", "coo", "pm"].includes(normalizedRole) : false;
+  const canSendConsultationInvites = normalizedRole ? ["admin", "ceo", "coo", "pm"].includes(normalizedRole) : false;
+
+  const openInvitationPreview = async (event: ConsultationCalendarEvent, audience: "expert" | "client") => {
+    try {
+      const response = await apiRequest("GET", `/api/consultations/${event.id}/invitations/${audience}/preview`);
+      const preview = await response.json();
+      setInvitationPreview(preview);
+      setInviteSubject(preview.subject || "");
+      setInviteBody(preview.body || "");
+      setIsInvitationPreviewOpen(true);
+    } catch (error) {
+      toast({
+        title: "Failed to load invitation preview",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const sendInvitationMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedEvent || !invitationPreview) throw new Error("No invitation preview selected.");
+      const response = await apiRequest(
+        "POST",
+        `/api/consultations/${selectedEvent.id}/invitations/${invitationPreview.audience}/send`,
+        {
+          subject: inviteSubject,
+          body: inviteBody,
+        }
+      );
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/consultation-calendar"] });
+      toast({ title: "Consultation invitation sent" });
+      setIsInvitationPreviewOpen(false);
+      setInvitationPreview(null);
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to send consultation invitation",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const renderEventButton = (event: ConsultationCalendarEvent, compact = false) => (
     <button
@@ -610,17 +681,125 @@ function ConsultationCalendarSection() {
                   }
                 />
                 <CalendarDetail label="Status" value={<StatusBadge status={selectedEvent.status} type="call" />} />
+                <CalendarDetail
+                  label="Expert Invitation"
+                  value={
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{selectedEvent.expertInvitationStatus?.replace(/_/g, " ") || "not sent"}</Badge>
+                      {selectedEvent.expertInvitationSentAt && (
+                        <span className="text-xs text-muted-foreground">
+                          Sent {format(new Date(selectedEvent.expertInvitationSentAt), "MMM d, HH:mm")}
+                        </span>
+                      )}
+                    </div>
+                  }
+                />
+                <CalendarDetail
+                  label="Client Invitation"
+                  value={
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{selectedEvent.clientInvitationStatus?.replace(/_/g, " ") || "not sent"}</Badge>
+                      {selectedEvent.clientInvitationSentAt && (
+                        <span className="text-xs text-muted-foreground">
+                          Sent {format(new Date(selectedEvent.clientInvitationSentAt), "MMM d, HH:mm")}
+                        </span>
+                      )}
+                    </div>
+                  }
+                />
                 <CalendarDetail label="Assigned PM / Scheduled By" value={selectedEvent.pmName || selectedEvent.scheduledByUserName || "-"} />
               </dl>
-              {selectedEvent.meetingLink && (
-                <div className="flex justify-end">
+              <div className="flex flex-wrap justify-end gap-2">
+                {canSendConsultationInvites && ["pending", "scheduled"].includes(String(selectedEvent.status || "").toLowerCase()) && (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={() => openInvitationPreview(selectedEvent, "expert")}
+                      data-testid="button-send-expert-consultation-invitation"
+                    >
+                      Send Expert Invitation
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => openInvitationPreview(selectedEvent, "client")}
+                      data-testid="button-send-client-consultation-invitation"
+                    >
+                      Send Client Invitation
+                    </Button>
+                  </>
+                )}
+                {selectedEvent.meetingLink && (
                   <Button asChild className="gap-2" data-testid="button-open-meeting">
                     <a href={selectedEvent.meetingLink} target="_blank" rel="noopener noreferrer">
                       <Video className="h-4 w-4" /> Open Meeting
                     </a>
                   </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isInvitationPreviewOpen} onOpenChange={setIsInvitationPreviewOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {invitationPreview?.audience === "client" ? "Client-facing Consultation Invitation" : "Expert-facing Consultation Invitation"}
+            </DialogTitle>
+          </DialogHeader>
+          {invitationPreview && (
+            <div className="space-y-4">
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <p><span className="font-semibold">Recipient:</span> {invitationPreview.recipientEmail || "Missing"}</p>
+                <p className="mt-1 text-muted-foreground">
+                  {invitationPreview.audience === "expert"
+                    ? "Expert-facing copy uses confidential wording and does not include client identity or internal project context."
+                    : "Client-facing copy includes the expert and scheduled consultation details."}
+                </p>
+              </div>
+              {invitationPreview.missingFields.length > 0 && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                  <p className="font-semibold">Missing required fields</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {invitationPreview.missingFields.map((field) => (
+                      <li key={field}>{field}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="consultation-invite-subject">Subject</label>
+                <Textarea
+                  id="consultation-invite-subject"
+                  value={inviteSubject}
+                  onChange={(event) => setInviteSubject(event.target.value)}
+                  rows={2}
+                  data-testid="textarea-consultation-invite-subject"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="consultation-invite-body">Email Body</label>
+                <Textarea
+                  id="consultation-invite-body"
+                  value={inviteBody}
+                  onChange={(event) => setInviteBody(event.target.value)}
+                  rows={12}
+                  data-testid="textarea-consultation-invite-body"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setIsInvitationPreviewOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => sendInvitationMutation.mutate()}
+                  disabled={!invitationPreview.canSend || !inviteSubject.trim() || !inviteBody.trim() || sendInvitationMutation.isPending}
+                  data-testid="button-confirm-send-consultation-invitation"
+                >
+                  {sendInvitationMutation.isPending ? "Sending..." : "Send"}
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

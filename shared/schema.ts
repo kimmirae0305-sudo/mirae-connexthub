@@ -303,6 +303,14 @@ export const callRecords = pgTable("call_records", {
   zoomLink: text("zoom_link"),
   recordingUrl: text("recording_url"),
   notes: text("notes"),
+  expertInvitationStatus: text("expert_invitation_status").notNull().default("not_sent"),
+  expertInvitationSentAt: timestamp("expert_invitation_sent_at"),
+  expertInvitationSentByUserId: integer("expert_invitation_sent_by_user_id").references(() => users.id),
+  expertInvitationRecipientEmails: text("expert_invitation_recipient_emails").array(),
+  clientInvitationStatus: text("client_invitation_status").notNull().default("not_sent"),
+  clientInvitationSentAt: timestamp("client_invitation_sent_at"),
+  clientInvitationSentByUserId: integer("client_invitation_sent_by_user_id").references(() => users.id),
+  clientInvitationRecipientEmails: text("client_invitation_recipient_emails").array(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -414,6 +422,25 @@ export const advisorProjectInvitationEmailSends = pgTable("advisor_project_invit
   subject: text("subject").notNull(),
   body: text("body").notNull(),
   emailType: text("email_type").notNull().default("initial_invite"),
+  provider: text("provider").notNull().default("zoho"),
+  providerMessageId: text("provider_message_id"),
+  status: text("status").notNull().default("sent"),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const consultationInvitationEmailSends = pgTable("consultation_invitation_email_sends", {
+  id: serial("id").primaryKey(),
+  callRecordId: integer("call_record_id").notNull().references(() => callRecords.id, { onDelete: "cascade" }),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  expertId: integer("expert_id").references(() => experts.id, { onDelete: "set null" }),
+  sentByUserId: integer("sent_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  audience: text("audience").notNull(),
+  fromEmail: text("from_email").notNull(),
+  fromName: text("from_name"),
+  toEmail: text("to_email").notNull(),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
   provider: text("provider").notNull().default("zoho"),
   providerMessageId: text("provider_message_id"),
   status: text("status").notNull().default("sent"),
@@ -810,6 +837,25 @@ export const advisorProjectInvitationEmailSendsRelations = relations(advisorProj
   }),
 }));
 
+export const consultationInvitationEmailSendsRelations = relations(consultationInvitationEmailSends, ({ one }) => ({
+  callRecord: one(callRecords, {
+    fields: [consultationInvitationEmailSends.callRecordId],
+    references: [callRecords.id],
+  }),
+  project: one(projects, {
+    fields: [consultationInvitationEmailSends.projectId],
+    references: [projects.id],
+  }),
+  expert: one(experts, {
+    fields: [consultationInvitationEmailSends.expertId],
+    references: [experts.id],
+  }),
+  sentByUser: one(users, {
+    fields: [consultationInvitationEmailSends.sentByUserId],
+    references: [users.id],
+  }),
+}));
+
 export const projectActivitiesRelations = relations(projectActivities, ({ one }) => ({
   project: one(projects, {
     fields: [projectActivities.projectId],
@@ -1073,6 +1119,8 @@ export const insertCallRecordSchema = createInsertSchema(callRecords).omit({
   scheduledStartTime: coerceDate.optional(),
   scheduledEndTime: coerceDate.optional(),
   completedAt: coerceDate.optional(),
+  expertInvitationSentAt: coerceDate.optional(),
+  clientInvitationSentAt: coerceDate.optional(),
 });
 
 export const insertInsightSchema = createInsertSchema(insights).omit({
@@ -1116,6 +1164,13 @@ export const insertAdvisorProjectResponseSchema = createInsertSchema(advisorProj
 });
 
 export const insertAdvisorProjectInvitationEmailSendSchema = createInsertSchema(advisorProjectInvitationEmailSends).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  sentAt: coerceDate.optional(),
+});
+
+export const insertConsultationInvitationEmailSendSchema = createInsertSchema(consultationInvitationEmailSends).omit({
   id: true,
   createdAt: true,
 }).extend({
@@ -1251,6 +1306,8 @@ export type AdvisorProjectResponse = typeof advisorProjectResponses.$inferSelect
 export type InsertAdvisorProjectResponse = z.infer<typeof insertAdvisorProjectResponseSchema>;
 export type AdvisorProjectInvitationEmailSend = typeof advisorProjectInvitationEmailSends.$inferSelect;
 export type InsertAdvisorProjectInvitationEmailSend = z.infer<typeof insertAdvisorProjectInvitationEmailSendSchema>;
+export type ConsultationInvitationEmailSend = typeof consultationInvitationEmailSends.$inferSelect;
+export type InsertConsultationInvitationEmailSend = z.infer<typeof insertConsultationInvitationEmailSendSchema>;
 
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type InsertUsageRecord = z.infer<typeof insertUsageRecordSchema>;

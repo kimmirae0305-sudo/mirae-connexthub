@@ -28,6 +28,8 @@ import {
   projectExperts,
   projectAngles,
   users,
+  clientOrganizations,
+  consultationInvitationEmailSends,
   type UserEmailConnection,
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
@@ -169,6 +171,11 @@ const expertPaymentMethods = new Set([
   "Other",
 ]);
 const advisorEmailTypes = new Set(["initial_invite", "follow_up", "resend_invite"]);
+const consultationInvitationAudiences = new Set(["expert", "client"]);
+const consultationInvitationTemplateTypes = {
+  expert: "expert_invitation",
+  client: "client_invitation",
+} as const;
 const SELECTED_ADVISOR_SEND_LIMIT = 20;
 const getFirstNameForEmail = (name?: string | null) => {
   const firstName = String(name || "").trim().split(/\s+/)[0];
@@ -311,6 +318,74 @@ const getZohoProviderMessageId = (payload: any) =>
     payload?.data?.[0]?.message_id ||
     ""
   ).trim();
+const formatConsultationDateTimeForEmail = (value: Date, timezone?: string | null) => {
+  const timeZone = timezone || "America/Sao_Paulo";
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone,
+  }).format(value);
+};
+const buildConsultationInvitationTemplate = ({
+  audience,
+  expertName,
+  expertTitle,
+  clientContactName,
+  scheduledAt,
+  timezone,
+  durationMinutes,
+  meetingLink,
+  pmName,
+}: {
+  audience: "expert" | "client";
+  expertName: string;
+  expertTitle?: string | null;
+  clientContactName?: string | null;
+  scheduledAt: Date;
+  timezone?: string | null;
+  durationMinutes: number;
+  meetingLink: string;
+  pmName?: string | null;
+}) => {
+  const dateTime = formatConsultationDateTimeForEmail(scheduledAt, timezone);
+  const timeZone = timezone || "America/Sao_Paulo";
+  const pmLine = pmName ? `\nPM contact: ${pmName}` : "";
+
+  if (audience === "expert") {
+    return {
+      templateType: consultationInvitationTemplateTypes.expert,
+      subject: "Mirae Connext | Confidential consultation invitation",
+      body: `Hi ${getFirstNameForEmail(expertName) || expertName},
+
+This confirms your scheduled Confidential Market Research Consultation with Mirae Connext.
+
+Scheduled time: ${dateTime}
+Time zone: ${timeZone}
+Planned duration: ${durationMinutes} minutes
+Meeting link: ${meetingLink}${pmLine}
+
+Please do not share this invitation or meeting link. Client identity and consultation context remain confidential and will be discussed only as appropriate during the call.`,
+    };
+  }
+
+  const greeting = clientContactName ? `Hi ${getFirstNameForEmail(clientContactName) || clientContactName},` : "Hello,";
+  const expertLine = expertTitle ? `${expertName} — ${expertTitle}` : expertName;
+  return {
+    templateType: consultationInvitationTemplateTypes.client,
+    subject: "Mirae Connext | Consultation meeting details",
+    body: `${greeting}
+
+This confirms the scheduled expert consultation.
+
+Expert: ${expertLine}
+Scheduled time: ${dateTime}
+Time zone: ${timeZone}
+Planned duration: ${durationMinutes} minutes
+Meeting link: ${meetingLink}${pmLine}
+
+Please use the meeting link above at the scheduled time.`,
+  };
+};
 const getZohoAccessTokenForConnection = async (
   connection: UserEmailConnection,
   config: ReturnType<typeof getZohoOAuthConfig>
@@ -4636,6 +4711,297 @@ export async function registerRoutes(
   });
 
   // ==================== CALL RECORDS ====================
+  const getConsultationInvitationContext = async (callRecordId: number, user: any) => {
+    const [row] = await db
+      .select({
+        callRecord: callRecords,
+        project: projects,
+        expert: experts,
+        pmName: users.fullName,
+        clientOrganizationName: clientOrganizations.name,
+      })
+      .from(callRecords)
+      .innerJoin(projects, eq(callRecords.projectId, projects.id))
+      .innerJoin(experts, eq(callRecords.expertId, experts.id))
+      .leftJoin(users, eq(callRecords.pmId, users.id))
+      .leftJoin(clientOrganizations, eq(projects.clientOrganizationId, clientOrganizations.id))
+      .where(eq(callRecords.id, callRecordId));
+
+    if (!row) return null;
+    if (!canManageProjectAdvisorInvitations(row.project, user)) {
+      throw new Error("consultation_invitation_access_denied");
+    }
+    return row;
+  };
+
+  const buildConsultationInvitationPreview = (context: NonNullable<Awaited<ReturnType<typeof getConsultationInvitationContext>>>, audience: "expert" | "client") => {
+    const { callRecord, project, expert, pmName } = context;
+    const scheduledAt = callRecord.scheduledStartTime || callRecord.callDate;
+    const recipientEmail = audience === "expert" ? normalizeEmailForMatch(expert.email) : normalizeEmailForMatch(project.clientPocEmail);
+    const recipientName = audience === "expert" ? expert.name : project.clientPocName;
+    const missingFields: string[] = [];
+
+    if (!recipientEmail || !isSingleRecipientEmail(recipientEmail)) {
+      missingFields.push(audience === "expert" ? "expert email" : "client contact email");
+    }
+    if (!scheduledAt) missingFields.push("scheduled date and time");
+    if (!callRecord.durationMinutes || callRecord.durationMinutes <= 0) missingFields.push("planned duration");
+    if (!callRecord.zoomLink?.trim()) missingFields.push("meeting link");
+    if (!["pending", "scheduled"].includes(String(callRecord.status || "").toLowerCase())) {
+      missingFields.push("scheduled consultation status");
+    }
+
+    const template = buildConsultationInvitationTemplate({
+      audience,
+      expertName: expert.name,
+      expertTitle: expert.jobTitle || expert.expertise || null,
+      clientContactName: project.clientPocName || null,
+      scheduledAt: scheduledAt || new Date(),
+      timezone: callRecord.timezone,
+      durationMinutes: callRecord.durationMinutes,
+      meetingLink: callRecord.zoomLink || "",
+      pmName,
+    });
+
+    return {
+      audience,
+      templateType: template.templateType,
+      recipientName: recipientName || null,
+      recipientEmail,
+      subject: template.subject,
+      body: template.body,
+      missingFields,
+      canSend: missingFields.length === 0,
+      consultation: {
+        id: callRecord.id,
+        projectId: callRecord.projectId,
+        projectName: project.name,
+        expertName: expert.name,
+        clientOrganizationName: context.clientOrganizationName || project.clientName || null,
+        scheduledStartTime: callRecord.scheduledStartTime || callRecord.callDate,
+        scheduledEndTime: callRecord.scheduledEndTime,
+        timezone: callRecord.timezone || "America/Sao_Paulo",
+        durationMinutes: callRecord.durationMinutes,
+        meetingLink: callRecord.zoomLink || null,
+        status: callRecord.status,
+        expertInvitationStatus: callRecord.expertInvitationStatus || "not_sent",
+        clientInvitationStatus: callRecord.clientInvitationStatus || "not_sent",
+      },
+    };
+  };
+
+  const getZohoSendAccountForUser = async (user: any, senderIdentity: ReturnType<typeof resolveEmailSenderIdentity>) => {
+    const config = getZohoOAuthConfig();
+    if (!config.isConfigured) {
+      return { errorStatus: 503, error: "Zoho OAuth is not configured." } as const;
+    }
+
+    const connection = await storage.getUserEmailConnection(user.id, ZOHO_MAIL_PROVIDER);
+    if (!connection || connection.status !== "connected") {
+      return { errorStatus: 403, error: "Connect your Zoho Mail account before sending consultation invitations." } as const;
+    }
+    if (normalizeEmailForMatch(connection.providerEmail) !== senderIdentity.fromEmail) {
+      return { errorStatus: 403, error: "Connected Zoho Mail account does not match your CRM sender identity." } as const;
+    }
+
+    const accessToken = await getZohoAccessTokenForConnection(connection, config);
+    let accountId = String(connection.providerAccountId || "").trim();
+    if (!accountId) {
+      const latestConnection = await storage.getUserEmailConnection(user.id, ZOHO_MAIL_PROVIDER) || connection;
+      const accountsRes = await fetch(`${config.mailApiBaseUrl}/api/accounts`, {
+        headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+      });
+      const accountsPayload: any = await accountsRes.json().catch(() => ({}));
+      if (!accountsRes.ok) {
+        return { errorStatus: 502, error: "Unable to verify Zoho Mail account before sending." } as const;
+      }
+      const matchingAccount = extractZohoAccounts(accountsPayload).find(
+        (account) => getZohoAccountEmail(account) === senderIdentity.fromEmail
+      );
+      accountId = getZohoAccountId(matchingAccount);
+      if (!accountId) {
+        return { errorStatus: 403, error: "Connected Zoho Mail account does not match your CRM sender identity." } as const;
+      }
+      await storage.upsertUserEmailConnection({
+        userId: latestConnection.userId,
+        provider: latestConnection.provider || ZOHO_MAIL_PROVIDER,
+        providerEmail: senderIdentity.fromEmail,
+        providerAccountId: accountId,
+        providerUserId: String(matchingAccount?.userId || matchingAccount?.zohoUserId || latestConnection.providerUserId || ""),
+        providerOrgId: String(matchingAccount?.organizationId || matchingAccount?.orgId || latestConnection.providerOrgId || ""),
+        encryptedRefreshToken: latestConnection.encryptedRefreshToken,
+        encryptedAccessToken: latestConnection.encryptedAccessToken,
+        accessTokenExpiresAt: latestConnection.accessTokenExpiresAt,
+        scopes: latestConnection.scopes || ZOHO_MAIL_SCOPES.join(" "),
+        status: "connected",
+        lastConnectedAt: latestConnection.lastConnectedAt || new Date(),
+        lastValidatedAt: new Date(),
+        revokedAt: null,
+      });
+    }
+
+    return { config, accessToken, accountId } as const;
+  };
+
+  app.get("/api/consultations/:id/invitations/:audience/preview", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const callRecordId = Number(req.params.id);
+      const audience = String(req.params.audience || "") as "expert" | "client";
+      if (!Number.isInteger(callRecordId) || callRecordId <= 0 || !consultationInvitationAudiences.has(audience)) {
+        return res.status(400).json({ error: "Invalid consultation invitation preview request." });
+      }
+
+      const context = await getConsultationInvitationContext(callRecordId, req.user);
+      if (!context) return res.status(404).json({ error: "Consultation not found." });
+      res.json(buildConsultationInvitationPreview(context, audience));
+    } catch (error: any) {
+      if (error?.message === "consultation_invitation_access_denied") {
+        return res.status(403).json({ error: "Access denied for this consultation." });
+      }
+      console.error("Failed to build consultation invitation preview:", error);
+      res.status(500).json({ error: "Failed to build consultation invitation preview." });
+    }
+  });
+
+  app.post("/api/consultations/:id/invitations/:audience/send", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const user = req.user!;
+      const callRecordId = Number(req.params.id);
+      const audience = String(req.params.audience || "") as "expert" | "client";
+      if (!Number.isInteger(callRecordId) || callRecordId <= 0 || !consultationInvitationAudiences.has(audience)) {
+        return res.status(400).json({ error: "Invalid consultation invitation send request." });
+      }
+
+      const forbiddenFields = ["toEmail", "toEmails", "recipients", "cc", "bcc", "attachments"].filter((field) =>
+        Object.prototype.hasOwnProperty.call(req.body || {}, field)
+      );
+      if (forbiddenFields.length > 0) {
+        return res.status(400).json({ error: "Consultation invitations do not support arbitrary recipients, CC, BCC, or attachments." });
+      }
+
+      const context = await getConsultationInvitationContext(callRecordId, user);
+      if (!context) return res.status(404).json({ error: "Consultation not found." });
+      const preview = buildConsultationInvitationPreview(context, audience);
+      if (!preview.canSend) {
+        return res.status(400).json({ error: "Required fields are missing before sending.", missingFields: preview.missingFields });
+      }
+
+      const subject = String(req.body?.subject || preview.subject).trim();
+      const body = String(req.body?.body || preview.body).trim();
+      if (!subject || !body) return res.status(400).json({ error: "Subject and body are required before sending." });
+      if (subject.length > 300 || body.length > 20000) return res.status(400).json({ error: "Subject or body is too long to send safely." });
+
+      const senderIdentity = resolveEmailSenderIdentity(user);
+      if (!senderIdentity.isValid) {
+        return res.status(400).json({
+          error: senderIdentity.reason || "Sender identity is not configured for Mirae Connext email sending.",
+        });
+      }
+
+      const zoho = await getZohoSendAccountForUser(user, senderIdentity);
+      if ("error" in zoho) return res.status(zoho.errorStatus).json({ error: zoho.error });
+
+      const senderProfile = await storage.getUser(user.id);
+      const signatureSenderName = senderProfile?.fullName || senderIdentity.fromName;
+      const signatureSenderEmail = senderProfile?.email || senderIdentity.fromEmail;
+      const emailHtml = renderAdvisorEmailHtml({
+        body,
+        senderName: signatureSenderName,
+        senderEmail: signatureSenderEmail,
+        signatureName: senderProfile?.signatureName || null,
+        jobTitle: senderProfile?.jobTitle || null,
+        mobilePhone: senderProfile?.mobilePhone || null,
+        logoUrl: buildAdvisorEmailLogoUrl(req),
+      });
+
+      const zohoRes = await fetch(`${zoho.config.mailApiBaseUrl}/api/accounts/${encodeURIComponent(zoho.accountId)}/messages`, {
+        method: "POST",
+        headers: {
+          Authorization: `Zoho-oauthtoken ${zoho.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          fromAddress: senderIdentity.fromEmail,
+          toAddress: preview.recipientEmail,
+          subject,
+          content: emailHtml,
+          mailFormat: "html",
+        }),
+      });
+      const zohoPayload: any = await zohoRes.json().catch(() => ({}));
+      if (!zohoRes.ok) {
+        console.warn("[zoho-send-consultation-invitation]", {
+          provider: "zoho",
+          userId: user.id,
+          consultationId: callRecordId,
+          audience,
+          status: zohoRes.status,
+        });
+        await storage.updateCallRecord(callRecordId, {
+          [audience === "expert" ? "expertInvitationStatus" : "clientInvitationStatus"]: "failed",
+        } as any);
+        return res.status(502).json({ error: "Zoho Mail could not send the consultation invitation." });
+      }
+
+      const sentAt = new Date();
+      const providerMessageId = getZohoProviderMessageId(zohoPayload) || null;
+      await storage.createConsultationInvitationEmailSend({
+        callRecordId,
+        projectId: context.callRecord.projectId,
+        expertId: context.callRecord.expertId,
+        sentByUserId: user.id,
+        audience,
+        fromEmail: senderIdentity.fromEmail,
+        fromName: senderIdentity.fromName || null,
+        toEmail: preview.recipientEmail,
+        subject,
+        body,
+        provider: "zoho",
+        providerMessageId,
+        status: "sent",
+        sentAt,
+      });
+
+      const previousStatus = audience === "expert"
+        ? context.callRecord.expertInvitationStatus
+        : context.callRecord.clientInvitationStatus;
+      const nextStatus = previousStatus === "sent" || previousStatus === "resent" ? "resent" : "sent";
+      await storage.updateCallRecord(callRecordId, audience === "expert"
+        ? {
+            expertInvitationStatus: nextStatus,
+            expertInvitationSentAt: sentAt,
+            expertInvitationSentByUserId: user.id,
+            expertInvitationRecipientEmails: [preview.recipientEmail],
+          }
+        : {
+            clientInvitationStatus: nextStatus,
+            clientInvitationSentAt: sentAt,
+            clientInvitationSentByUserId: user.id,
+            clientInvitationRecipientEmails: [preview.recipientEmail],
+          }
+      );
+
+      res.json({
+        success: true,
+        status: nextStatus,
+        audience,
+        sentAt,
+        provider: "zoho",
+        providerMessageId,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || "");
+      if (message === "consultation_invitation_access_denied") {
+        return res.status(403).json({ error: "Access denied for this consultation." });
+      }
+      if (message === "zoho_refresh_token_missing" || message === "zoho_access_token_refresh_failed") {
+        return res.status(403).json({ error: "Zoho Mail connection needs to be reconnected before sending." });
+      }
+      console.error("Failed to send consultation invitation:", error);
+      res.status(500).json({ error: "Failed to send consultation invitation." });
+    }
+  });
+
   app.get("/api/dashboard/consultation-calendar", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const user = req.user!;

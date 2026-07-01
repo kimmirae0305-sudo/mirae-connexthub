@@ -121,6 +121,17 @@ type NormalizedAdvisorSubmittedAnswer = {
   answerText: string;
 };
 
+type ConsultationInvitationPreview = {
+  audience: "expert" | "client";
+  templateType: "expert_invitation" | "client_invitation";
+  recipientName: string | null;
+  recipientEmail: string;
+  subject: string;
+  body: string;
+  missingFields: string[];
+  canSend: boolean;
+};
+
 type AdvisorEmailLanguage = "en" | "pt" | "es";
 type AdvisorEmailMode = "initial_invite" | "follow_up" | "resend_invite";
 
@@ -632,6 +643,10 @@ export default function ProjectDetail() {
   const [isCompleteCallModalOpen, setIsCompleteCallModalOpen] = useState(false);
   const [isEditCallModalOpen, setIsEditCallModalOpen] = useState(false);
   const [selectedCallRecord, setSelectedCallRecord] = useState<CallRecord | null>(null);
+  const [consultationInvitationPreview, setConsultationInvitationPreview] = useState<ConsultationInvitationPreview | null>(null);
+  const [consultationInvitationCall, setConsultationInvitationCall] = useState<CallRecord | null>(null);
+  const [consultationInvitationSubject, setConsultationInvitationSubject] = useState("");
+  const [consultationInvitationBody, setConsultationInvitationBody] = useState("");
   const [selectedInsightCallRecord, setSelectedInsightCallRecord] = useState<CallRecord | null>(null);
   const [consultationStatusFilter, setConsultationStatusFilter] = useState<string>("all");
   
@@ -1557,6 +1572,54 @@ export default function ProjectDetail() {
     },
     onError: () => {
       toast({ title: "Failed to update consultation", variant: "destructive" });
+    },
+  });
+
+  const openConsultationInvitationPreview = async (record: CallRecord, audience: "expert" | "client") => {
+    try {
+      const response = await apiRequest("GET", `/api/consultations/${record.id}/invitations/${audience}/preview`);
+      const preview = await response.json();
+      setConsultationInvitationPreview(preview);
+      setConsultationInvitationCall(record);
+      setConsultationInvitationSubject(preview.subject || "");
+      setConsultationInvitationBody(preview.body || "");
+    } catch (error) {
+      toast({
+        title: "Failed to load consultation invitation preview",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const sendConsultationInvitationMutation = useMutation({
+    mutationFn: async () => {
+      if (!consultationInvitationCall || !consultationInvitationPreview) {
+        throw new Error("No consultation invitation selected.");
+      }
+      const response = await apiRequest(
+        "POST",
+        `/api/consultations/${consultationInvitationCall.id}/invitations/${consultationInvitationPreview.audience}/send`,
+        {
+          subject: consultationInvitationSubject,
+          body: consultationInvitationBody,
+        }
+      );
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "consultations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/consultation-calendar"] });
+      toast({ title: "Consultation invitation sent" });
+      setConsultationInvitationPreview(null);
+      setConsultationInvitationCall(null);
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to send consultation invitation",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -4560,6 +4623,12 @@ export default function ProjectDetail() {
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={record.status} type="call" />
+                            {(record.expertInvitationStatus || record.clientInvitationStatus) && (
+                              <div className="mt-1 space-y-1 text-xs text-muted-foreground">
+                                <p>Expert invite: {(record.expertInvitationStatus || "not_sent").replace(/_/g, " ")}</p>
+                                <p>Client invite: {(record.clientInvitationStatus || "not_sent").replace(/_/g, " ")}</p>
+                              </div>
+                            )}
                             {record.completedAt && (
                               <p className="mt-1 text-xs text-muted-foreground">
                                 Completed {format(new Date(record.completedAt), "MMM dd")}
@@ -4633,6 +4702,24 @@ export default function ProjectDetail() {
                                     <Video className="h-4 w-4 mr-2" />
                                     Join Call
                                   </DropdownMenuItem>
+                                )}
+                                {(record.status === "pending" || record.status === "scheduled") && !isRA && (
+                                  <>
+                                    <DropdownMenuItem
+                                      onClick={() => openConsultationInvitationPreview(record, "expert")}
+                                      data-testid={`button-preview-expert-consultation-invite-${record.id}`}
+                                    >
+                                      <Mail className="h-4 w-4 mr-2" />
+                                      Send Expert Invitation
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => openConsultationInvitationPreview(record, "client")}
+                                      data-testid={`button-preview-client-consultation-invite-${record.id}`}
+                                    >
+                                      <Mail className="h-4 w-4 mr-2" />
+                                      Send Client Invitation
+                                    </DropdownMenuItem>
+                                  </>
                                 )}
                                 {!isRA && (
                                   <DropdownMenuItem
@@ -6317,6 +6404,96 @@ export default function ProjectDetail() {
             }}
             onCancel={() => setIsQuickInviteModalOpen(false)}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!consultationInvitationPreview}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConsultationInvitationPreview(null);
+            setConsultationInvitationCall(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {consultationInvitationPreview?.audience === "client"
+                ? "Client-facing Consultation Invitation"
+                : "Expert-facing Consultation Invitation"}
+            </DialogTitle>
+            <DialogDescription>
+              Review the recipient, subject, and body before sending through Zoho Mail.
+            </DialogDescription>
+          </DialogHeader>
+          {consultationInvitationPreview && (
+            <div className="space-y-4">
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <p><span className="font-semibold">Recipient:</span> {consultationInvitationPreview.recipientEmail || "Missing"}</p>
+                <p className="mt-1 text-muted-foreground">
+                  {consultationInvitationPreview.audience === "expert"
+                    ? "Expert-facing copy uses confidential wording and does not include client identity or internal project context."
+                    : "Client-facing copy includes the expert and scheduled consultation details."}
+                </p>
+              </div>
+              {consultationInvitationPreview.missingFields.length > 0 && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                  <p className="font-semibold">Missing required fields</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {consultationInvitationPreview.missingFields.map((field) => (
+                      <li key={field}>{field}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="project-consultation-invite-subject">Subject</label>
+                <Textarea
+                  id="project-consultation-invite-subject"
+                  value={consultationInvitationSubject}
+                  onChange={(event) => setConsultationInvitationSubject(event.target.value)}
+                  rows={2}
+                  data-testid="textarea-project-consultation-invite-subject"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="project-consultation-invite-body">Email Body</label>
+                <Textarea
+                  id="project-consultation-invite-body"
+                  value={consultationInvitationBody}
+                  onChange={(event) => setConsultationInvitationBody(event.target.value)}
+                  rows={12}
+                  data-testid="textarea-project-consultation-invite-body"
+                />
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setConsultationInvitationPreview(null);
+                    setConsultationInvitationCall(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => sendConsultationInvitationMutation.mutate()}
+                  disabled={
+                    !consultationInvitationPreview.canSend ||
+                    !consultationInvitationSubject.trim() ||
+                    !consultationInvitationBody.trim() ||
+                    sendConsultationInvitationMutation.isPending
+                  }
+                  data-testid="button-send-project-consultation-invite"
+                >
+                  {sendConsultationInvitationMutation.isPending ? "Sending..." : "Send"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
