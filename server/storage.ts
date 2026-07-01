@@ -22,6 +22,7 @@ import {
   advisorProjectInvitations,
   advisorProjectResponses,
   advisorProjectInvitationEmailSends,
+  consultationInvitationEmailSends,
   userEmailConnections,
   emailOauthStates,
   emailTemplates,
@@ -59,6 +60,8 @@ import {
   type InsertAdvisorProjectResponse,
   type AdvisorProjectInvitationEmailSend,
   type InsertAdvisorProjectInvitationEmailSend,
+  type ConsultationInvitationEmailSend,
+  type InsertConsultationInvitationEmailSend,
   type UserEmailConnection,
   type InsertUserEmailConnection,
   type EmailOauthState,
@@ -128,6 +131,12 @@ export interface ConsultationCalendarEventRow {
   durationMinutes: number;
   status: string;
   meetingLink: string | null;
+  expertInvitationStatus: string;
+  expertInvitationSentAt: Date | null;
+  expertInvitationRecipientEmails: string[] | null;
+  clientInvitationStatus: string;
+  clientInvitationSentAt: Date | null;
+  clientInvitationRecipientEmails: string[] | null;
   pmId: number | null;
   pmName: string | null;
   scheduledByUserId: number | null;
@@ -663,6 +672,7 @@ export interface IStorage {
   getCallRecord(id: number): Promise<CallRecord | undefined>;
   getCallRecordsByProject(projectId: number): Promise<CallRecord[]>;
   getCallRecordsByExpert(expertId: number): Promise<CallRecord[]>;
+  createConsultationInvitationEmailSend(send: InsertConsultationInvitationEmailSend): Promise<ConsultationInvitationEmailSend>;
   getConsultationCalendarEvents(filters?: {
     startDate?: Date;
     endDate?: Date;
@@ -1965,6 +1975,14 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(callRecords.callDate));
   }
 
+  async createConsultationInvitationEmailSend(send: InsertConsultationInvitationEmailSend): Promise<ConsultationInvitationEmailSend> {
+    const [created] = await db
+      .insert(consultationInvitationEmailSends)
+      .values(send)
+      .returning();
+    return created;
+  }
+
   async getConsultationCalendarEvents(filters: {
     startDate?: Date;
     endDate?: Date;
@@ -2000,6 +2018,12 @@ export class DatabaseStorage implements IStorage {
         durationMinutes: callRecords.durationMinutes,
         status: callRecords.status,
         meetingLink: callRecords.zoomLink,
+        expertInvitationStatus: callRecords.expertInvitationStatus,
+        expertInvitationSentAt: callRecords.expertInvitationSentAt,
+        expertInvitationRecipientEmails: callRecords.expertInvitationRecipientEmails,
+        clientInvitationStatus: callRecords.clientInvitationStatus,
+        clientInvitationSentAt: callRecords.clientInvitationSentAt,
+        clientInvitationRecipientEmails: callRecords.clientInvitationRecipientEmails,
         pmId: callRecords.pmId,
         pmName: users.fullName,
       })
