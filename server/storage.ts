@@ -718,6 +718,7 @@ export interface IStorage {
   ): Promise<AdvisorProjectInvitation | undefined>;
   getAdvisorProjectResponseByInvitation(invitationId: number): Promise<AdvisorProjectResponse | undefined>;
   getAdvisorProjectResponseByProjectExpert(projectId: number, expertId: number): Promise<AdvisorProjectResponse | undefined>;
+  getAdvisorProjectResponsesByProject(projectId: number): Promise<AdvisorProjectResponse[]>;
   saveAdvisorProjectResponse(response: InsertAdvisorProjectResponse): Promise<AdvisorProjectResponse>;
   createAdvisorProjectInvitationEmailSend(
     emailSend: InsertAdvisorProjectInvitationEmailSend
@@ -4599,6 +4600,14 @@ export class DatabaseStorage implements IStorage {
       )
       .orderBy(desc(advisorProjectResponses.submittedAt));
     return response || undefined;
+  }
+
+  async getAdvisorProjectResponsesByProject(projectId: number): Promise<AdvisorProjectResponse[]> {
+    return db
+      .select()
+      .from(advisorProjectResponses)
+      .where(eq(advisorProjectResponses.projectId, projectId))
+      .orderBy(desc(advisorProjectResponses.submittedAt));
   }
 
   async saveAdvisorProjectResponse(response: InsertAdvisorProjectResponse): Promise<AdvisorProjectResponse> {
