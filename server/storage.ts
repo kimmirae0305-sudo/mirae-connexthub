@@ -112,6 +112,28 @@ export interface CuLedgerRow {
   source: "Completed Call Record";
 }
 
+export interface ConsultationCalendarEventRow {
+  id: number;
+  projectId: number;
+  projectName: string;
+  clientOrganizationId: number | null;
+  clientOrganizationName: string | null;
+  clientName: string | null;
+  expertId: number;
+  expertName: string;
+  scheduledStartTime: Date | null;
+  scheduledEndTime: Date | null;
+  callDate: Date;
+  timezone: string | null;
+  durationMinutes: number;
+  status: string;
+  meetingLink: string | null;
+  pmId: number | null;
+  pmName: string | null;
+  scheduledByUserId: number | null;
+  scheduledByUserName: string | null;
+}
+
 export interface BillableUsageFilters {
   startDate?: Date;
   endDate?: Date;
@@ -641,6 +663,12 @@ export interface IStorage {
   getCallRecord(id: number): Promise<CallRecord | undefined>;
   getCallRecordsByProject(projectId: number): Promise<CallRecord[]>;
   getCallRecordsByExpert(expertId: number): Promise<CallRecord[]>;
+  getConsultationCalendarEvents(filters?: {
+    startDate?: Date;
+    endDate?: Date;
+    userId?: number;
+    includeAll?: boolean;
+  }): Promise<ConsultationCalendarEventRow[]>;
   getCuLedgerRows(filters: CuLedgerFilters): Promise<CuLedgerRow[]>;
   getOperationsAnalytics(filters: OperationsAnalyticsFilters): Promise<OperationsAnalytics>;
   getPmPerformance(filters: PmPerformanceFilters): Promise<PmPerformanceReport>;
@@ -1935,6 +1963,59 @@ export class DatabaseStorage implements IStorage {
       .from(callRecords)
       .where(eq(callRecords.expertId, expertId))
       .orderBy(desc(callRecords.callDate));
+  }
+
+  async getConsultationCalendarEvents(filters: {
+    startDate?: Date;
+    endDate?: Date;
+    userId?: number;
+    includeAll?: boolean;
+  } = {}): Promise<ConsultationCalendarEventRow[]> {
+    const eventStart = sql<Date>`coalesce(${callRecords.scheduledStartTime}, ${callRecords.callDate})`;
+    const conditions = [
+      sql`lower(${callRecords.status}) in ('pending', 'scheduled')`,
+      sql`${eventStart} IS NOT NULL`,
+    ];
+
+    if (filters.startDate) conditions.push(gte(eventStart, filters.startDate));
+    if (filters.endDate) conditions.push(lte(eventStart, filters.endDate));
+    if (!filters.includeAll && filters.userId) {
+      conditions.push(or(eq(callRecords.pmId, filters.userId), eq(projects.createdByPmId, filters.userId))!);
+    }
+
+    const rows = await db
+      .select({
+        id: callRecords.id,
+        projectId: callRecords.projectId,
+        projectName: projects.name,
+        clientOrganizationId: projects.clientOrganizationId,
+        clientOrganizationName: clientOrganizations.name,
+        clientName: projects.clientName,
+        expertId: callRecords.expertId,
+        expertName: experts.name,
+        scheduledStartTime: callRecords.scheduledStartTime,
+        scheduledEndTime: callRecords.scheduledEndTime,
+        callDate: callRecords.callDate,
+        timezone: callRecords.timezone,
+        durationMinutes: callRecords.durationMinutes,
+        status: callRecords.status,
+        meetingLink: callRecords.zoomLink,
+        pmId: callRecords.pmId,
+        pmName: users.fullName,
+      })
+      .from(callRecords)
+      .innerJoin(projects, eq(callRecords.projectId, projects.id))
+      .innerJoin(experts, eq(callRecords.expertId, experts.id))
+      .leftJoin(clientOrganizations, eq(projects.clientOrganizationId, clientOrganizations.id))
+      .leftJoin(users, eq(callRecords.pmId, users.id))
+      .where(and(...conditions))
+      .orderBy(sql`${eventStart} asc`);
+
+    return rows.map((row) => ({
+      ...row,
+      scheduledByUserId: row.pmId,
+      scheduledByUserName: row.pmName,
+    }));
   }
 
   async getCuLedgerRows(filters: CuLedgerFilters): Promise<CuLedgerRow[]> {
