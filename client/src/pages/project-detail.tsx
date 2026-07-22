@@ -199,6 +199,14 @@ type AdvisorProjectInvitationWithEmail = AdvisorProjectInvitation & {
   latestEmailSend?: AdvisorInvitationEmailHistoryItem | null;
 };
 
+type AdvisorInvitationTimelineEvent = {
+  key: string;
+  label: string;
+  at: string | Date;
+  description?: string;
+  icon: JSX.Element;
+};
+
 type SelectedAdvisorSendResult = {
   invitationId: number;
   expertId?: number | null;
@@ -603,6 +611,11 @@ export default function ProjectDetail() {
   const [selectedAdvisorSendResult, setSelectedAdvisorSendResult] = useState<SelectedAdvisorSendResponse | null>(null);
   const [sentHistoryContext, setSentHistoryContext] = useState<{
     invitationId: number;
+    advisorName: string;
+    advisorEmail: string;
+  } | null>(null);
+  const [advisorInvitationDetailContext, setAdvisorInvitationDetailContext] = useState<{
+    invitation: AdvisorProjectInvitationWithEmail;
     advisorName: string;
     advisorEmail: string;
   } | null>(null);
@@ -2778,6 +2791,130 @@ export default function ProjectDetail() {
     return format(date, "MMM d, yyyy h:mm a");
   };
 
+  const formatAdvisorTrackingDate = (value?: string | Date | null) =>
+    formatAdvisorInviteSentAt(value) || "Not recorded";
+
+  const getAdvisorInvitationStatusLabel = (status?: string | null) => {
+    const normalized = String(status || "not_sent").trim().toLowerCase();
+    const labels: Record<string, string> = {
+      not_sent: "Not Sent",
+      draft: "Draft",
+      sent: "Sent",
+      submitted: "Submitted",
+      declined: "Declined",
+      expired: "Expired",
+      revoked: "Revoked",
+      failed: "Failed",
+    };
+    return labels[normalized] || normalized || "Not Sent";
+  };
+
+  const getAdvisorInvitationStatusBadge = (status?: string | null) => {
+    const normalized = String(status || "not_sent").trim().toLowerCase();
+    const classNameByStatus: Record<string, string> = {
+      not_sent: "bg-muted text-muted-foreground border-border",
+      draft: "bg-amber-500/10 text-amber-700 border-amber-500/20",
+      sent: "bg-blue-500/10 text-blue-700 border-blue-500/20",
+      submitted: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20",
+      declined: "bg-rose-500/10 text-rose-700 border-rose-500/20",
+      expired: "bg-slate-500/10 text-slate-700 border-slate-500/20",
+      revoked: "bg-zinc-500/10 text-zinc-700 border-zinc-500/20",
+      failed: "bg-destructive/10 text-destructive border-destructive/20",
+    };
+    return (
+      <Badge variant="outline" className={classNameByStatus[normalized] || classNameByStatus.not_sent}>
+        {getAdvisorInvitationStatusLabel(normalized)}
+      </Badge>
+    );
+  };
+
+  const formatAdvisorDeclineReason = (reason?: string | null) => {
+    const labels: Record<string, string> = {
+      schedule_conflict: "I am unavailable",
+      outside_expertise: "Not relevant to my experience",
+      conflict_of_interest: "Conflict of interest",
+      compensation: "Compensation does not work for me",
+      not_interested: "I am not interested",
+      other: "Other",
+    };
+    const normalized = String(reason || "").trim();
+    return normalized ? labels[normalized] || normalized : "Not recorded";
+  };
+
+  const buildAdvisorInvitationTimeline = (
+    invitation?: AdvisorProjectInvitationWithEmail | null
+  ): AdvisorInvitationTimelineEvent[] => {
+    if (!invitation) return [];
+    const events: AdvisorInvitationTimelineEvent[] = [];
+    const status = String(invitation.status || "").trim().toLowerCase();
+    const sentAt = invitation.sentAt || invitation.latestEmailSend?.sentAt;
+
+    if (sentAt) {
+      events.push({
+        key: "sent",
+        label: "Invitation Sent",
+        at: sentAt,
+        description: invitation.latestEmailSend?.sentBy ? `Sent by ${invitation.latestEmailSend.sentBy}` : undefined,
+        icon: <Send className="h-4 w-4 text-blue-600" />,
+      });
+    }
+    if (invitation.firstViewedAt) {
+      events.push({
+        key: "first-viewed",
+        label: "First Viewed",
+        at: invitation.firstViewedAt,
+        icon: <Eye className="h-4 w-4 text-purple-600" />,
+      });
+    }
+    if (
+      invitation.lastViewedAt &&
+      (!invitation.firstViewedAt || new Date(invitation.lastViewedAt).getTime() !== new Date(invitation.firstViewedAt).getTime())
+    ) {
+      events.push({
+        key: "viewed-again",
+        label: "Viewed Again",
+        at: invitation.lastViewedAt,
+        description: `${invitation.viewCount || 0} total views`,
+        icon: <Eye className="h-4 w-4 text-purple-600" />,
+      });
+    }
+    if (invitation.submittedAt) {
+      events.push({
+        key: "submitted",
+        label: "Submitted",
+        at: invitation.submittedAt,
+        icon: <CheckCircle2 className="h-4 w-4 text-emerald-600" />,
+      });
+    }
+    if (invitation.declinedAt) {
+      events.push({
+        key: "declined",
+        label: "Declined",
+        at: invitation.declinedAt,
+        description: formatAdvisorDeclineReason(invitation.declineReason),
+        icon: <XCircle className="h-4 w-4 text-rose-600" />,
+      });
+    }
+    if (status === "expired" && invitation.expiresAt) {
+      events.push({
+        key: "expired",
+        label: "Expired",
+        at: invitation.expiresAt,
+        icon: <Clock className="h-4 w-4 text-slate-600" />,
+      });
+    }
+    if (status === "revoked" && invitation.revokedAt) {
+      events.push({
+        key: "revoked",
+        label: "Revoked",
+        at: invitation.revokedAt,
+        icon: <XCircle className="h-4 w-4 text-zinc-600" />,
+      });
+    }
+
+    return events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  };
+
   const handleProjectInviteIndicatorClick = (pe: EnrichedExpert, invitation?: AdvisorProjectInvitationWithEmail) => {
     if (hasSubmittedAdvisorState(pe, invitation)) {
       if (pe.hasSubmittedAdvisorResponse || String(invitation?.status || "").toLowerCase() === "submitted" || invitation?.submittedAt) {
@@ -3979,6 +4116,10 @@ export default function ProjectDetail() {
                           <TableHead className="text-xs font-semibold uppercase">Name</TableHead>
                           <TableHead className="w-40 text-xs font-semibold uppercase">Rate</TableHead>
                           <TableHead className="w-56 text-xs font-semibold uppercase">Project Invite</TableHead>
+                          <TableHead className="w-32 text-xs font-semibold uppercase">Status</TableHead>
+                          <TableHead className="w-20 text-xs font-semibold uppercase">Views</TableHead>
+                          <TableHead className="w-40 text-xs font-semibold uppercase">Last Viewed</TableHead>
+                          <TableHead className="w-40 text-xs font-semibold uppercase">Responded At</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -3994,6 +4135,7 @@ export default function ProjectDetail() {
                         const sentByDisplay = advisorInvitation?.latestEmailSend?.sentBy || null;
                         const advisorActionLabel = getAdvisorEmailActionLabel(pe, advisorInvitation);
                         const expertName = pe.expert?.name || `Expert #${pe.expertId}`;
+                        const trackingStatus = advisorInvitation?.status || inviteStatus;
                         return (
                           <TableRow key={pe.id} data-testid={`row-existing-expert-${pe.id}`}>
                             <TableCell>
@@ -4075,16 +4217,28 @@ export default function ProjectDetail() {
                                       Generate Review Link
                                     </DropdownMenuItem>
                                     {advisorInvitation && (
-                                      <DropdownMenuItem
-                                        onClick={() => setSentHistoryContext({
-                                          invitationId: advisorInvitation.id,
-                                          advisorName: expertName,
-                                          advisorEmail: advisorInvitation.email || pe.expert?.email || "",
-                                        })}
-                                      >
-                                        <Mail className="h-4 w-4 mr-2" />
-                                        View sent history
-                                      </DropdownMenuItem>
+                                      <>
+                                        <DropdownMenuItem
+                                          onClick={() => setAdvisorInvitationDetailContext({
+                                            invitation: advisorInvitation,
+                                            advisorName: expertName,
+                                            advisorEmail: advisorInvitation.email || pe.expert?.email || "",
+                                          })}
+                                        >
+                                          <Activity className="h-4 w-4 mr-2" />
+                                          View tracking details
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onClick={() => setSentHistoryContext({
+                                            invitationId: advisorInvitation.id,
+                                            advisorName: expertName,
+                                            advisorEmail: advisorInvitation.email || pe.expert?.email || "",
+                                          })}
+                                        >
+                                          <Mail className="h-4 w-4 mr-2" />
+                                          View sent history
+                                        </DropdownMenuItem>
+                                      </>
                                     )}
                                     {inviteStatus === "submitted" && (
                                       <>
@@ -4108,6 +4262,16 @@ export default function ProjectDetail() {
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               </div>
+                            </TableCell>
+                            <TableCell>{getAdvisorInvitationStatusBadge(trackingStatus)}</TableCell>
+                            <TableCell className="font-mono text-sm">
+                              {advisorInvitation?.viewCount ?? 0}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {advisorInvitation?.lastViewedAt ? formatAdvisorInviteSentAt(advisorInvitation.lastViewedAt) : "-"}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {advisorInvitation?.respondedAt ? formatAdvisorInviteSentAt(advisorInvitation.respondedAt) : "-"}
                             </TableCell>
                           </TableRow>
                         );
@@ -5212,6 +5376,103 @@ export default function ProjectDetail() {
           )}
           <DialogFooter>
             <Button onClick={() => setGeneratedAdvisorReviewLink(null)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Advisor Invitation Tracking Detail Modal */}
+      <Dialog open={!!advisorInvitationDetailContext} onOpenChange={(open) => !open && setAdvisorInvitationDetailContext(null)}>
+        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Advisor Invitation Details</DialogTitle>
+            <DialogDescription>
+              Response tracking for {advisorInvitationDetailContext?.advisorName || "this advisor"}.
+            </DialogDescription>
+          </DialogHeader>
+          {advisorInvitationDetailContext ? (() => {
+            const invitation = advisorInvitationDetailContext.invitation;
+            const timeline = buildAdvisorInvitationTimeline(invitation);
+            const detailItem = (label: string, value: JSX.Element | string | number | null) => (
+              <div className="rounded-md border bg-muted/20 p-3">
+                <div className="text-xs font-semibold uppercase text-muted-foreground">{label}</div>
+                <div className="mt-1 text-sm">{value}</div>
+              </div>
+            );
+
+            return (
+              <div className="space-y-5 py-2">
+                <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                  <div className="font-medium">{advisorInvitationDetailContext.advisorName}</div>
+                  <div className="text-muted-foreground">{advisorInvitationDetailContext.advisorEmail || "No email on profile"}</div>
+                </div>
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-semibold">General</h3>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {detailItem("Status", getAdvisorInvitationStatusBadge(invitation.status))}
+                    {detailItem("Sent At", formatAdvisorTrackingDate(invitation.sentAt || invitation.latestEmailSend?.sentAt))}
+                    {detailItem("Expires At", formatAdvisorTrackingDate(invitation.expiresAt))}
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-semibold">Review Activity</h3>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {detailItem("First Viewed", formatAdvisorTrackingDate(invitation.firstViewedAt))}
+                    {detailItem("Last Viewed", formatAdvisorTrackingDate(invitation.lastViewedAt))}
+                    {detailItem("View Count", <span className="font-mono">{invitation.viewCount ?? 0}</span>)}
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-semibold">Response</h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {detailItem("Responded At", formatAdvisorTrackingDate(invitation.respondedAt))}
+                    {detailItem("Response Source", invitation.responseSource || "Not recorded")}
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-semibold">Decline</h3>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {detailItem("Decline Reason", formatAdvisorDeclineReason(invitation.declineReason))}
+                    {detailItem("Declined At", formatAdvisorTrackingDate(invitation.declinedAt))}
+                    {detailItem("Decline Note", invitation.declineNote || "Not recorded")}
+                  </div>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="text-sm font-semibold">Timeline</h3>
+                  {timeline.length === 0 ? (
+                    <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                      No tracking events recorded yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {timeline.map((event) => (
+                        <div key={event.key} className="flex gap-3 rounded-md border p-3">
+                          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
+                            {event.icon}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium">{event.label}</div>
+                            <div className="text-sm text-muted-foreground">{formatAdvisorTrackingDate(event.at)}</div>
+                            {event.description && (
+                              <div className="mt-1 text-sm text-muted-foreground">{event.description}</div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            );
+          })() : null}
+          <DialogFooter>
+            <Button type="button" onClick={() => setAdvisorInvitationDetailContext(null)}>
               Done
             </Button>
           </DialogFooter>
