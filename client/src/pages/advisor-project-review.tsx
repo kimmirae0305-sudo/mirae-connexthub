@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { AlertCircle, CalendarClock, CheckCircle2, ClipboardList, Loader2, ShieldCheck } from "lucide-react";
@@ -41,6 +41,14 @@ type AdvisorReviewSubmitResponse = {
   submittedAt?: string | null;
   status?: string;
   message?: string;
+};
+
+type ScreeningQuestion = AdvisorProjectReviewData["screeningQuestions"][number];
+type AdvisorProjectReviewPayload = AdvisorProjectReviewData & {
+  project: AdvisorProjectReviewData["project"] & {
+    externalAdvisorBrief?: string | null;
+  };
+  vettingQuestions?: ScreeningQuestion[];
 };
 
 const formatDate = (value?: string | null) => {
@@ -119,17 +127,19 @@ function AdvisorProjectReviewContent() {
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const viewedRecordedRef = useRef(false);
 
-  const project = data?.project ?? { id: null, advisorBrief: "" };
-  const invitation = data?.invitation ?? { id: null, expiresAt: null };
+  const reviewData = data as AdvisorProjectReviewPayload | undefined;
+  const project = reviewData?.project ?? { id: null, advisorBrief: "", externalAdvisorBrief: null };
+  const invitation = data?.invitation ?? { id: null, expiresAt: null, status: null, submittedAt: null };
   const advisor = data?.advisor ?? { name: "Advisor" };
-  const screeningQuestions = Array.isArray(data?.screeningQuestions)
-    ? data.screeningQuestions
-    : Array.isArray((data as any)?.vettingQuestions)
-      ? (data as any).vettingQuestions
+  const screeningQuestions: ScreeningQuestion[] = Array.isArray(reviewData?.screeningQuestions)
+    ? reviewData.screeningQuestions
+    : Array.isArray(reviewData?.vettingQuestions)
+      ? reviewData.vettingQuestions
       : [];
   const advisorBrief =
-    String(project.advisorBrief || (project as any).externalAdvisorBrief || "").trim() ||
+    String(project.advisorBrief || project.externalAdvisorBrief || "").trim() ||
     "Project details will be shared by the Mirae Connext team.";
   const alreadySubmitted = Boolean(data?.alreadySubmitted || invitation.status === "submitted" || invitation.submittedAt);
 
@@ -137,6 +147,17 @@ function AdvisorProjectReviewContent() {
     if (!data) return;
     setIsSubmitted(Boolean(data.alreadySubmitted || data.invitation?.status === "submitted" || data.invitation?.submittedAt));
   }, [data]);
+
+  useEffect(() => {
+    if (!data || !token || viewedRecordedRef.current) return;
+    viewedRecordedRef.current = true;
+
+    void fetch(resolveApiUrl(`/api/public/advisor-project-review/${token}/viewed`), {
+      method: "POST",
+    }).catch(() => {
+      // View tracking should never block the advisor review experience.
+    });
+  }, [data, token]);
 
   const submitMutation = useMutation<AdvisorReviewSubmitResponse, Error>({
     mutationFn: async () => {

@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { Router as ExpressRouter } from "express";
 import fs from "fs";
 import path from "path";
-import { storage } from "./storage";
+import { getAdvisorInvitationViewBlockReason, storage } from "./storage";
 import { db } from "./db";
 import {
   insertProjectSchema,
@@ -2685,6 +2685,51 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching public advisor project review:", error);
       res.status(500).json({ error: "Unable to load this review link" });
+    }
+  });
+
+  app.post("/api/public/advisor-project-review/:token/viewed", async (req, res) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      if (!token) {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+
+      const invitation = await storage.getAdvisorProjectInvitationByToken(token);
+      if (!invitation) {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+
+      const expiresAt = invitation.expiresAt ? new Date(invitation.expiresAt) : null;
+      if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+
+      const blockReason = getAdvisorInvitationViewBlockReason(invitation);
+      if (blockReason) {
+        return res.json({
+          success: false,
+          reason: blockReason,
+          viewCount: invitation.viewCount ?? 0,
+        });
+      }
+
+      const updatedInvitation = await storage.recordAdvisorProjectInvitationViewed(invitation.id);
+      if (!updatedInvitation) {
+        return res.json({
+          success: false,
+          reason: "not_recorded",
+          viewCount: invitation.viewCount ?? 0,
+        });
+      }
+
+      res.json({
+        success: true,
+        viewCount: updatedInvitation.viewCount ?? invitation.viewCount ?? 0,
+      });
+    } catch (error) {
+      console.error("Error recording advisor project review view:", error);
+      res.status(500).json({ error: "Unable to record this review view" });
     }
   });
 
