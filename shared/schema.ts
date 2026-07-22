@@ -386,10 +386,19 @@ export const advisorProjectInvitations = pgTable("advisor_project_invitations", 
   expertId: integer("expert_id").notNull().references(() => experts.id, { onDelete: "cascade" }),
   email: text("email").notNull(),
   token: text("token"),
-  status: text("status").notNull().default("not_sent"), // not_sent, draft, sent, submitted, failed, expired
+  status: text("status").notNull().default("not_sent"), // not_sent, draft, sent, submitted, declined, failed, expired, revoked
   sentAt: timestamp("sent_at"),
   submittedAt: timestamp("submitted_at"),
   expiresAt: timestamp("expires_at"),
+  firstViewedAt: timestamp("first_viewed_at"),
+  lastViewedAt: timestamp("last_viewed_at"),
+  viewCount: integer("view_count").notNull().default(0),
+  respondedAt: timestamp("responded_at"),
+  declinedAt: timestamp("declined_at"),
+  declineReason: text("decline_reason"),
+  declineNote: text("decline_note"),
+  responseSource: text("response_source"),
+  revokedAt: timestamp("revoked_at"),
   createdBy: integer("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -1154,6 +1163,11 @@ export const insertAdvisorProjectInvitationSchema = createInsertSchema(advisorPr
   sentAt: coerceDate.optional(),
   submittedAt: coerceDate.optional(),
   expiresAt: coerceDate.optional(),
+  firstViewedAt: coerceDate.optional(),
+  lastViewedAt: coerceDate.optional(),
+  respondedAt: coerceDate.optional(),
+  declinedAt: coerceDate.optional(),
+  revokedAt: coerceDate.optional(),
 });
 
 export const insertAdvisorProjectResponseSchema = createInsertSchema(advisorProjectResponses).omit({
@@ -1369,6 +1383,33 @@ export const INVITATION_STATUSES = [
   "opened",
   "accepted",
   "declined",
+  "submitted",
+] as const;
+
+export const ADVISOR_PROJECT_INVITATION_STATUSES = [
+  "not_sent",
+  "draft",
+  "sent",
+  "submitted",
+  "declined",
+  "failed",
+  "expired",
+  "revoked",
+] as const;
+
+export const ADVISOR_INVITATION_RESPONSE_SOURCES = [
+  "magic_link",
+  "admin",
+  "manual",
+] as const;
+
+export const ADVISOR_INVITATION_DECLINE_REASONS = [
+  "schedule_conflict",
+  "outside_expertise",
+  "conflict_of_interest",
+  "compensation",
+  "not_interested",
+  "other",
 ] as const;
 
 // Expert pipeline status within a project

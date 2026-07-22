@@ -80,6 +80,9 @@ import {
   type ExpertPaymentDetailRequest,
   type InsertExpertPaymentDetailRequest,
   calculateCU,
+  ADVISOR_PROJECT_INVITATION_STATUSES,
+  ADVISOR_INVITATION_RESPONSE_SOURCES,
+  ADVISOR_INVITATION_DECLINE_REASONS,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, ilike, or, and, sql, gte, lte, inArray } from "drizzle-orm";
@@ -484,6 +487,95 @@ export interface AdvisorProjectInvitationEmailHistoryItem {
   status: string;
 }
 
+export type AdvisorProjectInvitationStatus = typeof ADVISOR_PROJECT_INVITATION_STATUSES[number];
+export type AdvisorInvitationResponseSource = typeof ADVISOR_INVITATION_RESPONSE_SOURCES[number];
+export type AdvisorInvitationDeclineReason = typeof ADVISOR_INVITATION_DECLINE_REASONS[number];
+export type AdvisorInvitationPublicBlockReason = "submitted" | "declined" | "expired" | "revoked";
+
+export const ADVISOR_PUBLIC_ACTION_BLOCKING_STATUSES = [
+  "submitted",
+  "declined",
+  "expired",
+  "revoked",
+] as const;
+
+const ADVISOR_PROJECT_INVITATION_STATUS_SET = new Set<string>(ADVISOR_PROJECT_INVITATION_STATUSES);
+const ADVISOR_INVITATION_RESPONSE_SOURCE_SET = new Set<string>(ADVISOR_INVITATION_RESPONSE_SOURCES);
+const ADVISOR_INVITATION_DECLINE_REASON_SET = new Set<string>(ADVISOR_INVITATION_DECLINE_REASONS);
+const ADVISOR_PUBLIC_ACTION_BLOCKING_STATUS_SET = new Set<string>(ADVISOR_PUBLIC_ACTION_BLOCKING_STATUSES);
+
+export function normalizeAdvisorInvitationStatus(status?: string | null): AdvisorProjectInvitationStatus {
+  const normalized = String(status || "not_sent").trim().toLowerCase();
+  return ADVISOR_PROJECT_INVITATION_STATUS_SET.has(normalized)
+    ? normalized as AdvisorProjectInvitationStatus
+    : "not_sent";
+}
+
+export function isAdvisorInvitationResponseSource(value?: string | null): value is AdvisorInvitationResponseSource {
+  return ADVISOR_INVITATION_RESPONSE_SOURCE_SET.has(String(value || "").trim());
+}
+
+export function isAdvisorInvitationDeclineReason(value?: string | null): value is AdvisorInvitationDeclineReason {
+  return ADVISOR_INVITATION_DECLINE_REASON_SET.has(String(value || "").trim());
+}
+
+export function getAdvisorInvitationPublicBlockReason(
+  invitation: Pick<AdvisorProjectInvitation, "id" | "status" | "expiresAt" | "revokedAt">,
+  now = new Date()
+): AdvisorInvitationPublicBlockReason | null {
+  const status = normalizeAdvisorInvitationStatus(invitation.status);
+  if (ADVISOR_PUBLIC_ACTION_BLOCKING_STATUS_SET.has(status)) {
+    return status as AdvisorInvitationPublicBlockReason;
+  }
+  if (invitation.revokedAt) return "revoked";
+
+  if (invitation.expiresAt) {
+    const expiresAt = new Date(invitation.expiresAt);
+    if (Number.isNaN(expiresAt.getTime())) {
+      console.warn("[advisor-invitation-expiration-invalid]", {
+        invitationId: invitation.id,
+        expiresAt: invitation.expiresAt,
+      });
+      return "expired";
+    }
+    if (expiresAt <= now) return "expired";
+  }
+
+  return null;
+}
+
+export function canTransitionAdvisorInvitationStatus(
+  fromStatus: string | null | undefined,
+  toStatus: string,
+  options: { adminOverride?: boolean } = {}
+) {
+  const from = normalizeAdvisorInvitationStatus(fromStatus);
+  const normalizedTo = String(toStatus || "").trim().toLowerCase();
+  if (!ADVISOR_PROJECT_INVITATION_STATUS_SET.has(normalizedTo)) return false;
+  const to = normalizedTo as AdvisorProjectInvitationStatus;
+  if (from === to) return true;
+
+  const allowedTransitions: Record<AdvisorProjectInvitationStatus, AdvisorProjectInvitationStatus[]> = {
+    not_sent: ["draft", "revoked"],
+    draft: ["sent", "failed", "revoked"],
+    sent: ["submitted", "declined", "failed", "expired", "revoked"],
+    submitted: options.adminOverride ? ["revoked"] : [],
+    declined: options.adminOverride ? ["revoked"] : [],
+    failed: ["draft", "revoked"],
+    expired: options.adminOverride ? ["revoked"] : [],
+    revoked: [],
+  };
+
+  return allowedTransitions[from]?.includes(to) || false;
+}
+
+export interface MarkAdvisorProjectInvitationDeclinedInput {
+  declineReason: AdvisorInvitationDeclineReason;
+  declineNote?: string | null;
+  responseSource?: AdvisorInvitationResponseSource;
+  now?: Date;
+}
+
 export type CompanyLinkStatus = "pending_review" | "suggested" | "linked" | "unclear" | "ignored";
 
 export interface CompanySuggestion {
@@ -715,6 +807,11 @@ export interface IStorage {
   updateAdvisorProjectInvitation(
     id: number,
     invitation: Partial<InsertAdvisorProjectInvitation>
+  ): Promise<AdvisorProjectInvitation | undefined>;
+  recordAdvisorProjectInvitationViewed(id: number, now?: Date): Promise<AdvisorProjectInvitation | undefined>;
+  markAdvisorProjectInvitationDeclined(
+    id: number,
+    input: MarkAdvisorProjectInvitationDeclinedInput
   ): Promise<AdvisorProjectInvitation | undefined>;
   getAdvisorProjectResponseByInvitation(invitationId: number): Promise<AdvisorProjectResponse | undefined>;
   getAdvisorProjectResponseByProjectExpert(projectId: number, expertId: number): Promise<AdvisorProjectResponse | undefined>;
@@ -4577,6 +4674,69 @@ export class DatabaseStorage implements IStorage {
       .set({ ...(invitation as any), updatedAt: new Date() })
       .where(eq(advisorProjectInvitations.id, id))
       .returning();
+    return updated || undefined;
+  }
+
+  async recordAdvisorProjectInvitationViewed(id: number, now = new Date()): Promise<AdvisorProjectInvitation | undefined> {
+    const existing = await this.getAdvisorProjectInvitation(id);
+    if (!existing) return undefined;
+    if (getAdvisorInvitationPublicBlockReason(existing, now)) return existing;
+
+    const [updated] = await db
+      .update(advisorProjectInvitations)
+      .set({
+        firstViewedAt: existing.firstViewedAt || now,
+        lastViewedAt: now,
+        viewCount: sql`${advisorProjectInvitations.viewCount} + 1`,
+        updatedAt: now,
+      } as any)
+      .where(eq(advisorProjectInvitations.id, id))
+      .returning();
+
+    return updated || undefined;
+  }
+
+  async markAdvisorProjectInvitationDeclined(
+    id: number,
+    input: MarkAdvisorProjectInvitationDeclinedInput
+  ): Promise<AdvisorProjectInvitation | undefined> {
+    const existing = await this.getAdvisorProjectInvitation(id);
+    if (!existing) return undefined;
+
+    const now = input.now || new Date();
+    const status = normalizeAdvisorInvitationStatus(existing.status);
+    if (status === "declined") return existing;
+    if (getAdvisorInvitationPublicBlockReason(existing, now)) return existing;
+
+    const responseSource = input.responseSource || "magic_link";
+    if (!isAdvisorInvitationResponseSource(responseSource)) {
+      throw new Error("invalid_advisor_invitation_response_source");
+    }
+    if (!isAdvisorInvitationDeclineReason(input.declineReason)) {
+      throw new Error("invalid_advisor_invitation_decline_reason");
+    }
+    const declineNote = String(input.declineNote || "").trim();
+    if (input.declineReason === "other" && !declineNote) {
+      throw new Error("advisor_invitation_decline_note_required");
+    }
+    if (!canTransitionAdvisorInvitationStatus(status, "declined")) {
+      throw new Error("invalid_advisor_invitation_status_transition");
+    }
+
+    const [updated] = await db
+      .update(advisorProjectInvitations)
+      .set({
+        status: "declined",
+        declinedAt: now,
+        respondedAt: existing.respondedAt || now,
+        declineReason: input.declineReason,
+        declineNote: declineNote || null,
+        responseSource,
+        updatedAt: now,
+      } as any)
+      .where(eq(advisorProjectInvitations.id, id))
+      .returning();
+
     return updated || undefined;
   }
 

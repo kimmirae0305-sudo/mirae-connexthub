@@ -781,9 +781,25 @@ const compatibilityStatements = [
   `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS created_by integer REFERENCES users(id)`,
   `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS created_at timestamp DEFAULT now()`,
   `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS updated_at timestamp DEFAULT now()`,
+  `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS first_viewed_at timestamp`,
+  `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS last_viewed_at timestamp`,
+  `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS view_count integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS responded_at timestamp`,
+  `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS declined_at timestamp`,
+  `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS decline_reason text`,
+  `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS decline_note text`,
+  `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS response_source text`,
+  `ALTER TABLE advisor_project_invitations ADD COLUMN IF NOT EXISTS revoked_at timestamp`,
+  `UPDATE advisor_project_invitations
+   SET responded_at = submitted_at
+   WHERE submitted_at IS NOT NULL
+     AND responded_at IS NULL`,
   `CREATE INDEX IF NOT EXISTS idx_advisor_project_invitations_project ON advisor_project_invitations(project_id)`,
   `CREATE INDEX IF NOT EXISTS idx_advisor_project_invitations_project_expert ON advisor_project_invitations(project_id, expert_id)`,
   `CREATE INDEX IF NOT EXISTS idx_advisor_project_invitations_token ON advisor_project_invitations(token)`,
+  `CREATE INDEX IF NOT EXISTS advisor_project_invitations_project_status_idx ON advisor_project_invitations(project_id, status)`,
+  `CREATE INDEX IF NOT EXISTS advisor_project_invitations_status_sent_at_idx ON advisor_project_invitations(status, sent_at)`,
+  `CREATE INDEX IF NOT EXISTS advisor_project_invitations_responded_at_idx ON advisor_project_invitations(responded_at)`,
   `CREATE TABLE IF NOT EXISTS advisor_project_responses (
     id serial PRIMARY KEY,
     invitation_id integer NOT NULL REFERENCES advisor_project_invitations(id) ON DELETE CASCADE,
