@@ -3,7 +3,12 @@ import { createServer, type Server } from "http";
 import { Router as ExpressRouter } from "express";
 import fs from "fs";
 import path from "path";
-import { getAdvisorInvitationViewBlockReason, storage } from "./storage";
+import {
+  type AdvisorInvitationDeclineReason,
+  getAdvisorInvitationDeclineBlockReason,
+  getAdvisorInvitationViewBlockReason,
+  storage,
+} from "./storage";
 import { db } from "./db";
 import {
   insertProjectSchema,
@@ -30,6 +35,7 @@ import {
   users,
   clientOrganizations,
   consultationInvitationEmailSends,
+  ADVISOR_INVITATION_DECLINE_REASONS,
   type UserEmailConnection,
 } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
@@ -171,6 +177,19 @@ const expertPaymentMethods = new Set([
   "Other",
 ]);
 const advisorEmailTypes = new Set(["initial_invite", "follow_up", "resend_invite"]);
+const ADVISOR_DECLINE_NOTE_MAX_LENGTH = 1000;
+const advisorPublicDeclineReasons = ADVISOR_INVITATION_DECLINE_REASONS.map((value) => ({
+  value,
+  label: {
+    schedule_conflict: "I am unavailable",
+    outside_expertise: "Not relevant to my experience",
+    conflict_of_interest: "Conflict of interest",
+    compensation: "Compensation does not work for me",
+    not_interested: "I am not interested",
+    other: "Other",
+  }[value] || value,
+}));
+const advisorPublicDeclineReasonSet = new Set<string>(ADVISOR_INVITATION_DECLINE_REASONS);
 const consultationInvitationAudiences = new Set(["expert", "client"]);
 const consultationInvitationTemplateTypes = {
   expert: "expert_invitation",
@@ -2730,6 +2749,155 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error recording advisor project review view:", error);
       res.status(500).json({ error: "Unable to record this review view" });
+    }
+  });
+
+  app.get("/api/public/advisor-project-review/:token/decline", async (req, res) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      if (!token) {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+
+      const invitation = await storage.getAdvisorProjectInvitationByToken(token);
+      if (!invitation) {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+
+      const blockReason = getAdvisorInvitationDeclineBlockReason(invitation);
+      if (blockReason === "draft" || blockReason === "not_sent" || blockReason === "failed") {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+
+      const [project, expert] = await Promise.all([
+        storage.getProject(invitation.projectId),
+        storage.getExpert(invitation.expertId),
+      ]);
+
+      if (!project || !expert) {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+
+      const safeBrief = String((project as any).externalAdvisorBrief || "").trim() ||
+        "Project details will be shared by the Mirae Connext team.";
+
+      res.json({
+        invitation: {
+          id: invitation.id,
+          status: invitation.status,
+          expiresAt: invitation.expiresAt,
+          declinedAt: invitation.declinedAt,
+          declineReason: invitation.declineReason,
+          respondedAt: invitation.respondedAt,
+        },
+        project: {
+          id: project.id,
+          title: String((project as any).title || (project as any).name || `Project #${project.id}`),
+          advisorBrief: safeBrief,
+        },
+        advisor: {
+          name: expert.name,
+        },
+        allowedToDecline: !blockReason,
+        blockReason,
+        declineReasons: advisorPublicDeclineReasons,
+        noteMaxLength: ADVISOR_DECLINE_NOTE_MAX_LENGTH,
+      });
+    } catch (error) {
+      console.error("Error fetching advisor project decline confirmation:", error);
+      res.status(500).json({ error: "Unable to load this decline confirmation" });
+    }
+  });
+
+  app.post("/api/public/advisor-project-review/:token/decline", async (req, res) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      if (!token) {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+
+      const invitation = await storage.getAdvisorProjectInvitationByToken(token);
+      if (!invitation) {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+
+      const reason = String(req.body?.reason || "").trim();
+      const note = String(req.body?.note || "").trim();
+      if (!advisorPublicDeclineReasonSet.has(reason)) {
+        return res.status(400).json({
+          error: "Please select a valid decline reason.",
+          allowedReasons: ADVISOR_INVITATION_DECLINE_REASONS,
+        });
+      }
+      if (reason === "other" && !note) {
+        return res.status(400).json({ error: "Please add a short note when selecting Other." });
+      }
+      if (note.length > ADVISOR_DECLINE_NOTE_MAX_LENGTH) {
+        return res.status(400).json({
+          error: `Decline note must be ${ADVISOR_DECLINE_NOTE_MAX_LENGTH} characters or fewer.`,
+        });
+      }
+
+      const blockReason = getAdvisorInvitationDeclineBlockReason(invitation);
+      if (blockReason === "draft" || blockReason === "not_sent" || blockReason === "failed") {
+        return res.status(404).json({ error: "Invalid review link" });
+      }
+      if (blockReason === "declined") {
+        return res.json({
+          success: true,
+          alreadyDeclined: true,
+          status: "declined",
+          declinedAt: invitation.declinedAt,
+          reason: invitation.declineReason,
+          message: "Your response has already been recorded.",
+        });
+      }
+      if (blockReason) {
+        return res.status(409).json({
+          error: "This invitation can no longer be declined.",
+          status: invitation.status,
+          blockReason,
+        });
+      }
+
+      const declinedInvitation = await storage.markAdvisorProjectInvitationDeclined(invitation.id, {
+        declineReason: reason as AdvisorInvitationDeclineReason,
+        declineNote: note || null,
+        responseSource: "magic_link",
+      });
+
+      if (!declinedInvitation || declinedInvitation.status !== "declined") {
+        return res.status(409).json({
+          error: "This invitation can no longer be declined.",
+          status: declinedInvitation?.status || invitation.status,
+        });
+      }
+
+      res.json({
+        success: true,
+        alreadyDeclined: false,
+        status: "declined",
+        declinedAt: declinedInvitation.declinedAt,
+        respondedAt: declinedInvitation.respondedAt,
+        reason: declinedInvitation.declineReason,
+        message: "Your response has been recorded. Thank you for letting us know.",
+      });
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message === "invalid_advisor_invitation_decline_reason") {
+          return res.status(400).json({ error: "Please select a valid decline reason." });
+        }
+        if (error.message === "advisor_invitation_decline_note_required") {
+          return res.status(400).json({ error: "Please add a short note when selecting Other." });
+        }
+        if (error.message === "advisor_invitation_decline_note_too_long") {
+          return res.status(400).json({
+            error: `Decline note must be ${ADVISOR_DECLINE_NOTE_MAX_LENGTH} characters or fewer.`,
+          });
+        }
+      }
+      console.error("Error declining advisor project invitation:", error);
+      res.status(500).json({ error: "Unable to decline this review link" });
     }
   });
 

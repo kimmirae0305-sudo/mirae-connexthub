@@ -491,6 +491,14 @@ export type AdvisorProjectInvitationStatus = typeof ADVISOR_PROJECT_INVITATION_S
 export type AdvisorInvitationResponseSource = typeof ADVISOR_INVITATION_RESPONSE_SOURCES[number];
 export type AdvisorInvitationDeclineReason = typeof ADVISOR_INVITATION_DECLINE_REASONS[number];
 export type AdvisorInvitationPublicBlockReason = "submitted" | "declined" | "expired" | "revoked";
+export type AdvisorInvitationDeclineBlockReason =
+  | "submitted"
+  | "declined"
+  | "expired"
+  | "revoked"
+  | "failed"
+  | "draft"
+  | "not_sent";
 
 export const ADVISOR_PUBLIC_ACTION_BLOCKING_STATUSES = [
   "submitted",
@@ -565,6 +573,35 @@ export function getAdvisorInvitationViewBlockReason(
   }
 
   return null;
+}
+
+export function getAdvisorInvitationDeclineBlockReason(
+  invitation: Pick<AdvisorProjectInvitation, "id" | "status" | "expiresAt" | "revokedAt">,
+  now = new Date()
+): AdvisorInvitationDeclineBlockReason | null {
+  const status = normalizeAdvisorInvitationStatus(invitation.status);
+  if (status === "sent") {
+    if (invitation.revokedAt) return "revoked";
+    if (!invitation.expiresAt) return "expired";
+
+    const expiresAt = new Date(invitation.expiresAt);
+    if (Number.isNaN(expiresAt.getTime())) {
+      console.warn("[advisor-invitation-expiration-invalid]", {
+        invitationId: invitation.id,
+        expiresAt: invitation.expiresAt,
+      });
+      return "expired";
+    }
+    return expiresAt <= now ? "expired" : null;
+  }
+
+  if (status === "submitted") return "submitted";
+  if (status === "declined") return "declined";
+  if (status === "expired") return "expired";
+  if (status === "revoked" || invitation.revokedAt) return "revoked";
+  if (status === "failed") return "failed";
+  if (status === "draft") return "draft";
+  return "not_sent";
 }
 
 export function canTransitionAdvisorInvitationStatus(
@@ -4736,7 +4773,6 @@ export class DatabaseStorage implements IStorage {
     const now = input.now || new Date();
     const status = normalizeAdvisorInvitationStatus(existing.status);
     if (status === "declined") return existing;
-    if (getAdvisorInvitationPublicBlockReason(existing, now)) return existing;
 
     const responseSource = input.responseSource || "magic_link";
     if (!isAdvisorInvitationResponseSource(responseSource)) {
@@ -4749,7 +4785,10 @@ export class DatabaseStorage implements IStorage {
     if (input.declineReason === "other" && !declineNote) {
       throw new Error("advisor_invitation_decline_note_required");
     }
-    if (!canTransitionAdvisorInvitationStatus(status, "declined")) {
+    if (declineNote.length > 1000) {
+      throw new Error("advisor_invitation_decline_note_too_long");
+    }
+    if (getAdvisorInvitationDeclineBlockReason(existing, now) || !canTransitionAdvisorInvitationStatus(status, "declined")) {
       throw new Error("invalid_advisor_invitation_status_transition");
     }
 
@@ -4758,16 +4797,25 @@ export class DatabaseStorage implements IStorage {
       .set({
         status: "declined",
         declinedAt: now,
-        respondedAt: existing.respondedAt || now,
+        respondedAt: now,
         declineReason: input.declineReason,
         declineNote: declineNote || null,
         responseSource,
         updatedAt: now,
       } as any)
-      .where(eq(advisorProjectInvitations.id, id))
+      .where(
+        and(
+          eq(advisorProjectInvitations.id, id),
+          eq(advisorProjectInvitations.status, "sent"),
+          sql`${advisorProjectInvitations.revokedAt} is null`,
+          sql`${advisorProjectInvitations.expiresAt} is not null`,
+          sql`${advisorProjectInvitations.expiresAt} > ${now}`
+        )
+      )
       .returning();
 
-    return updated || undefined;
+    if (updated) return updated;
+    return this.getAdvisorProjectInvitation(id);
   }
 
   async getAdvisorProjectResponseByInvitation(invitationId: number): Promise<AdvisorProjectResponse | undefined> {
