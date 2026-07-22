@@ -1,5 +1,7 @@
 type AdvisorEmailRenderOptions = {
   body: string;
+  reviewLink?: string | null;
+  declineLink?: string | null;
   senderName?: string | null;
   senderEmail?: string | null;
   signatureName?: string | null;
@@ -18,6 +20,7 @@ export type AdvisorTemplateVariableContext = {
   senderEmail?: string | null;
   senderMobile?: string | null;
   reviewLink?: string | null;
+  declineLink?: string | null;
 };
 
 const BRAND_NAME = "Mirae Connext";
@@ -36,6 +39,7 @@ export const ADVISOR_EMAIL_ALLOWED_VARIABLES = [
   "senderEmail",
   "senderMobile",
   "reviewLink",
+  "declineLink",
   "companyName",
   "platformName",
   "brandName",
@@ -261,6 +265,7 @@ export function renderAdvisorTemplateText(templateText: string, context: Advisor
     senderEmail: String(context.senderEmail || "").trim(),
     senderMobile: String(context.senderMobile || "").trim(),
     reviewLink: String(context.reviewLink || "").trim(),
+    declineLink: String(context.declineLink || "").trim(),
     companyName: BRAND_NAME,
     platformName: BRAND_NAME,
     brandName: BRAND_NAME,
@@ -272,13 +277,35 @@ export function renderAdvisorTemplateText(templateText: string, context: Advisor
   });
 }
 
+function ensureAdvisorActionText(body: string, context: AdvisorTemplateVariableContext) {
+  const reviewLink = String(context.reviewLink || "").trim();
+  const declineLink = String(context.declineLink || "").trim();
+  let normalizedBody = String(body || "").trim();
+
+  if (reviewLink && !normalizedBody.includes(reviewLink)) {
+    normalizedBody += `\n\nReview Project:\n${reviewLink}`;
+  }
+  if (declineLink && !normalizedBody.includes(declineLink)) {
+    normalizedBody += `\n\nDecline this invitation:\n${declineLink}`;
+  }
+
+  if (!/third-party sources/i.test(normalizedBody)) {
+    normalizedBody += "\n\nYou may not use any third-party sources, including artificial intelligence tools, when responding to screening questions or participating in consultations with a Mirae Connext client.";
+  }
+  if (!/withhold or deny payment/i.test(normalizedBody)) {
+    normalizedBody += "\n\nMirae Connext reserves the right to withhold or deny payment for any consultation and to suspend or remove you from its expert network if it determines that you have misrepresented your identity, professional experience, qualifications, or knowledge, or have used unauthorized third-party sources in connection with a screening or consultation.";
+  }
+
+  return normalizedBody.trim();
+}
+
 export function renderAdvisorTemplateContent(
   template: { subject: string; body: string },
   context: AdvisorTemplateVariableContext
 ) {
   return {
     subject: renderAdvisorTemplateText(template.subject, context).trim(),
-    body: renderAdvisorTemplateText(template.body, context).trim(),
+    body: ensureAdvisorActionText(renderAdvisorTemplateText(template.body, context), context),
   };
 }
 
@@ -328,6 +355,26 @@ function renderBodyHtml(body: string) {
       return `<div style="margin:0 0 12px 0;">${linked}</div>`;
     })
     .join("");
+}
+
+function renderAdvisorCtaHtml(options: AdvisorEmailRenderOptions) {
+  const reviewLink = String(options.reviewLink || "").trim();
+  const declineLink = String(options.declineLink || "").trim();
+  if (!reviewLink && !declineLink) return "";
+
+  const reviewHtml = reviewLink
+    ? `<div style="margin:22px 0 12px 0;">
+        <a href="${escapeHtml(reviewLink)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:20px;font-weight:700;padding:12px 20px;border-radius:6px;">Review Project</a>
+      </div>`
+    : "";
+  const declineHtml = declineLink
+    ? `<div style="margin:6px 0 22px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#4b5563;">
+        <span>Not interested in this opportunity?</span>
+        <a href="${escapeHtml(declineLink)}" style="color:#374151;text-decoration:underline;font-weight:600;">Decline Now</a>
+      </div>`
+    : "";
+
+  return `${reviewHtml}${declineHtml}`;
 }
 
 function renderFooterHtml(options: AdvisorEmailRenderOptions) {
@@ -393,6 +440,7 @@ export function renderAdvisorEmailHtml(options: AdvisorEmailRenderOptions) {
   <body style="margin:0;padding:0;background:#ffffff;">
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:22px;color:#111827;max-width:640px;padding:24px;">
       ${renderBodyHtml(options.body)}
+      ${renderAdvisorCtaHtml(options)}
       ${renderFooterHtml(options)}
     </div>
   </body>

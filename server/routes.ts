@@ -90,6 +90,11 @@ const getInviteBaseUrl = (req: AuthRequest) => {
 const buildPublicRecruitmentUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/r/${token}`;
 const buildPublicAdvisorProjectReviewUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/advisor-project-review/${token}`;
+const buildPublicAdvisorProjectDeclineUrl = (token: string, req: AuthRequest) => {
+  const url = new URL(buildPublicAdvisorProjectReviewUrl(token, req));
+  url.searchParams.set("intent", "decline");
+  return url.toString();
+};
 const buildPublicExpertPaymentDetailsUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/expert-payment-details/${token}`;
 const getEmailAssetBaseUrl = (req: AuthRequest) =>
@@ -1012,6 +1017,7 @@ export async function registerRoutes(
       const signatureSenderEmail = senderProfile?.email || senderIdentity.fromEmail;
       const tokenData = await ensureAdvisorProjectReviewTokenForSend(invitation);
       const reviewUrl = buildPublicAdvisorProjectReviewUrl(tokenData.token, req);
+      const declineUrl = buildPublicAdvisorProjectDeclineUrl(tokenData.token, req);
       const renderedEmail = renderAdvisorTemplateContent(
         { subject, body },
         {
@@ -1021,10 +1027,13 @@ export async function registerRoutes(
           senderEmail: signatureSenderEmail,
           senderMobile: senderProfile?.mobilePhone || null,
           reviewLink: reviewUrl,
+          declineLink: declineUrl,
         }
       );
       const emailHtml = renderAdvisorEmailHtml({
         body: renderedEmail.body,
+        reviewLink: reviewUrl,
+        declineLink: declineUrl,
         senderName: signatureSenderName,
         senderEmail: signatureSenderEmail,
         signatureName: senderProfile?.signatureName || null,
@@ -1314,6 +1323,7 @@ export async function registerRoutes(
         }
 
         const reviewUrl = buildPublicAdvisorProjectReviewUrl(token, req);
+        const declineUrl = buildPublicAdvisorProjectDeclineUrl(token, req);
         const { subject, body } = await resolveAdvisorEmailTemplateForSend({
           templateType: mapAdvisorEmailTypeToTemplateType(emailType),
           language: "en",
@@ -1324,10 +1334,13 @@ export async function registerRoutes(
             senderEmail,
             senderMobile: senderProfile?.mobilePhone || null,
             reviewLink: reviewUrl,
+            declineLink: declineUrl,
           },
         });
         const emailHtml = renderAdvisorEmailHtml({
           body,
+          reviewLink: reviewUrl,
+          declineLink: declineUrl,
           senderName,
           senderEmail,
           signatureName: senderProfile?.signatureName || null,

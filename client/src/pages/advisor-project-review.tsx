@@ -188,6 +188,7 @@ function AdvisorProjectReviewContent() {
   const [declineError, setDeclineError] = useState<string | null>(null);
   const [declineSuccess, setDeclineSuccess] = useState<AdvisorDeclineResponse | null>(null);
   const viewedRecordedRef = useRef(false);
+  const intentAppliedRef = useRef(false);
 
   const reviewData = data as AdvisorProjectReviewPayload | undefined;
   const project = reviewData?.project ?? { id: null, advisorBrief: "", externalAdvisorBrief: null };
@@ -221,6 +222,16 @@ function AdvisorProjectReviewContent() {
   useEffect(() => {
     if (!data) return;
     setIsSubmitted(Boolean(data.alreadySubmitted || data.invitation?.status === "submitted" || data.invitation?.submittedAt));
+  }, [data]);
+
+  useEffect(() => {
+    if (!data || intentAppliedRef.current || typeof window === "undefined") return;
+    intentAppliedRef.current = true;
+    const intent = new URLSearchParams(window.location.search).get("intent");
+    if (intent === "decline") {
+      setIsDeclineOpen(true);
+      setDeclineError(null);
+    }
   }, [data]);
 
   useEffect(() => {
