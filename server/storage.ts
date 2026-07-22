@@ -544,6 +544,29 @@ export function getAdvisorInvitationPublicBlockReason(
   return null;
 }
 
+export function getAdvisorInvitationViewBlockReason(
+  invitation: Pick<AdvisorProjectInvitation, "id" | "status" | "expiresAt" | "revokedAt">,
+  now = new Date()
+): Extract<AdvisorInvitationPublicBlockReason, "expired" | "revoked"> | null {
+  const status = normalizeAdvisorInvitationStatus(invitation.status);
+  if (status === "expired" || status === "revoked") return status;
+  if (invitation.revokedAt) return "revoked";
+
+  if (invitation.expiresAt) {
+    const expiresAt = new Date(invitation.expiresAt);
+    if (Number.isNaN(expiresAt.getTime())) {
+      console.warn("[advisor-invitation-expiration-invalid]", {
+        invitationId: invitation.id,
+        expiresAt: invitation.expiresAt,
+      });
+      return "expired";
+    }
+    if (expiresAt <= now) return "expired";
+  }
+
+  return null;
+}
+
 export function canTransitionAdvisorInvitationStatus(
   fromStatus: string | null | undefined,
   toStatus: string,
@@ -4680,17 +4703,24 @@ export class DatabaseStorage implements IStorage {
   async recordAdvisorProjectInvitationViewed(id: number, now = new Date()): Promise<AdvisorProjectInvitation | undefined> {
     const existing = await this.getAdvisorProjectInvitation(id);
     if (!existing) return undefined;
-    if (getAdvisorInvitationPublicBlockReason(existing, now)) return existing;
+    if (getAdvisorInvitationViewBlockReason(existing, now)) return undefined;
 
     const [updated] = await db
       .update(advisorProjectInvitations)
       .set({
-        firstViewedAt: existing.firstViewedAt || now,
+        firstViewedAt: sql`coalesce(${advisorProjectInvitations.firstViewedAt}, ${now})`,
         lastViewedAt: now,
-        viewCount: sql`${advisorProjectInvitations.viewCount} + 1`,
+        viewCount: sql`coalesce(${advisorProjectInvitations.viewCount}, 0) + 1`,
         updatedAt: now,
       } as any)
-      .where(eq(advisorProjectInvitations.id, id))
+      .where(
+        and(
+          eq(advisorProjectInvitations.id, id),
+          sql`lower(coalesce(${advisorProjectInvitations.status}, '')) not in ('expired', 'revoked')`,
+          sql`${advisorProjectInvitations.revokedAt} is null`,
+          sql`(${advisorProjectInvitations.expiresAt} is null or ${advisorProjectInvitations.expiresAt} > ${now})`
+        )
+      )
       .returning();
 
     return updated || undefined;
