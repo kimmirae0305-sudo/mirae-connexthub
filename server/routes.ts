@@ -1031,7 +1031,7 @@ export async function registerRoutes(
         }
       );
       const emailHtml = renderAdvisorEmailHtml({
-        body: renderedEmail.body,
+        body: renderedEmail.htmlBody,
         reviewLink: reviewUrl,
         declineLink: declineUrl,
         senderName: signatureSenderName,
@@ -1079,7 +1079,7 @@ export async function registerRoutes(
         fromName: senderIdentity.fromName || null,
         toEmail,
         subject: renderedEmail.subject,
-        body: renderedEmail.body,
+        body: renderedEmail.textBody,
         emailType,
         provider: "zoho",
         providerMessageId,
@@ -1324,7 +1324,7 @@ export async function registerRoutes(
 
         const reviewUrl = buildPublicAdvisorProjectReviewUrl(token, req);
         const declineUrl = buildPublicAdvisorProjectDeclineUrl(token, req);
-        const { subject, body } = await resolveAdvisorEmailTemplateForSend({
+        const { subject, htmlBody, textBody } = await resolveAdvisorEmailTemplateForSend({
           templateType: mapAdvisorEmailTypeToTemplateType(emailType),
           language: "en",
           context: {
@@ -1338,7 +1338,7 @@ export async function registerRoutes(
           },
         });
         const emailHtml = renderAdvisorEmailHtml({
-          body,
+          body: htmlBody,
           reviewLink: reviewUrl,
           declineLink: declineUrl,
           senderName,
@@ -1395,7 +1395,7 @@ export async function registerRoutes(
           fromName: senderIdentity.fromName || null,
           toEmail,
           subject,
-          body,
+          body: textBody,
           emailType,
           provider: "zoho",
           providerMessageId,
