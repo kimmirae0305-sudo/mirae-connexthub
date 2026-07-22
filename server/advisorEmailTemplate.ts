@@ -303,9 +303,15 @@ export function renderAdvisorTemplateContent(
   template: { subject: string; body: string },
   context: AdvisorTemplateVariableContext
 ) {
+  const subject = renderAdvisorTemplateText(template.subject, context).trim();
+  const body = renderAdvisorTemplateText(template.body, context).trim();
+  const textBody = ensureAdvisorActionText(body, context);
+
   return {
-    subject: renderAdvisorTemplateText(template.subject, context).trim(),
-    body: ensureAdvisorActionText(renderAdvisorTemplateText(template.body, context), context),
+    subject,
+    body: textBody,
+    htmlBody: body,
+    textBody,
   };
 }
 
