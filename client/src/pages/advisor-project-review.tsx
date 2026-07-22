@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useParams } from "wouter";
-import { AlertCircle, CalendarClock, CheckCircle2, ClipboardList, Loader2, ShieldCheck } from "lucide-react";
+import { AlertCircle, CalendarClock, CheckCircle2, ClipboardList, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { resolveApiUrl } from "@/lib/apiUrl";
@@ -43,6 +44,50 @@ type AdvisorReviewSubmitResponse = {
   message?: string;
 };
 
+type AdvisorDeclineReason =
+  | "schedule_conflict"
+  | "outside_expertise"
+  | "conflict_of_interest"
+  | "compensation"
+  | "not_interested"
+  | "other";
+
+type AdvisorDeclineConfirmationData = {
+  invitation: {
+    id: number;
+    status?: string | null;
+    expiresAt?: string | null;
+    declinedAt?: string | null;
+    declineReason?: string | null;
+    respondedAt?: string | null;
+  };
+  project: {
+    id: number;
+    title: string;
+    advisorBrief: string;
+  };
+  advisor: {
+    name: string;
+  };
+  allowedToDecline: boolean;
+  blockReason?: string | null;
+  declineReasons?: Array<{
+    value: AdvisorDeclineReason;
+    label: string;
+  }>;
+  noteMaxLength?: number;
+};
+
+type AdvisorDeclineResponse = {
+  success: boolean;
+  alreadyDeclined?: boolean;
+  status?: string;
+  declinedAt?: string | null;
+  respondedAt?: string | null;
+  reason?: string | null;
+  message?: string;
+};
+
 type ScreeningQuestion = AdvisorProjectReviewData["screeningQuestions"][number];
 type AdvisorProjectReviewPayload = AdvisorProjectReviewData & {
   project: AdvisorProjectReviewData["project"] & {
@@ -50,6 +95,16 @@ type AdvisorProjectReviewPayload = AdvisorProjectReviewData & {
   };
   vettingQuestions?: ScreeningQuestion[];
 };
+
+const DECLINE_NOTE_MAX_LENGTH = 1000;
+const fallbackDeclineReasons: Array<{ value: AdvisorDeclineReason; label: string }> = [
+  { value: "schedule_conflict", label: "I am unavailable" },
+  { value: "outside_expertise", label: "Not relevant to my experience" },
+  { value: "conflict_of_interest", label: "Conflict of interest" },
+  { value: "compensation", label: "Compensation does not work for me" },
+  { value: "not_interested", label: "I am not interested" },
+  { value: "other", label: "Other" },
+];
 
 const formatDate = (value?: string | null) => {
   if (!value) return "No expiration date set";
@@ -127,6 +182,11 @@ function AdvisorProjectReviewContent() {
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isDeclineOpen, setIsDeclineOpen] = useState(false);
+  const [declineReason, setDeclineReason] = useState<AdvisorDeclineReason | "">("");
+  const [declineNote, setDeclineNote] = useState("");
+  const [declineError, setDeclineError] = useState<string | null>(null);
+  const [declineSuccess, setDeclineSuccess] = useState<AdvisorDeclineResponse | null>(null);
   const viewedRecordedRef = useRef(false);
 
   const reviewData = data as AdvisorProjectReviewPayload | undefined;
@@ -142,6 +202,21 @@ function AdvisorProjectReviewContent() {
     String(project.advisorBrief || project.externalAdvisorBrief || "").trim() ||
     "Project details will be shared by the Mirae Connext team.";
   const alreadySubmitted = Boolean(data?.alreadySubmitted || invitation.status === "submitted" || invitation.submittedAt);
+  const alreadyDeclined = Boolean(invitation.status === "declined" || declineSuccess?.status === "declined");
+
+  const declineConfirmationQuery = useQuery<AdvisorDeclineConfirmationData>({
+    queryKey: ["/api/public/advisor-project-review", token, "decline"],
+    queryFn: async () => {
+      const res = await fetch(resolveApiUrl(`/api/public/advisor-project-review/${token}/decline`));
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || "Unable to load decline confirmation");
+      }
+      return payload;
+    },
+    enabled: Boolean(token && data && isDeclineOpen),
+    retry: false,
+  });
 
   useEffect(() => {
     if (!data) return;
@@ -191,6 +266,46 @@ function AdvisorProjectReviewContent() {
     },
   });
 
+  const declineMutation = useMutation<AdvisorDeclineResponse, Error>({
+    mutationFn: async () => {
+      const selectedReason = String(declineReason || "").trim();
+      const note = declineNote.trim();
+      if (!selectedReason) {
+        throw new Error("Please select a decline reason.");
+      }
+      if (selectedReason === "other" && !note) {
+        throw new Error("Please add a short note when selecting Other.");
+      }
+      if (note.length > DECLINE_NOTE_MAX_LENGTH) {
+        throw new Error(`Decline note must be ${DECLINE_NOTE_MAX_LENGTH} characters or fewer.`);
+      }
+
+      const res = await fetch(resolveApiUrl(`/api/public/advisor-project-review/${token}/decline`), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          reason: selectedReason,
+          note,
+        }),
+      });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || "Unable to decline this invitation.");
+      }
+      return payload;
+    },
+    onSuccess: (response) => {
+      setDeclineSuccess(response);
+      setDeclineError(null);
+    },
+    onError: (error) => {
+      setDeclineError(error.message || "Unable to decline this invitation.");
+    },
+  });
+
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     const missingRequired = screeningQuestions.filter((question) =>
@@ -211,6 +326,24 @@ function AdvisorProjectReviewContent() {
     submitMutation.mutate();
   };
 
+  const openDeclineConfirmation = () => {
+    setIsDeclineOpen(true);
+    setDeclineError(null);
+  };
+
+  const cancelDecline = () => {
+    if (declineMutation.isPending) return;
+    setIsDeclineOpen(false);
+    setDeclineError(null);
+  };
+
+  const handleDeclineSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (declineMutation.isPending || declineSuccess) return;
+    setDeclineError(null);
+    declineMutation.mutate();
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-muted/30 px-4 py-10">
@@ -228,6 +361,28 @@ function AdvisorProjectReviewContent() {
 
   if (error || !data) {
     return <SafeReviewLinkError />;
+  }
+
+  if (alreadyDeclined) {
+    return (
+      <div className="min-h-screen bg-muted/30 px-4 py-10">
+        <div className="mx-auto flex min-h-[70vh] max-w-3xl items-center justify-center">
+          <Card className="w-full max-w-lg">
+            <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                <XCircle className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold">Invitation Declined</h1>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Your response has been recorded. Thank you for letting us know.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
   }
 
   if (isSubmitted || alreadySubmitted) {
@@ -298,6 +453,125 @@ function AdvisorProjectReviewContent() {
           </CardContent>
         </Card>
 
+        {isDeclineOpen ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Decline Project</CardTitle>
+              <CardDescription>
+                Please confirm that you would like to decline this project invitation.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {declineConfirmationQuery.isLoading ? (
+                <div className="flex items-center gap-2 rounded-md border bg-muted/20 p-4 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading decline confirmation...
+                </div>
+              ) : declineConfirmationQuery.error ? (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                  {(declineConfirmationQuery.error as Error).message || "Unable to load decline confirmation."}
+                </div>
+              ) : declineConfirmationQuery.data && !declineConfirmationQuery.data.allowedToDecline ? (
+                <div className="space-y-4">
+                  <div className="rounded-md border bg-muted/20 p-4">
+                    <p className="text-sm font-medium">This invitation cannot be declined from this page.</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Current status: {declineConfirmationQuery.data.invitation.status || "unavailable"}
+                    </p>
+                  </div>
+                  <Button type="button" variant="outline" onClick={cancelDecline}>
+                    Keep Reviewing
+                  </Button>
+                </div>
+              ) : (
+                <form onSubmit={handleDeclineSubmit} className="space-y-5">
+                  <div className="rounded-md border bg-muted/20 p-4">
+                    <p className="text-sm font-medium text-muted-foreground">Project</p>
+                    <p className="mt-1 text-base font-semibold">
+                      {declineConfirmationQuery.data?.project.title || `Project #${project.id}`}
+                    </p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Advisor: {declineConfirmationQuery.data?.advisor.name || advisor.name || "Advisor"}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label>Reason</Label>
+                    <RadioGroup
+                      value={declineReason}
+                      onValueChange={(value) => setDeclineReason(value as AdvisorDeclineReason)}
+                      className="gap-3"
+                    >
+                      {(declineConfirmationQuery.data?.declineReasons || fallbackDeclineReasons).map((reason) => (
+                        <div key={reason.value} className="flex items-center gap-3 rounded-md border bg-background p-3">
+                          <RadioGroupItem
+                            id={`decline-reason-${reason.value}`}
+                            value={reason.value}
+                            disabled={declineMutation.isPending || Boolean(declineSuccess)}
+                          />
+                          <Label htmlFor={`decline-reason-${reason.value}`} className="text-sm font-normal">
+                            {reason.label}
+                          </Label>
+                        </div>
+                      ))}
+                    </RadioGroup>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="advisor-decline-note">
+                      Note {declineReason === "other" ? "(required)" : "(optional)"}
+                    </Label>
+                    <Textarea
+                      id="advisor-decline-note"
+                      value={declineNote}
+                      onChange={(event) => setDeclineNote(event.target.value.slice(0, DECLINE_NOTE_MAX_LENGTH + 1))}
+                      maxLength={DECLINE_NOTE_MAX_LENGTH + 1}
+                      placeholder="Add any context you would like to share..."
+                      className="min-h-[120px]"
+                      disabled={declineMutation.isPending || Boolean(declineSuccess)}
+                      data-testid="textarea-advisor-decline-note"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {declineNote.length}/{declineConfirmationQuery.data?.noteMaxLength || DECLINE_NOTE_MAX_LENGTH}
+                    </p>
+                  </div>
+
+                  {declineError && (
+                    <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                      {declineError}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <Button
+                      type="submit"
+                      variant="destructive"
+                      disabled={declineMutation.isPending || Boolean(declineSuccess)}
+                      data-testid="button-confirm-advisor-decline"
+                    >
+                      {declineMutation.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Recording...
+                        </>
+                      ) : (
+                        "Confirm Decline"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={cancelDecline}
+                      disabled={declineMutation.isPending}
+                    >
+                      Keep Reviewing
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
         <Card>
           <CardHeader>
@@ -377,23 +651,35 @@ function AdvisorProjectReviewContent() {
                 {validationError}
               </div>
             )}
-            <Button
-              type="submit"
-              disabled={submitMutation.isPending}
-              data-testid="button-submit-advisor-review"
-            >
-              {submitMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Submitting...
-                </>
-              ) : (
-                "Submit Responses"
-              )}
-            </Button>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button
+                type="submit"
+                disabled={submitMutation.isPending}
+                data-testid="button-submit-advisor-review"
+              >
+                {submitMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  "Submit Responses"
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={openDeclineConfirmation}
+                disabled={submitMutation.isPending}
+                data-testid="button-open-advisor-decline"
+              >
+                Decline Project
+              </Button>
+            </div>
           </CardContent>
         </Card>
         </form>
+        )}
 
         <Separator />
         <p className="pb-4 text-center text-xs text-muted-foreground">
