@@ -1949,7 +1949,11 @@ export default function ProjectDetail() {
       pe.id === record.projectExpertId || pe.expertId === record.expertId
     );
     if (!advisor) return record.projectExpertId ? `Assignment #${record.projectExpertId}` : "-";
-    const sourceLabel = advisor.sourceType === "internal_db" ? "Internal DB" : "RA-sourced";
+    const sourceLabel = advisor.sourceType === "internal_db"
+      ? "Existing Database"
+      : advisor.sourceType === "ra_external" || advisor.sourceType === "ra_sourced" || advisor.sourceType === "quick_invite"
+        ? "RA-sourced"
+        : "Admin";
     return `${sourceLabel} #${advisor.id}`;
   };
 
@@ -2395,9 +2399,8 @@ export default function ProjectDetail() {
     (Array.isArray(pe.vqAnswers) && pe.vqAnswers.length > 0);
 
   const getAdvisorSourceLabel = (pe: EnrichedExpert) => {
-    if (pe.sourceType === "internal_db") return "Internal DB";
+    if (pe.sourceType === "internal_db") return "Existing Database";
     if (pe.sourceType === "ra_external" || pe.sourceType === "ra_sourced" || pe.sourceType === "quick_invite") return "RA-sourced";
-    if (pe.sourcedByRa) return "RA-sourced";
     return "Admin";
   };
 
