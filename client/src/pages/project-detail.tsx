@@ -1304,6 +1304,7 @@ export default function ProjectDetail() {
         subject: preview.subject,
         body: preview.body,
         emailType: preview.emailMode,
+        language: preview.language,
       });
       return res.json();
     },
