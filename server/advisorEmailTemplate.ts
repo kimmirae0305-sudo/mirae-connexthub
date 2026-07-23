@@ -1,5 +1,6 @@
 type AdvisorEmailRenderOptions = {
   body: string;
+  language?: string | null;
   reviewLink?: string | null;
   declineLink?: string | null;
   senderName?: string | null;
@@ -32,6 +33,31 @@ const DEFAULT_PROJECT_TITLE = "Expert Consultation Opportunity";
 const WEBSITE_URL = "http://www.miraeconnext.com";
 const WEBSITE_LABEL = "www.miraeconnext.com";
 const ADVISOR_ACTION_INSTRUCTION_TEXT = "Review the project details using the button below.";
+const ADVISOR_ACTION_I18N: Record<AdvisorManagedTemplateLanguage, {
+  instruction: string;
+  reviewLabel: string;
+  declineLeadIn: string;
+  declineLabel: string;
+}> = {
+  en: {
+    instruction: ADVISOR_ACTION_INSTRUCTION_TEXT,
+    reviewLabel: "Review Project",
+    declineLeadIn: "Not interested in this opportunity?",
+    declineLabel: "Decline Now",
+  },
+  "pt-BR": {
+    instruction: "Revise os detalhes do projeto usando o botão abaixo.",
+    reviewLabel: "Revisar Projeto",
+    declineLeadIn: "Não tem interesse nesta oportunidade?",
+    declineLabel: "Recusar Agora",
+  },
+  es: {
+    instruction: "Revise los detalles del proyecto utilizando el botón que aparece a continuación.",
+    reviewLabel: "Revisar Proyecto",
+    declineLeadIn: "¿No le interesa esta oportunidad?",
+    declineLabel: "Rechazar Ahora",
+  },
+};
 export const ADVISOR_EMAIL_TEMPLATE_TYPES: AdvisorManagedTemplateType[] = [
   "advisor_initial_invite",
   "advisor_follow_up",
@@ -223,9 +249,9 @@ function escapeHtml(value: string) {
 }
 
 export function normalizeAdvisorTemplateLanguage(language?: string | null): AdvisorManagedTemplateLanguage {
-  const normalized = String(language || "").trim();
-  if (normalized === "pt" || normalized.toLowerCase() === "pt-br") return "pt-BR";
-  if (normalized === "es") return "es";
+  const normalized = String(language || "").trim().toLowerCase().replace("_", "-");
+  if (normalized === "pt" || normalized === "pt-br" || normalized.startsWith("pt-")) return "pt-BR";
+  if (normalized === "es" || normalized.startsWith("es-")) return "es";
   return "en";
 }
 
@@ -465,7 +491,7 @@ function getAdvisorActionInstructionText(line: string) {
   return ADVISOR_ACTION_INSTRUCTION_TEXT_BY_LINE.get(normalizeAdvisorActionInstructionLine(line)) || null;
 }
 
-function extractAdvisorActionInstruction(body: string) {
+function extractAdvisorActionInstruction(body: string, language: AdvisorManagedTemplateLanguage) {
   let instructionText: string | null = null;
   let didExtractInstruction = false;
   const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
@@ -482,7 +508,7 @@ function extractAdvisorActionInstruction(body: string) {
 
   return {
     body: bodyWithoutInstruction,
-    instructionText: instructionText || ADVISOR_ACTION_INSTRUCTION_TEXT,
+    instructionText: instructionText || ADVISOR_ACTION_I18N[language].instruction,
   };
 }
 
@@ -513,10 +539,15 @@ function renderBodyHtml(body: string, advisorActionsHtml = "") {
     .join("");
 }
 
-function renderAdvisorCtaHtml(options: AdvisorEmailRenderOptions, instructionText = ADVISOR_ACTION_INSTRUCTION_TEXT) {
+function renderAdvisorCtaHtml(
+  options: AdvisorEmailRenderOptions,
+  language: AdvisorManagedTemplateLanguage,
+  instructionText = ADVISOR_ACTION_I18N[language].instruction
+) {
   const reviewLink = String(options.reviewLink || "").trim();
   const declineLink = String(options.declineLink || "").trim();
   if (!reviewLink && !declineLink) return "";
+  const labels = ADVISOR_ACTION_I18N[language];
 
   const instructionHtml = reviewLink
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;width:100%;max-width:640px;margin:0 0 16px 0;">
@@ -531,7 +562,7 @@ function renderAdvisorCtaHtml(options: AdvisorEmailRenderOptions, instructionTex
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 12px 0;">
         <tr>
           <td style="background:#111827;border-radius:6px;">
-            <a href="${escapeHtml(reviewLink)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:20px;font-weight:700;padding:12px 20px;border-radius:6px;">Review Project</a>
+            <a href="${escapeHtml(reviewLink)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:20px;font-weight:700;padding:12px 20px;border-radius:6px;">${escapeHtml(labels.reviewLabel)}</a>
           </td>
         </tr>
       </table>`
@@ -540,8 +571,8 @@ function renderAdvisorCtaHtml(options: AdvisorEmailRenderOptions, instructionTex
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:6px 0 22px 0;">
         <tr>
           <td style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#4b5563;">
-            <span>Not interested in this opportunity?</span>
-            <a href="${escapeHtml(declineLink)}" style="color:#374151;text-decoration:underline;font-weight:600;">Decline Now</a>
+            <span>${escapeHtml(labels.declineLeadIn)}</span>
+            <a href="${escapeHtml(declineLink)}" style="color:#374151;text-decoration:underline;font-weight:600;">${escapeHtml(labels.declineLabel)}</a>
           </td>
         </tr>
       </table>`
@@ -604,8 +635,9 @@ function renderFooterHtml(options: AdvisorEmailRenderOptions) {
 // Keep the CRM-controlled advisor email footer/signature centralized here.
 // If the Zoho Mail signature changes, update this helper rather than each template.
 export function renderAdvisorEmailHtml(options: AdvisorEmailRenderOptions) {
-  const { body, instructionText } = extractAdvisorActionInstruction(options.body);
-  const ctaHtml = renderAdvisorCtaHtml(options, instructionText);
+  const language = normalizeAdvisorTemplateLanguage(options.language);
+  const { body, instructionText } = extractAdvisorActionInstruction(options.body, language);
+  const ctaHtml = renderAdvisorCtaHtml(options, language, instructionText);
   const hasAdvisorActionsPlaceholder = body.includes(ADVISOR_ACTIONS_HTML_MARKER);
 
   return `<!doctype html>

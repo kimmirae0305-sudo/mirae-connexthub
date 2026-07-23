@@ -919,6 +919,7 @@ export async function registerRoutes(
       const subject = String(req.body?.subject || "").trim();
       const body = String(req.body?.body || "").trim();
       const emailType = String(req.body?.emailType || req.body?.emailMode || "initial_invite").trim();
+      const language = normalizeAdvisorTemplateLanguage(req.body?.language);
 
       if (![projectId, invitationId, expertId].every((id) => Number.isInteger(id) && id > 0)) {
         return res.status(400).json({ error: "Invalid project, invitation, or advisor id." });
@@ -1035,6 +1036,7 @@ export async function registerRoutes(
       );
       const emailHtml = renderAdvisorEmailHtml({
         body: renderedEmail.htmlBody,
+        language,
         reviewLink: reviewUrl,
         declineLink: declineUrl,
         senderName: signatureSenderName,
@@ -1344,6 +1346,7 @@ export async function registerRoutes(
         });
         const emailHtml = renderAdvisorEmailHtml({
           body: htmlBody,
+          language: "en",
           reviewLink: reviewUrl,
           declineLink: declineUrl,
           senderName,
