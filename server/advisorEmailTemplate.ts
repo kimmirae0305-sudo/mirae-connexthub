@@ -312,6 +312,35 @@ function renderAdvisorActionText(context: AdvisorTemplateVariableContext) {
   return lines.join("\n\n");
 }
 
+function replaceTextActionBlocksWithHtmlMarker(body: string, context: AdvisorTemplateVariableContext) {
+  let normalizedBody = String(body || "").replace(/\r\n/g, "\n");
+  if (!normalizedBody.trim() || normalizedBody.includes(ADVISOR_ACTIONS_HTML_MARKER)) return normalizedBody;
+
+  const reviewLink = String(context.reviewLink || "").trim();
+  const declineLink = String(context.declineLink || "").trim();
+  const blocks = [
+    renderAdvisorActionText(context),
+    reviewLink ? `Review Project:\n${reviewLink}` : "",
+    declineLink ? `Decline this invitation:\n${declineLink}` : "",
+  ]
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  let didInsertMarker = false;
+  for (const block of blocks) {
+    while (normalizedBody.includes(block)) {
+      normalizedBody = normalizedBody.replace(block, () => {
+        if (didInsertMarker) return "";
+        didInsertMarker = true;
+        return ADVISOR_ACTIONS_HTML_MARKER;
+      });
+    }
+  }
+
+  return normalizedBody;
+}
+
 function ensureAdvisorActionText(body: string, context: AdvisorTemplateVariableContext) {
   const reviewLink = String(context.reviewLink || "").trim();
   const declineLink = String(context.declineLink || "").trim();
@@ -342,13 +371,14 @@ export function renderAdvisorTemplateContent(
   const htmlBody = renderAdvisorTemplateTextWithActions(template.body, context, ADVISOR_ACTIONS_HTML_MARKER, {
     includeActionLinks: false,
   }).trim();
+  const normalizedHtmlBody = replaceTextActionBlocksWithHtmlMarker(htmlBody, context).trim();
   const textBodyBase = renderAdvisorTemplateText(template.body, context).trim();
   const textBody = ensureAdvisorActionText(textBodyBase, context);
 
   return {
     subject,
     body: textBody,
-    htmlBody,
+    htmlBody: normalizedHtmlBody,
     textBody,
   };
 }
