@@ -10,6 +10,9 @@ type AdvisorEmailRenderOptions = {
   logoUrl?: string | null;
 };
 
+const ADVISOR_ACTIONS_VARIABLE = "advisorActions";
+const ADVISOR_ACTIONS_HTML_MARKER = "__MIRAE_ADVISOR_ACTIONS_HTML__";
+
 export type AdvisorManagedTemplateType = "advisor_initial_invite" | "advisor_follow_up" | "advisor_resend";
 export type AdvisorManagedTemplateLanguage = "en" | "pt-BR" | "es";
 
@@ -40,6 +43,7 @@ export const ADVISOR_EMAIL_ALLOWED_VARIABLES = [
   "senderMobile",
   "reviewLink",
   "declineLink",
+  ADVISOR_ACTIONS_VARIABLE,
   "companyName",
   "platformName",
   "brandName",
@@ -258,14 +262,25 @@ export function findUnsupportedAdvisorTemplateVariables(subject: string, body: s
 }
 
 export function renderAdvisorTemplateText(templateText: string, context: AdvisorTemplateVariableContext) {
+  return renderAdvisorTemplateTextWithActions(templateText, context, renderAdvisorActionText(context));
+}
+
+function renderAdvisorTemplateTextWithActions(
+  templateText: string,
+  context: AdvisorTemplateVariableContext,
+  advisorActions: string,
+  options?: { includeActionLinks?: boolean }
+) {
+  const includeActionLinks = options?.includeActionLinks !== false;
+  let didRenderAdvisorActions = false;
   const values: Record<string, string> = {
     advisorName: String(context.advisorName || "").trim() || "there",
     senderName: String(context.senderName || "").trim() || BRAND_NAME,
     senderTitle: String(context.senderTitle || "").trim(),
     senderEmail: String(context.senderEmail || "").trim(),
     senderMobile: String(context.senderMobile || "").trim(),
-    reviewLink: String(context.reviewLink || "").trim(),
-    declineLink: String(context.declineLink || "").trim(),
+    reviewLink: includeActionLinks ? String(context.reviewLink || "").trim() : "",
+    declineLink: includeActionLinks ? String(context.declineLink || "").trim() : "",
     companyName: BRAND_NAME,
     platformName: BRAND_NAME,
     brandName: BRAND_NAME,
@@ -273,8 +288,28 @@ export function renderAdvisorTemplateText(templateText: string, context: Advisor
 
   return String(templateText || "").replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_match, variableName) => {
     if (!ALLOWED_VARIABLE_SET.has(variableName)) return "";
+    if (variableName === ADVISOR_ACTIONS_VARIABLE) {
+      if (didRenderAdvisorActions) return "";
+      didRenderAdvisorActions = true;
+      return advisorActions;
+    }
     return values[variableName] || "";
   });
+}
+
+function renderAdvisorActionText(context: AdvisorTemplateVariableContext) {
+  const reviewLink = String(context.reviewLink || "").trim();
+  const declineLink = String(context.declineLink || "").trim();
+  const lines: string[] = [];
+
+  if (reviewLink) {
+    lines.push(`Review Project:\n${reviewLink}`);
+  }
+  if (declineLink) {
+    lines.push(`Decline this invitation:\n${declineLink}`);
+  }
+
+  return lines.join("\n\n");
 }
 
 function ensureAdvisorActionText(body: string, context: AdvisorTemplateVariableContext) {
@@ -303,14 +338,17 @@ export function renderAdvisorTemplateContent(
   template: { subject: string; body: string },
   context: AdvisorTemplateVariableContext
 ) {
-  const subject = renderAdvisorTemplateText(template.subject, context).trim();
-  const body = renderAdvisorTemplateText(template.body, context).trim();
-  const textBody = ensureAdvisorActionText(body, context);
+  const subject = renderAdvisorTemplateTextWithActions(template.subject, context, "").trim();
+  const htmlBody = renderAdvisorTemplateTextWithActions(template.body, context, ADVISOR_ACTIONS_HTML_MARKER, {
+    includeActionLinks: false,
+  }).trim();
+  const textBodyBase = renderAdvisorTemplateText(template.body, context).trim();
+  const textBody = ensureAdvisorActionText(textBodyBase, context);
 
   return {
     subject,
     body: textBody,
-    htmlBody: body,
+    htmlBody,
     textBody,
   };
 }
@@ -343,22 +381,43 @@ function getSenderSignatureProfile(senderName?: string | null, senderEmail?: str
   };
 }
 
-function renderBodyHtml(body: string) {
+function renderTextLineHtml(line: string) {
   const urlPattern = /(https?:\/\/[^\s<>"']+)/g;
+  const escaped = escapeHtml(line);
+  if (!escaped.trim()) return '<div style="height:12px;line-height:12px;">&nbsp;</div>';
+
+  const linked = escaped.replace(urlPattern, (url) => {
+    const cleanUrl = url.replace(/[),.;:!?]+$/g, "");
+    const trailing = url.slice(cleanUrl.length);
+    return `<a href="${cleanUrl}" style="color:#2563eb;text-decoration:underline;">${cleanUrl}</a>${trailing}`;
+  });
+
+  return `<div style="margin:0 0 12px 0;">${linked}</div>`;
+}
+
+function renderBodyHtml(body: string, advisorActionsHtml = "") {
   const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
+  let didRenderAdvisorActions = false;
+  const consumeAdvisorActionsHtml = () => {
+    if (didRenderAdvisorActions) return "";
+    didRenderAdvisorActions = true;
+    return advisorActionsHtml;
+  };
 
   return lines
     .map((line) => {
-      const escaped = escapeHtml(line);
-      if (!escaped.trim()) return '<div style="height:12px;line-height:12px;">&nbsp;</div>';
+      if (line.trim() === ADVISOR_ACTIONS_HTML_MARKER) return consumeAdvisorActionsHtml();
+      if (line.includes(ADVISOR_ACTIONS_HTML_MARKER)) {
+        const parts = line.split(ADVISOR_ACTIONS_HTML_MARKER);
+        return parts
+          .map((part, index) => {
+            const prefix = index > 0 ? consumeAdvisorActionsHtml() : "";
+            return `${prefix}${part ? renderTextLineHtml(part) : ""}`;
+          })
+          .join("");
+      }
 
-      const linked = escaped.replace(urlPattern, (url) => {
-        const cleanUrl = url.replace(/[),.;:!?]+$/g, "");
-        const trailing = url.slice(cleanUrl.length);
-        return `<a href="${cleanUrl}" style="color:#2563eb;text-decoration:underline;">${cleanUrl}</a>${trailing}`;
-      });
-
-      return `<div style="margin:0 0 12px 0;">${linked}</div>`;
+      return renderTextLineHtml(line);
     })
     .join("");
 }
@@ -437,6 +496,9 @@ function renderFooterHtml(options: AdvisorEmailRenderOptions) {
 // Keep the CRM-controlled advisor email footer/signature centralized here.
 // If the Zoho Mail signature changes, update this helper rather than each template.
 export function renderAdvisorEmailHtml(options: AdvisorEmailRenderOptions) {
+  const ctaHtml = renderAdvisorCtaHtml(options);
+  const hasAdvisorActionsPlaceholder = String(options.body || "").includes(ADVISOR_ACTIONS_HTML_MARKER);
+
   return `<!doctype html>
 <html>
   <head>
@@ -445,8 +507,8 @@ export function renderAdvisorEmailHtml(options: AdvisorEmailRenderOptions) {
   </head>
   <body style="margin:0;padding:0;background:#ffffff;">
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:22px;color:#111827;max-width:640px;padding:24px;">
-      ${renderBodyHtml(options.body)}
-      ${renderAdvisorCtaHtml(options)}
+      ${renderBodyHtml(options.body, ctaHtml)}
+      ${hasAdvisorActionsPlaceholder ? "" : ctaHtml}
       ${renderFooterHtml(options)}
     </div>
   </body>

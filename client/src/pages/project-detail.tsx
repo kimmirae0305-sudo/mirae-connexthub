@@ -530,6 +530,8 @@ function renderAdvisorTemplateVariables(
     senderEmail: senderEmail || "",
     senderMobile: "",
     reviewLink,
+    declineLink: "",
+    advisorActions: `Review Project:\n${reviewLink}`,
     companyName: "Mirae Connext",
     platformName: "Mirae Connext",
     brandName: "Mirae Connext",

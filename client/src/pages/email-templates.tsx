@@ -60,6 +60,9 @@ const SAMPLE_VALUES: Record<string, string> = {
   senderEmail: "mirae@miraeconnext.com",
   senderMobile: "+55 11 95500 7861",
   reviewLink: "https://miraeconnexthub.com/public/advisor-project-review/sample-token",
+  declineLink: "https://miraeconnexthub.com/public/advisor-project-review/sample-token?intent=decline",
+  advisorActions:
+    "Review Project:\nhttps://miraeconnexthub.com/public/advisor-project-review/sample-token\n\nDecline this invitation:\nhttps://miraeconnexthub.com/public/advisor-project-review/sample-token?intent=decline",
   companyName: "Mirae Connext",
   platformName: "Mirae Connext",
   brandName: "Mirae Connext",
