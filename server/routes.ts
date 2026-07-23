@@ -54,6 +54,7 @@ import {
   ADVISOR_EMAIL_TEMPLATE_TYPES,
   findUnsupportedAdvisorTemplateVariables,
   getDefaultAdvisorEmailTemplate,
+  normalizeAdvisorProjectTitle,
   normalizeAdvisorTemplateLanguage,
   normalizeAdvisorTemplateType,
   renderAdvisorEmailHtml,
@@ -1015,6 +1016,7 @@ export async function registerRoutes(
       const senderProfile = await storage.getUser(user.id);
       const signatureSenderName = senderProfile?.fullName || senderIdentity.fromName;
       const signatureSenderEmail = senderProfile?.email || senderIdentity.fromEmail;
+      const projectTitle = normalizeAdvisorProjectTitle(project.name);
       const tokenData = await ensureAdvisorProjectReviewTokenForSend(invitation);
       const reviewUrl = buildPublicAdvisorProjectReviewUrl(tokenData.token, req);
       const declineUrl = buildPublicAdvisorProjectDeclineUrl(tokenData.token, req);
@@ -1026,6 +1028,7 @@ export async function registerRoutes(
           senderTitle: senderProfile?.jobTitle || null,
           senderEmail: signatureSenderEmail,
           senderMobile: senderProfile?.mobilePhone || null,
+          projectTitle,
           reviewLink: reviewUrl,
           declineLink: declineUrl,
         }
@@ -1222,6 +1225,7 @@ export async function registerRoutes(
       const attachedExpertIds = new Set(projectAssignments.map((assignment) => assignment.expertId));
       const senderName = senderProfile?.fullName || senderIdentity.fromName;
       const senderEmail = senderProfile?.email || senderIdentity.fromEmail;
+      const projectTitle = normalizeAdvisorProjectTitle(project.name);
       const logoUrl = buildAdvisorEmailLogoUrl(req);
       const results: Array<{
         invitationId: number;
@@ -1333,6 +1337,7 @@ export async function registerRoutes(
             senderTitle: senderProfile?.jobTitle || null,
             senderEmail,
             senderMobile: senderProfile?.mobilePhone || null,
+            projectTitle,
             reviewLink: reviewUrl,
             declineLink: declineUrl,
           },

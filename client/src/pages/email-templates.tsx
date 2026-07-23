@@ -59,6 +59,7 @@ const SAMPLE_VALUES: Record<string, string> = {
   senderTitle: "Co Founder & COO | Mirae Connext",
   senderEmail: "mirae@miraeconnext.com",
   senderMobile: "+55 11 95500 7861",
+  projectTitle: "LATAM Payments Market Review",
   reviewLink: "https://miraeconnexthub.com/public/advisor-project-review/sample-token",
   declineLink: "https://miraeconnexthub.com/public/advisor-project-review/sample-token?intent=decline",
   advisorActions:

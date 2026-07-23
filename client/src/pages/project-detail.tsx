@@ -392,10 +392,12 @@ function getAdvisorEmailTemplate(
   language: AdvisorEmailLanguage,
   advisorName: string,
   reviewLink: string,
-  senderName?: string | null
+  senderName?: string | null,
+  projectTitle?: string | null
 ) {
   const senderFirstName = getFirstName(senderName) || "Mirae";
   const greeting = getAdvisorGreeting(advisorName, language);
+  const renderedProjectTitle = String(projectTitle || "").trim() || "Expert Consultation Opportunity";
 
   if (mode !== "follow_up") {
     if (language === "pt") {
@@ -437,7 +439,7 @@ Esta es una etapa inicial de evaluacion y aun no representa una consulta confirm
     }
 
     return {
-      subject: "Mirae Connext | Expert consultation opportunity",
+      subject: `Review Project: ${renderedProjectTitle} | Mirae Connext`,
       body: `${greeting}
 
 This is ${senderFirstName} from Mirae Connext.
@@ -489,7 +491,7 @@ Gracias por su atencion.`,
   }
 
   return {
-    subject: "Follow-up: Expert consultation invitation from Mirae Connext",
+    subject: `Reminder: ${renderedProjectTitle} | Mirae Connext`,
     body: `${greeting}
 
 This is ${senderFirstName} from Mirae Connext.
@@ -519,16 +521,19 @@ function renderAdvisorTemplateVariables(
   advisorName: string,
   reviewLink: string,
   senderName?: string | null,
-  senderEmail?: string | null
+  senderEmail?: string | null,
+  projectTitle?: string | null
 ) {
   const senderFirstName = getFirstName(senderName) || "Mirae";
   const advisorFirstName = getFirstName(advisorName) || "there";
+  const renderedProjectTitle = String(projectTitle || "").trim() || "Expert Consultation Opportunity";
   const values: Record<string, string> = {
     advisorName: advisorFirstName,
     senderName: senderFirstName,
     senderTitle: "",
     senderEmail: senderEmail || "",
     senderMobile: "",
+    projectTitle: renderedProjectTitle,
     reviewLink,
     declineLink: "",
     advisorActions: "{{advisorActions}}",
@@ -546,9 +551,10 @@ async function getAdvisorEmailTemplateForPreview(
   advisorName: string,
   reviewLink: string,
   senderName?: string | null,
-  senderEmail?: string | null
+  senderEmail?: string | null,
+  projectTitle?: string | null
 ) {
-  const fallback = getAdvisorEmailTemplate(mode, language, advisorName, reviewLink, senderName);
+  const fallback = getAdvisorEmailTemplate(mode, language, advisorName, reviewLink, senderName, projectTitle);
 
   try {
     const res = await apiRequest(
@@ -560,8 +566,8 @@ async function getAdvisorEmailTemplateForPreview(
     if (!template?.subject || !template?.body) return fallback;
 
     return {
-      subject: renderAdvisorTemplateVariables(template.subject, advisorName, reviewLink, senderName, senderEmail),
-      body: renderAdvisorTemplateVariables(template.body, advisorName, reviewLink, senderName, senderEmail),
+      subject: renderAdvisorTemplateVariables(template.subject, advisorName, reviewLink, senderName, senderEmail, projectTitle),
+      body: renderAdvisorTemplateVariables(template.body, advisorName, reviewLink, senderName, senderEmail, projectTitle),
     };
   } catch {
     return fallback;
@@ -2543,7 +2549,8 @@ export default function ProjectDetail() {
     const initialMode = requestedMode || getDefaultAdvisorEmailMode(invitation);
     const senderTemplateName = senderIdentity?.fromName || senderIdentity?.fromEmail;
     const senderTemplateEmail = senderIdentity?.fromEmail;
-    const initialTemplate = getAdvisorEmailTemplate(initialMode, "en", advisorName, "", senderTemplateName);
+    const projectTitle = projectDetail?.name;
+    const initialTemplate = getAdvisorEmailTemplate(initialMode, "en", advisorName, "", senderTemplateName, projectTitle);
 
     setAdvisorEmailPreview({
       invitationId: null,
@@ -2592,7 +2599,8 @@ export default function ProjectDetail() {
         advisorName,
         linkData.publicReviewUrl,
         senderTemplateName,
-        senderTemplateEmail
+        senderTemplateEmail,
+        projectTitle
       );
       setAdvisorEmailPreview((current) => current ? {
         ...current,
@@ -2667,7 +2675,8 @@ export default function ProjectDetail() {
       current.advisorName,
       current.publicReviewUrl,
       senderIdentity?.fromName || senderIdentity?.fromEmail,
-      senderIdentity?.fromEmail
+      senderIdentity?.fromEmail,
+      projectDetail?.name
     );
     setAdvisorEmailPreview((latest) => latest ? {
       ...latest,
@@ -2687,7 +2696,8 @@ export default function ProjectDetail() {
       current.advisorName,
       current.publicReviewUrl,
       senderIdentity?.fromName || senderIdentity?.fromEmail,
-      senderIdentity?.fromEmail
+      senderIdentity?.fromEmail,
+      projectDetail?.name
     );
     setAdvisorEmailPreview((latest) => latest ? {
       ...latest,
