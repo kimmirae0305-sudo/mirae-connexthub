@@ -22,11 +22,13 @@ export type AdvisorTemplateVariableContext = {
   senderTitle?: string | null;
   senderEmail?: string | null;
   senderMobile?: string | null;
+  projectTitle?: string | null;
   reviewLink?: string | null;
   declineLink?: string | null;
 };
 
 const BRAND_NAME = "Mirae Connext";
+const DEFAULT_PROJECT_TITLE = "Expert Consultation Opportunity";
 const WEBSITE_URL = "http://www.miraeconnext.com";
 const WEBSITE_LABEL = "www.miraeconnext.com";
 export const ADVISOR_EMAIL_TEMPLATE_TYPES: AdvisorManagedTemplateType[] = [
@@ -41,6 +43,7 @@ export const ADVISOR_EMAIL_ALLOWED_VARIABLES = [
   "senderTitle",
   "senderEmail",
   "senderMobile",
+  "projectTitle",
   "reviewLink",
   "declineLink",
   ADVISOR_ACTIONS_VARIABLE,
@@ -57,7 +60,7 @@ export const ADVISOR_EMAIL_DEFAULT_TEMPLATES: Record<
   advisor_initial_invite: {
     en: {
       description: "Initial advisor project review invitation.",
-      subject: "Mirae Connext | Expert consultation opportunity",
+      subject: "Review Project: {{projectTitle}} | Mirae Connext",
       body: `Hi {{advisorName}},
 
 This is {{senderName}} from {{brandName}}.
@@ -110,7 +113,7 @@ Esta es una etapa inicial de evaluacion y aun no representa una consulta confirm
   advisor_follow_up: {
     en: {
       description: "Advisor project review follow-up.",
-      subject: "Follow-up: Expert consultation invitation from Mirae Connext",
+      subject: "Reminder: {{projectTitle}} | Mirae Connext",
       body: `Hi {{advisorName}},
 
 This is {{senderName}} from {{brandName}}.
@@ -157,7 +160,7 @@ Gracias por su atencion.`,
   advisor_resend: {
     en: {
       description: "Resend advisor project review invitation.",
-      subject: "Mirae Connext | Expert consultation opportunity",
+      subject: "Review Project: {{projectTitle}} | Mirae Connext",
       body: `Hi {{advisorName}},
 
 This is {{senderName}} from {{brandName}}.
@@ -261,6 +264,10 @@ export function findUnsupportedAdvisorTemplateVariables(subject: string, body: s
   return Array.from(unsupported);
 }
 
+export function normalizeAdvisorProjectTitle(projectTitle?: string | null) {
+  return String(projectTitle || "").trim() || DEFAULT_PROJECT_TITLE;
+}
+
 export function renderAdvisorTemplateText(templateText: string, context: AdvisorTemplateVariableContext) {
   return renderAdvisorTemplateTextWithActions(templateText, context, renderAdvisorActionText(context));
 }
@@ -279,6 +286,7 @@ function renderAdvisorTemplateTextWithActions(
     senderTitle: String(context.senderTitle || "").trim(),
     senderEmail: String(context.senderEmail || "").trim(),
     senderMobile: String(context.senderMobile || "").trim(),
+    projectTitle: normalizeAdvisorProjectTitle(context.projectTitle),
     reviewLink: includeActionLinks ? String(context.reviewLink || "").trim() : "",
     declineLink: includeActionLinks ? String(context.declineLink || "").trim() : "",
     companyName: BRAND_NAME,
