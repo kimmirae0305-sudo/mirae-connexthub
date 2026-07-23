@@ -68,6 +68,8 @@ import PDFDocument from "pdfkit";
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
 const generateAdvisorProjectReviewToken = () => `apr_${crypto.randomBytes(32).toString("hex")}`;
 const generateExpertPaymentDetailsToken = () => `epd_${crypto.randomBytes(32).toString("hex")}`;
+const PROJECT_EXPERT_RA_SOURCE_TYPES = new Set(["ra_external", "ra_sourced", "quick_invite"]);
+const PROJECT_EXPERT_SOURCE_TYPES = new Set(["internal_db", ...PROJECT_EXPERT_RA_SOURCE_TYPES]);
 const trimTrailingSlashes = (value: string) => value.replace(/\/+$/, "");
 const getRequestBaseUrl = (req: AuthRequest) => {
   const forwardedProto = req.headers["x-forwarded-proto"];
@@ -2275,12 +2277,7 @@ export async function registerRoutes(
 
       // Separate experts by source type for backward-compatible consumers.
       const internalExperts = enrichedExperts.filter(e => e.sourceType === "internal_db");
-      const raSourcedExperts = enrichedExperts.filter(e =>
-        e.sourceType === "ra_external" ||
-        e.sourceType === "ra_sourced" ||
-        e.sourceType === "quick_invite" ||
-        e.applicationStatus === "submitted"
-      );
+      const raSourcedExperts = enrichedExperts.filter(e => PROJECT_EXPERT_RA_SOURCE_TYPES.has(e.sourceType));
       const projectAdvisors = enrichedExperts;
       const projectApplications = enrichedExperts.filter(isReviewableApplication);
 
@@ -4330,7 +4327,17 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
-      const assignment = await storage.createProjectExpert(result.data);
+      const sourceType = result.data.sourceType || "internal_db";
+      if (!PROJECT_EXPERT_SOURCE_TYPES.has(sourceType)) {
+        return res.status(400).json({ error: "Invalid project expert sourceType" });
+      }
+
+      const assignmentData = {
+        ...result.data,
+        sourceType,
+        sourcedByRaId: sourceType === "internal_db" ? null : result.data.sourcedByRaId,
+      };
+      const assignment = await storage.createProjectExpert(assignmentData);
       res.status(201).json(assignment);
     } catch (error) {
       res.status(500).json({ error: "Failed to assign expert to project" });
