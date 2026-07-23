@@ -31,6 +31,7 @@ const BRAND_NAME = "Mirae Connext";
 const DEFAULT_PROJECT_TITLE = "Expert Consultation Opportunity";
 const WEBSITE_URL = "http://www.miraeconnext.com";
 const WEBSITE_LABEL = "www.miraeconnext.com";
+const ADVISOR_ACTION_INSTRUCTION_TEXT = "Review the project details using the button below.";
 export const ADVISOR_EMAIL_TEMPLATE_TYPES: AdvisorManagedTemplateType[] = [
   "advisor_initial_invite",
   "advisor_follow_up",
@@ -433,6 +434,58 @@ function renderTextLineHtml(line: string) {
   return `<div style="margin:0 0 12px 0;">${linked}</div>`;
 }
 
+function normalizeAdvisorActionInstructionLine(line: string) {
+  return String(line || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[.!?]+$/g, ".")
+    .toLowerCase();
+}
+
+const ADVISOR_ACTION_INSTRUCTION_TEXT_BY_LINE = new Map(
+  [
+    ["Please click the button below to review the project details.", ADVISOR_ACTION_INSTRUCTION_TEXT],
+    [ADVISOR_ACTION_INSTRUCTION_TEXT, ADVISOR_ACTION_INSTRUCTION_TEXT],
+    ["Revise os detalhes do projeto usando o botão abaixo.", "Revise os detalhes do projeto usando o botão abaixo."],
+    ["Revise os detalhes do projeto usando o bot?o abaixo.", "Revise os detalhes do projeto usando o botão abaixo."],
+    [
+      "Revise los detalles del proyecto utilizando el botón que aparece a continuación.",
+      "Revise los detalles del proyecto utilizando el botón que aparece a continuación.",
+    ],
+    [
+      "Revise los detalles del proyecto utilizando el bot?n que aparece a continuaci?n.",
+      "Revise los detalles del proyecto utilizando el botón que aparece a continuación.",
+    ],
+  ].map(([line, instruction]) => [normalizeAdvisorActionInstructionLine(line), instruction])
+);
+
+function getAdvisorActionInstructionText(line: string) {
+  return ADVISOR_ACTION_INSTRUCTION_TEXT_BY_LINE.get(normalizeAdvisorActionInstructionLine(line)) || null;
+}
+
+function extractAdvisorActionInstruction(body: string) {
+  let instructionText: string | null = null;
+  let didExtractInstruction = false;
+  const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
+  const bodyWithoutInstruction = lines
+    .filter((line) => {
+      const candidate = getAdvisorActionInstructionText(line);
+      if (!candidate) return true;
+      if (didExtractInstruction) return true;
+      instructionText = candidate;
+      didExtractInstruction = true;
+      return false;
+    })
+    .join("\n");
+
+  return {
+    body: bodyWithoutInstruction,
+    instructionText: instructionText || ADVISOR_ACTION_INSTRUCTION_TEXT,
+  };
+}
+
 function renderBodyHtml(body: string, advisorActionsHtml = "") {
   const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
   let didRenderAdvisorActions = false;
@@ -460,24 +513,41 @@ function renderBodyHtml(body: string, advisorActionsHtml = "") {
     .join("");
 }
 
-function renderAdvisorCtaHtml(options: AdvisorEmailRenderOptions) {
+function renderAdvisorCtaHtml(options: AdvisorEmailRenderOptions, instructionText = ADVISOR_ACTION_INSTRUCTION_TEXT) {
   const reviewLink = String(options.reviewLink || "").trim();
   const declineLink = String(options.declineLink || "").trim();
   if (!reviewLink && !declineLink) return "";
 
+  const instructionHtml = reviewLink
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;width:100%;max-width:640px;margin:0 0 16px 0;">
+        <tr>
+          <td style="background-color:#F8FAFC;border-left:4px solid #111827;padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:22px;color:#111827;font-weight:700;">
+            ${escapeHtml(instructionText)}
+          </td>
+        </tr>
+      </table>`
+    : "";
   const reviewHtml = reviewLink
-    ? `<div style="margin:22px 0 12px 0;">
-        <a href="${escapeHtml(reviewLink)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:20px;font-weight:700;padding:12px 20px;border-radius:6px;">Review Project</a>
-      </div>`
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 12px 0;">
+        <tr>
+          <td style="background:#111827;border-radius:6px;">
+            <a href="${escapeHtml(reviewLink)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:20px;font-weight:700;padding:12px 20px;border-radius:6px;">Review Project</a>
+          </td>
+        </tr>
+      </table>`
     : "";
   const declineHtml = declineLink
-    ? `<div style="margin:6px 0 22px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#4b5563;">
-        <span>Not interested in this opportunity?</span>
-        <a href="${escapeHtml(declineLink)}" style="color:#374151;text-decoration:underline;font-weight:600;">Decline Now</a>
-      </div>`
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:6px 0 22px 0;">
+        <tr>
+          <td style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#4b5563;">
+            <span>Not interested in this opportunity?</span>
+            <a href="${escapeHtml(declineLink)}" style="color:#374151;text-decoration:underline;font-weight:600;">Decline Now</a>
+          </td>
+        </tr>
+      </table>`
     : "";
 
-  return `${reviewHtml}${declineHtml}`;
+  return `${instructionHtml}${reviewHtml}${declineHtml}`;
 }
 
 function renderFooterHtml(options: AdvisorEmailRenderOptions) {
@@ -534,8 +604,9 @@ function renderFooterHtml(options: AdvisorEmailRenderOptions) {
 // Keep the CRM-controlled advisor email footer/signature centralized here.
 // If the Zoho Mail signature changes, update this helper rather than each template.
 export function renderAdvisorEmailHtml(options: AdvisorEmailRenderOptions) {
-  const ctaHtml = renderAdvisorCtaHtml(options);
-  const hasAdvisorActionsPlaceholder = String(options.body || "").includes(ADVISOR_ACTIONS_HTML_MARKER);
+  const { body, instructionText } = extractAdvisorActionInstruction(options.body);
+  const ctaHtml = renderAdvisorCtaHtml(options, instructionText);
+  const hasAdvisorActionsPlaceholder = body.includes(ADVISOR_ACTIONS_HTML_MARKER);
 
   return `<!doctype html>
 <html>
@@ -545,7 +616,7 @@ export function renderAdvisorEmailHtml(options: AdvisorEmailRenderOptions) {
   </head>
   <body style="margin:0;padding:0;background:#ffffff;">
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:22px;color:#111827;max-width:640px;padding:24px;">
-      ${renderBodyHtml(options.body, ctaHtml)}
+      ${renderBodyHtml(body, ctaHtml)}
       ${hasAdvisorActionsPlaceholder ? "" : ctaHtml}
       ${renderFooterHtml(options)}
     </div>
