@@ -221,6 +221,12 @@ export const experts = pgTable("experts", {
   sourcedAt: timestamp("sourced_at"),
   termsAccepted: boolean("terms_accepted").default(false),
   lgpdAccepted: boolean("lgpd_accepted").default(false),
+  termsAcceptedAt: timestamp("terms_accepted_at"),
+  privacyAcknowledgedAt: timestamp("privacy_acknowledged_at"),
+  termsVersion: text("terms_version"),
+  privacyPolicyVersion: text("privacy_policy_version"),
+  consentLanguage: text("consent_language"),
+  onboardingConsentSource: text("onboarding_consent_source"),
   billingInfo: text("billing_info"),
   languages: text("languages").array(), // Languages spoken by expert (e.g., ["en", "pt", "es"])
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -271,12 +277,15 @@ export const projectExperts = pgTable("project_experts", {
   expectedHourlyRateUsd: decimal("expected_hourly_rate_usd", { precision: 10, scale: 2 }),
   termsAccepted: boolean("terms_accepted").default(false),
   lgpdAccepted: boolean("lgpd_accepted").default(false),
+  termsAcceptedAt: timestamp("terms_accepted_at"),
+  privacyAcknowledgedAt: timestamp("privacy_acknowledged_at"),
   acceptedAt: timestamp("accepted_at"),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   consentLanguage: text("consent_language"),
   termsVersion: text("terms_version"),
   privacyPolicyVersion: text("privacy_policy_version"),
+  onboardingConsentSource: text("onboarding_consent_source"),
   conflictCheck: text("conflict_check"),
   applicationStatus: text("application_status").notNull().default("pending_review"),
   notes: text("notes"),
@@ -1098,6 +1107,8 @@ export const insertExpertSchema = createInsertSchema(experts).omit({
   createdAt: true,
 }).extend({
   sourcedAt: coerceDate.optional(),
+  termsAcceptedAt: coerceDate.optional(),
+  privacyAcknowledgedAt: coerceDate.optional(),
 });
 
 export const insertProjectAngleSchema = createInsertSchema(projectAngles).omit({
@@ -1118,6 +1129,8 @@ export const insertProjectExpertSchema = createInsertSchema(projectExperts).omit
   invitedAt: coerceDate.optional(),
   openedAt: coerceDate.optional(),
   respondedAt: coerceDate.optional(),
+  termsAcceptedAt: coerceDate.optional(),
+  privacyAcknowledgedAt: coerceDate.optional(),
   lastActivityAt: coerceDate.optional(),
 });
 

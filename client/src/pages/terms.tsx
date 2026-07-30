@@ -51,11 +51,25 @@ export default function TermsPage() {
         <Card>
           <CardHeader>
             <CardTitle>{content.title}</CardTitle>
-            <CardDescription>Version: {content.effectiveDate}</CardDescription>
+            <CardDescription>
+              Effective Date: {content.effectiveDate} | Version: {content.version}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm leading-6 text-muted-foreground">
-            {content.body.map((paragraph) => (
-              <p key={paragraph}>{paragraph}</p>
+          <CardContent className="space-y-6 text-sm leading-6 text-muted-foreground">
+            {content.sections.map((section) => (
+              <section key={section.heading} className="space-y-3">
+                <h2 className="text-base font-semibold text-foreground">{section.heading}</h2>
+                {section.paragraphs.map((paragraph) => (
+                  <p key={paragraph}>{paragraph}</p>
+                ))}
+                {section.bullets && section.bullets.length > 0 && (
+                  <ul className="list-disc space-y-2 pl-5">
+                    {section.bullets.map((bullet) => (
+                      <li key={bullet}>{bullet}</li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             ))}
           </CardContent>
         </Card>

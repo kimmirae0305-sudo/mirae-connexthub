@@ -63,6 +63,11 @@ import {
   type AdvisorManagedTemplateType,
   type AdvisorTemplateVariableContext,
 } from "./advisorEmailTemplate";
+import {
+  EXPERT_TERMS_VERSION,
+  PRIVACY_POLICY_VERSION,
+  isQuickInviteSupportedLanguage,
+} from "@shared/quickInvitePolicy";
 import PDFDocument from "pdfkit";
 
 const generateRecruitmentToken = () => `inv_${crypto.randomBytes(24).toString("hex")}`;
@@ -3344,8 +3349,24 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Project not found" });
       }
 
-      if (!termsAccepted || !lgpdAccepted) {
-        return res.status(400).json({ error: "Terms and LGPD consent are required" });
+      if (termsAccepted !== true) {
+        return res.status(400).json({ error: "Terms acceptance is required" });
+      }
+
+      if (lgpdAccepted !== true) {
+        return res.status(400).json({ error: "Privacy/LGPD acknowledgement is required" });
+      }
+
+      if (termsVersion !== EXPERT_TERMS_VERSION) {
+        return res.status(400).json({ error: "Current Terms version is required" });
+      }
+
+      if (privacyPolicyVersion !== PRIVACY_POLICY_VERSION) {
+        return res.status(400).json({ error: "Current Privacy Policy version is required" });
+      }
+
+      if (!isQuickInviteSupportedLanguage(consentLanguage)) {
+        return res.status(400).json({ error: "Unsupported consent language" });
       }
 
       if (
@@ -3403,6 +3424,7 @@ export async function registerRoutes(
 
       const normalizedEmail = String(email).trim().toLowerCase();
       const acceptedAt = new Date();
+      const consentAcceptedAt = acceptedAt;
       const numericRate = Number(expectedHourlyRateUsd);
       const sourceOwner = link.raId
         ? await storage.getUser(link.raId)
@@ -3419,114 +3441,147 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Expected hourly rate must be a positive USD amount" });
       }
 
-      // Check if expert with email already exists
-      let expert = await storage.getExpertByEmail(normalizedEmail);
-      
-      if (!expert) {
-        // Create new expert with recruitment tracking
-        expert = await storage.createExpert({
-          name: String(fullName).trim(),
-          email: normalizedEmail,
-          phone: phoneWhatsapp || null,
-          whatsapp: phoneWhatsapp || null,
-          country: country || null,
-          city: city || null,
-          jobTitle: currentTitle || null,
-          company: currentCompany || null,
-          expertise: safeExpertise,
-          sectorExpertise: safeSectorExpertise,
-          regionalExpertise: safeRegionalExpertise,
-          industry: safeExpertise,
-          yearsOfExperience: safeYearsOfExperience,
-          hourlyRate: String(numericRate),
-          workHistory: normalizedWorkHistory,
-          biography: safeProfessionalBio,
-          bio: safeProfessionalBio,
-          status: "available",
-          sourcedByRaId: sourceOwnerId || undefined,
-          sourcedAt: sourceOwnerId ? new Date() : undefined,
-          termsAccepted: true,
-          lgpdAccepted: true,
-        });
-      } else {
-        await storage.updateExpert(expert.id, {
-          name: String(fullName).trim(),
-          phone: phoneWhatsapp || expert.phone,
-          whatsapp: phoneWhatsapp || expert.whatsapp,
-          country: country || expert.country,
-          city: city || expert.city,
-          jobTitle: currentTitle || expert.jobTitle,
-          company: currentCompany || expert.company,
-          sectorExpertise: safeSectorExpertise || (expert as any).sectorExpertise || "",
-          regionalExpertise: safeRegionalExpertise || (expert as any).regionalExpertise || "",
-          industry: safeSectorExpertise || expert.industry || project.industry || "Professional",
-          expertise: safeSectorExpertise || expert.expertise || project.industry || "Professional",
-          yearsOfExperience: safeYearsOfExperience,
-          hourlyRate: String(numericRate),
-          workHistory: normalizedWorkHistory,
-          biography: safeProfessionalBio || expert.biography || "",
-          bio: safeProfessionalBio || expert.bio || "",
-          termsAccepted: true,
-          lgpdAccepted: true,
-          ...(sourceOwnerId && !expert.sourcedByRaId
-            ? { sourcedByRaId: sourceOwnerId, sourcedAt: new Date() }
-            : {}),
-        });
-        expert = await storage.getExpert(expert.id) || expert;
-      }
-
-      const existingProjectExperts = await db
-        .select()
-        .from(projectExperts)
-        .where(and(eq(projectExperts.projectId, link.projectId), eq(projectExperts.expertId, expert.id)))
-        .limit(1);
-
-      const projectExpertData = {
-        projectId: link.projectId,
-        expertId: expert.id,
-        angleIds: link.angleIds || undefined,
-        status: "pending_review",
-        invitationStatus: "submitted",
-        pipelineStatus: "interested",
-        sourceType: "ra_external",
-        sourcedByRaId: sourceOwnerId || undefined,
-        invitedAt: link.createdAt || new Date(),
-        respondedAt: new Date(),
-        invitationToken: token,
-        vqAnswers: formattedAnswers,
-        availabilityNote: availability || null,
-        expectedHourlyRateUsd: String(numericRate),
+      const existingExpert = await storage.getExpertByEmail(normalizedEmail);
+      const consentAuditData = {
         termsAccepted: true,
         lgpdAccepted: true,
-        acceptedAt,
-        ipAddress: req.ip || req.socket.remoteAddress || null,
-        userAgent: req.get("user-agent") || null,
-        consentLanguage: typeof consentLanguage === "string" ? consentLanguage : "en",
-        termsVersion: typeof termsVersion === "string" ? termsVersion : "2026-06-01",
-        privacyPolicyVersion: typeof privacyPolicyVersion === "string" ? privacyPolicyVersion : "2026-06-01",
-        conflictCheck: conflictCheck || null,
-        applicationStatus: "submitted",
-        lastActivityAt: new Date(),
-      } as any;
+        termsAcceptedAt: consentAcceptedAt,
+        privacyAcknowledgedAt: consentAcceptedAt,
+        termsVersion: EXPERT_TERMS_VERSION,
+        privacyPolicyVersion: PRIVACY_POLICY_VERSION,
+        consentLanguage,
+        onboardingConsentSource: "quick_invite_onboarding",
+      };
 
-      let projectExpert = existingProjectExperts[0];
-      if (projectExpert) {
-        projectExpert = await storage.updateProjectExpert(projectExpert.id, projectExpertData) || projectExpert;
-      } else {
-        projectExpert = await storage.createProjectExpert(projectExpertData);
-      }
+      const { expert, projectExpert } = await db.transaction(async (tx) => {
+        let savedExpert;
 
-      await db.update(expertInvitationLinks)
-        .set({ status: "onboarded", expertId: expert.id, usedAt: new Date(), updatedAt: new Date() })
-        .where(eq(expertInvitationLinks.token, token));
+        if (!existingExpert) {
+          [savedExpert] = await tx.insert(experts).values({
+            name: String(fullName).trim(),
+            email: normalizedEmail,
+            phone: phoneWhatsapp || null,
+            whatsapp: phoneWhatsapp || null,
+            country: country || null,
+            city: city || null,
+            jobTitle: currentTitle || null,
+            company: currentCompany || null,
+            expertise: safeExpertise,
+            sectorExpertise: safeSectorExpertise,
+            regionalExpertise: safeRegionalExpertise,
+            industry: safeExpertise,
+            yearsOfExperience: safeYearsOfExperience,
+            hourlyRate: String(numericRate),
+            workHistory: normalizedWorkHistory,
+            biography: safeProfessionalBio,
+            bio: safeProfessionalBio,
+            status: "available",
+            sourcedByRaId: sourceOwnerId || undefined,
+            sourcedAt: sourceOwnerId ? acceptedAt : undefined,
+            ...consentAuditData,
+          } as any).returning();
+        } else {
+          [savedExpert] = await tx
+            .update(experts)
+            .set({
+              name: String(fullName).trim(),
+              phone: phoneWhatsapp || existingExpert.phone,
+              whatsapp: phoneWhatsapp || existingExpert.whatsapp,
+              country: country || existingExpert.country,
+              city: city || existingExpert.city,
+              jobTitle: currentTitle || existingExpert.jobTitle,
+              company: currentCompany || existingExpert.company,
+              sectorExpertise: safeSectorExpertise || (existingExpert as any).sectorExpertise || "",
+              regionalExpertise: safeRegionalExpertise || (existingExpert as any).regionalExpertise || "",
+              industry: safeSectorExpertise || existingExpert.industry || project.industry || "Professional",
+              expertise: safeSectorExpertise || existingExpert.expertise || project.industry || "Professional",
+              yearsOfExperience: safeYearsOfExperience,
+              hourlyRate: String(numericRate),
+              workHistory: normalizedWorkHistory,
+              biography: safeProfessionalBio || existingExpert.biography || "",
+              bio: safeProfessionalBio || existingExpert.bio || "",
+              ...consentAuditData,
+              ...(sourceOwnerId && !existingExpert.sourcedByRaId
+                ? { sourcedByRaId: sourceOwnerId, sourcedAt: acceptedAt }
+                : {}),
+            } as any)
+            .where(eq(experts.id, existingExpert.id))
+            .returning();
+        }
 
-      // Log activity
-      await storage.createProjectActivity({
-        projectId: link.projectId,
-        expertId: expert.id,
-        activityType: "expert_application_submitted",
-        description: `Expert ${expert.name} submitted onboarding application`,
+        if (!savedExpert) {
+          throw new Error("Failed to save expert onboarding profile");
+        }
+
+        const [existingProjectExpert] = await tx
+          .select()
+          .from(projectExperts)
+          .where(and(eq(projectExperts.projectId, link.projectId!), eq(projectExperts.expertId, savedExpert.id)))
+          .limit(1);
+
+        const projectExpertData = {
+          projectId: link.projectId,
+          expertId: savedExpert.id,
+          angleIds: link.angleIds || undefined,
+          status: "pending_review",
+          invitationStatus: "submitted",
+          pipelineStatus: "interested",
+          sourceType: "ra_external",
+          sourcedByRaId: sourceOwnerId || undefined,
+          invitedAt: link.createdAt || acceptedAt,
+          respondedAt: acceptedAt,
+          invitationToken: token,
+          vqAnswers: formattedAnswers,
+          availabilityNote: availability || null,
+          expectedHourlyRateUsd: String(numericRate),
+          termsAccepted: true,
+          lgpdAccepted: true,
+          termsAcceptedAt: consentAcceptedAt,
+          privacyAcknowledgedAt: consentAcceptedAt,
+          acceptedAt,
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.get("user-agent") || null,
+          consentLanguage,
+          termsVersion: EXPERT_TERMS_VERSION,
+          privacyPolicyVersion: PRIVACY_POLICY_VERSION,
+          onboardingConsentSource: "quick_invite_onboarding",
+          conflictCheck: conflictCheck || null,
+          applicationStatus: "submitted",
+          lastActivityAt: acceptedAt,
+        } as any;
+
+        const [savedProjectExpert] = existingProjectExpert
+          ? await tx
+              .update(projectExperts)
+              .set(projectExpertData)
+              .where(eq(projectExperts.id, existingProjectExpert.id))
+              .returning()
+          : await tx.insert(projectExperts).values(projectExpertData).returning();
+
+        if (!savedProjectExpert) {
+          throw new Error("Failed to save project expert onboarding profile");
+        }
+
+        await tx.update(expertInvitationLinks)
+          .set({ status: "onboarded", expertId: savedExpert.id, usedAt: acceptedAt, updatedAt: acceptedAt })
+          .where(eq(expertInvitationLinks.token, token));
+
+        return { expert: savedExpert, projectExpert: savedProjectExpert };
       });
+
+      try {
+        await storage.createProjectActivity({
+          projectId: link.projectId,
+          expertId: expert.id,
+          activityType: "expert_application_submitted",
+          description: `Expert ${expert.name} submitted onboarding application`,
+        });
+      } catch (activityError) {
+        console.error(
+          "[quick-invite] Failed to create onboarding activity log",
+          activityError instanceof Error ? activityError.message : "Unknown error"
+        );
+      }
 
       res.json({
         success: true,

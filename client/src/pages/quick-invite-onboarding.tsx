@@ -21,11 +21,11 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { resolveApiUrl } from "@/lib/apiUrl";
 import {
+  EXPERT_TERMS_VERSION,
   normalizeQuickInviteLanguage,
   PRIVACY_POLICY_VERSION,
   quickInviteLanguages,
   quickInviteTranslations,
-  TERMS_VERSION,
   type QuickInviteLanguage,
 } from "@/lib/translations/quick-invite-onboarding";
 import logoPath from "@assets/Logo_1764384177823.png";
@@ -419,7 +419,7 @@ export default function QuickInviteOnboarding() {
           availability,
           conflictCheck,
           consentLanguage: language,
-          termsVersion: TERMS_VERSION,
+          termsVersion: EXPERT_TERMS_VERSION,
           privacyPolicyVersion: PRIVACY_POLICY_VERSION,
           expectedHourlyRateUsd: Number(formData.expectedHourlyRateUsd),
           yearsOfExperience: 0,
