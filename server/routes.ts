@@ -96,6 +96,7 @@ const getInviteBaseUrl = (req: AuthRequest) => {
   return trimTrailingSlashes(getRequestBaseUrl(req));
 };
 const buildPublicRecruitmentUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/r/${token}`;
+const buildPublicExpertRegistrationUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/register/${token}`;
 const buildPublicAdvisorProjectReviewUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/advisor-project-review/${token}`;
 const buildPublicAdvisorProjectDeclineUrl = (token: string, req: AuthRequest) => {
@@ -3192,7 +3193,8 @@ export async function registerRoutes(
           experiences: experiences || [],
         },
         languages: canConsultInEnglish === "yes" ? ["English"] : [],
-        status: "available" as const,
+        status: "invited" as const,
+        source: "Project" as const,
         sourcedByRaId,
         sourcedAt: sourcedByRaId ? new Date() : undefined,
         pastEmployers: experiences?.map((e: any) => e.company) || [],
@@ -3960,6 +3962,56 @@ export async function registerRoutes(
       res.json(assignments);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch expert assignments" });
+    }
+  });
+
+  app.post("/api/experts/:id/onboarding-link", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid expert id" });
+      }
+
+      const expert = await storage.getExpert(id);
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+
+      const user = req.user;
+      const token = generateRecruitmentToken();
+      const link = await storage.createExpertInvitationLink({
+        token,
+        projectId: null,
+        expertId: expert.id,
+        inviteType: "expert_onboarding",
+        candidateName: expert.name,
+        candidateEmail: expert.email,
+        status: "pending",
+        recruitedBy: user?.email || expert.recruitedBy || "system",
+        raId: user && canOwnSourcingAttribution(user.role) ? user.id : null,
+        isActive: true,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      });
+
+      const updates: Record<string, unknown> = {};
+      if (String(expert.status || "").toLowerCase() === "lead") {
+        updates.status = "invited";
+      }
+      if (!expert.sourcedByRaId && user && canOwnSourcingAttribution(user.role)) {
+        updates.sourcedByRaId = user.id;
+        updates.sourcedAt = new Date();
+      }
+      if (Object.keys(updates).length > 0) {
+        await storage.updateExpert(expert.id, updates as any);
+      }
+
+      res.status(201).json({
+        link,
+        inviteUrl: buildPublicExpertRegistrationUrl(token, req),
+      });
+    } catch (error) {
+      console.error("Error generating expert onboarding link:", error);
+      res.status(500).json({ error: "Failed to generate expert onboarding link" });
     }
   });
 
@@ -6026,9 +6078,16 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invitation link expired" });
       }
 
+      const existingLinkedExpert = link.expertId ? await storage.getExpert(link.expertId) : undefined;
+      const existingEmailExpert = req.body?.email ? await storage.getExpertByEmail(String(req.body.email)) : undefined;
+      if (!existingLinkedExpert && existingEmailExpert) {
+        return res.status(400).json({ error: "An expert with this email already exists" });
+      }
+
       const expertData = {
         ...req.body,
         recruitedBy: link.recruitedBy,
+        status: "registered",
       };
 
       const result = insertExpertSchema.safeParse(expertData);
@@ -6036,16 +6095,29 @@ export async function registerRoutes(
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
 
-      const expert = await storage.createExpert(result.data);
+      const expert = existingLinkedExpert
+        ? await storage.updateExpert(existingLinkedExpert.id, {
+            ...result.data,
+            email: existingLinkedExpert.email,
+            recruitedBy: existingLinkedExpert.recruitedBy || link.recruitedBy,
+          })
+        : await storage.createExpert(result.data);
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
       await storage.markInvitationLinkUsed(token, expert.id, "onboarded");
 
       // If link is for a specific project, auto-assign expert
       if (link.projectId) {
-        await storage.createProjectExpert({
-          projectId: link.projectId,
-          expertId: expert.id,
-          status: "assigned",
-        });
+        const existingAssignments = await storage.getProjectExpertsByExpert(expert.id);
+        const alreadyAssigned = existingAssignments.some((assignment) => assignment.projectId === link.projectId);
+        if (!alreadyAssigned) {
+          await storage.createProjectExpert({
+            projectId: link.projectId,
+            expertId: expert.id,
+            status: "assigned",
+          });
+        }
       }
 
       res.status(201).json(expert);
@@ -6217,7 +6289,8 @@ export async function registerRoutes(
         yearsOfExperience,
         hourlyRate: hourlyRate,
         bio: `${biography}\n\nWork History:\n${workHistory}\n\nExperience:\n${experienceText}`,
-        status: "available" as const,
+        status: "registered" as const,
+        source: "Project" as const,
         recruitedBy: link.recruitedBy,
         sourcedByRaId,
         sourcedAt: new Date(),
@@ -8358,6 +8431,7 @@ Please do not reply to this email with sensitive payment information. For securi
           bio: experts.bio,
           workHistory: experts.workHistory,
           status: experts.status,
+          source: experts.source,
           createdAt: experts.createdAt,
           sourcedByRaId: experts.sourcedByRaId,
           sourcedAt: experts.sourcedAt,

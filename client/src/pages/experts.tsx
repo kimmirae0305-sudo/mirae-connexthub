@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link } from "wouter";
-import { Plus, Pencil, Trash2, Search, Users, DollarSign, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Link2, Plus, Pencil, Trash2, Search, Users, DollarSign, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,7 @@ import type { Expert, InsertExpert } from "@shared/schema";
 import { format } from "date-fns";
 
 interface ExpertWithRecruiter extends Expert {
+  source?: string;
   recruiterName: string | null;
   recruiterEmail: string | null;
   recruitedAt?: string | Date | null;
@@ -125,7 +126,8 @@ const expertFormSchema = z.object({
   yearsOfExperience: z.coerce.number().min(0, "Must be 0 or greater"),
   hourlyRate: z.string().min(1, "Hourly rate is required"),
   bio: z.string().optional(),
-  status: z.string().default("available"),
+  status: z.string().default("lead"),
+  source: z.string().default("Inbound"),
   company: z.string().optional(),
   jobTitle: z.string().optional(),
   linkedinUrl: z.string().optional(),
@@ -165,12 +167,16 @@ const industries = [
   "Other",
 ];
 
-const statuses = ["available", "busy", "inactive"];
+const statuses = ["lead", "invited", "registered", "verified", "active", "available", "busy", "inactive"];
+const sourceOptions = ["Inbound", "Referral", "LinkedIn", "Internal Sourcing", "Project"];
+
+const formatStatusLabel = (status: string) =>
+  status.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 
 export default function Experts() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string[]>(["available", "busy", "inactive"]);
+  const [statusFilter, setStatusFilter] = useState<string[]>(statuses);
   const [rateRange, setRateRange] = useState<[number, number]>([0, 2000]);
   const [page, setPage] = useState(1);
   const pageSize = 25;
@@ -235,7 +241,8 @@ export default function Experts() {
       yearsOfExperience: 0,
       hourlyRate: "",
       bio: "",
-      status: "available",
+      status: "lead",
+      source: "Inbound",
       company: "",
       jobTitle: "",
       linkedinUrl: "",
@@ -253,6 +260,25 @@ export default function Experts() {
     },
     onError: () => {
       toast({ title: "Failed to register expert", variant: "destructive" });
+    },
+  });
+
+  const onboardingLinkMutation = useMutation({
+    mutationFn: async (expertId: number) => {
+      const response = await apiRequest("POST", `/api/experts/${expertId}/onboarding-link`, {});
+      return (await response.json()) as { inviteUrl: string };
+    },
+    onSuccess: async (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/experts-with-recruiter"] });
+      try {
+        await navigator.clipboard.writeText(data.inviteUrl);
+        toast({ title: "Onboarding link copied", description: data.inviteUrl });
+      } catch {
+        toast({ title: "Onboarding link generated", description: data.inviteUrl });
+      }
+    },
+    onError: () => {
+      toast({ title: "Failed to generate onboarding link", variant: "destructive" });
     },
   });
 
@@ -294,7 +320,7 @@ export default function Experts() {
 
   const resetFilters = () => {
     setSearchQuery("");
-    setStatusFilter(["available", "busy", "inactive"]);
+    setStatusFilter(statuses);
     setRateRange([0, 2000]);
   };
 
@@ -314,7 +340,8 @@ export default function Experts() {
         yearsOfExperience: expert.yearsOfExperience ?? 0,
         hourlyRate: String(expert.hourlyRate ?? ""),
         bio: expert.bio ?? "",
-        status: expert.status ?? "available",
+        status: expert.status ?? "lead",
+        source: (expert as Expert & { source?: string }).source ?? "Inbound",
         company: expert.company ?? "",
         jobTitle: expert.jobTitle ?? "",
         linkedinUrl: expert.linkedinUrl ?? "",
@@ -336,6 +363,7 @@ export default function Experts() {
       company: data.company || null,
       jobTitle: data.jobTitle || null,
       linkedinUrl: data.linkedinUrl || null,
+      source: data.source,
       workHistory: workHistory,
     };
 
@@ -375,7 +403,7 @@ export default function Experts() {
 
           <div className="flex flex-col gap-4 rounded-lg border border-border bg-card/50 p-4 sm:gap-6">
             <div>
-              <h3 className="mb-3 text-sm font-medium text-foreground">Availability Status</h3>
+              <h3 className="mb-3 text-sm font-medium text-foreground">Expert Status</h3>
               <div className="flex flex-wrap gap-2">
                 {statuses.map((status) => (
                   <Button
@@ -391,7 +419,7 @@ export default function Experts() {
                     }}
                     data-testid={`button-filter-status-${status}`}
                   >
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                    {formatStatusLabel(status)}
                   </Button>
                 ))}
               </div>
@@ -478,7 +506,8 @@ export default function Experts() {
                     <TableHead className="min-w-[220px] text-xs font-semibold uppercase">Expert Name</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Expertise / Industry</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Hourly Rate</TableHead>
-                    <TableHead className="text-center text-xs font-semibold uppercase">Availability Status</TableHead>
+                    <TableHead className="text-center text-xs font-semibold uppercase">Expert Status</TableHead>
+                    <TableHead className="text-xs font-semibold uppercase">Source</TableHead>
                     <TableHead className="text-xs font-semibold uppercase">Recruited by</TableHead>
                     <TableHead className="text-right text-xs font-semibold uppercase">Actions</TableHead>
                   </TableRow>
@@ -509,6 +538,7 @@ export default function Experts() {
                       <TableCell className="text-center">
                         <StatusBadge status={expert.status} type="expert" />
                       </TableCell>
+                      <TableCell>{expert.source || "-"}</TableCell>
                       <TableCell>
                         <div className="text-sm">{expert.recruiterName || "-"}</div>
                         {(expert.recruitedAt || expert.sourcedAt) && (
@@ -519,6 +549,16 @@ export default function Experts() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => onboardingLinkMutation.mutate(expert.id)}
+                            disabled={onboardingLinkMutation.isPending}
+                            title="Generate onboarding link"
+                            data-testid={`button-generate-onboarding-link-${expert.id}`}
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -662,7 +702,7 @@ export default function Experts() {
                   name="status"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Status</FormLabel>
+                      <FormLabel>Expert Status</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-expert-status">
@@ -672,7 +712,7 @@ export default function Experts() {
                         <SelectContent>
                           {statuses.map((status) => (
                             <SelectItem key={status} value={status}>
-                              {status.charAt(0).toUpperCase() + status.slice(1)}
+                              {formatStatusLabel(status)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -682,6 +722,31 @@ export default function Experts() {
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="source"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Source</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-expert-source">
+                          <SelectValue placeholder="Select source" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {sourceOptions.map((source) => (
+                          <SelectItem key={source} value={source}>
+                            {source}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField

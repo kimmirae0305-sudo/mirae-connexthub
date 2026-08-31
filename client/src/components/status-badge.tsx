@@ -20,6 +20,11 @@ const projectStatusStyles: Record<string, string> = {
 };
 
 const expertStatusStyles: Record<string, string> = {
+  lead: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400",
+  invited: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+  registered: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400",
+  verified: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+  active: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
   available: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
   busy: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
   inactive: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",

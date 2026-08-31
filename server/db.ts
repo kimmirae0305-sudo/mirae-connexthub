@@ -11,6 +11,13 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
+if (!/^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL)) {
+  throw new Error(
+    "DATABASE_URL must point to a PostgreSQL/Neon database for development and production. " +
+      "Create a dedicated development database and set DATABASE_URL=postgresql://..."
+  );
+}
+
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 export const db = drizzle({ client: pool, schema });
 
@@ -230,7 +237,8 @@ const compatibilityStatements = [
     bio text,
     work_history jsonb,
     biography text,
-    status text NOT NULL DEFAULT 'available',
+    status text NOT NULL DEFAULT 'lead',
+    source text NOT NULL DEFAULT 'Inbound',
     available_now boolean DEFAULT true,
     next_available_date timestamp,
     total_hours_worked numeric(10,2) DEFAULT 0,
@@ -284,6 +292,7 @@ const compatibilityStatements = [
     onboarding_consent_source text,
     assigned_at timestamp DEFAULT now()
   )`,
+  `ALTER TABLE experts ADD COLUMN IF NOT EXISTS source text DEFAULT 'Inbound'`,
   `CREATE TABLE IF NOT EXISTS call_records (
     id serial PRIMARY KEY,
     project_id integer NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
