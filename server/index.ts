@@ -61,8 +61,11 @@ const publicInviteHosts = new Set(["invite.miraeconnext.com", "www.invite.miraec
 function isAllowedPublicInvitePath(pathname: string) {
   return (
     /^\/r\/[^/]+\/?$/.test(pathname) ||
+    /^\/register\/[^/]+\/?$/.test(pathname) ||
     /^\/public\/advisor-project-review\/[^/]+\/?$/.test(pathname) ||
     pathname.startsWith("/api/quick-invite/") ||
+    pathname.startsWith("/api/invitation-links/") ||
+    pathname.startsWith("/api/register-expert/") ||
     pathname.startsWith("/api/public/advisor-project-review/") ||
     pathname.startsWith("/assets/") ||
     pathname.startsWith("/attached_assets/") ||

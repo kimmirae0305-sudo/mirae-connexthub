@@ -212,7 +212,8 @@ export const experts = pgTable("experts", {
     isCurrent?: boolean;
   }>>(), // Work history entries
   biography: text("biography"), // Detailed biography for RA review/editing
-  status: text("status").notNull().default("available"), // available, busy, inactive
+  status: text("status").notNull().default("lead"), // lead, invited, registered, verified, active; legacy: available, busy, inactive
+  source: text("source").notNull().default("Inbound"), // Inbound, Referral, LinkedIn, Internal Sourcing, Project
   availableNow: boolean("available_now").default(true), // Whether expert is currently available
   nextAvailableDate: timestamp("next_available_date"), // When expert becomes available next
   totalHoursWorked: decimal("total_hours_worked", { precision: 10, scale: 2 }).default("0"), // Total hours in past projects

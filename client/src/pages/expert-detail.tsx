@@ -10,6 +10,7 @@ import {
   Calendar,
   DollarSign,
   FileText,
+  Link2,
   Linkedin,
   Mail,
   Pencil,
@@ -127,6 +128,7 @@ interface ExpertEditForm {
   yearsOfExperience: string;
   hourlyRate: string;
   status: string;
+  source: string;
   availableNow: boolean;
   nextAvailableDate: string;
   bio: string;
@@ -176,6 +178,11 @@ const emptyNewCompanyForm = (): NewCompanyForm => ({
   notes: "",
   status: "unverified",
 });
+
+const expertStatusOptions = ["lead", "invited", "registered", "verified", "active", "available", "busy", "inactive"];
+const expertSourceOptions = ["Inbound", "Referral", "LinkedIn", "Internal Sourcing", "Project"];
+const formatOptionLabel = (value: string) =>
+  value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 
 function formatDate(value?: string | Date | null) {
   if (!value) return "-";
@@ -238,7 +245,8 @@ function expertToForm(expert: Expert): ExpertEditForm {
     timezone: expert.timezone || "",
     yearsOfExperience: String(expert.yearsOfExperience ?? 0),
     hourlyRate: String(expert.hourlyRate ?? ""),
-    status: expert.status || "available",
+    status: expert.status || "lead",
+    source: (expert as Expert & { source?: string }).source || "Inbound",
     availableNow: Boolean(expert.availableNow),
     nextAvailableDate: toDateInputValue(expert.nextAvailableDate),
     bio: expert.bio || "",
@@ -340,6 +348,30 @@ export default function ExpertDetail() {
       toast({
         title: "Failed to update expert",
         description: error instanceof Error ? error.message : "Please review the expert details and try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const onboardingLinkMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `/api/experts/${expertId}/onboarding-link`, {});
+      return response.json() as Promise<{ inviteUrl: string }>;
+    },
+    onSuccess: async (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/experts", expertId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/experts-with-recruiter"] });
+      try {
+        await navigator.clipboard.writeText(data.inviteUrl);
+        toast({ title: "Onboarding link copied", description: data.inviteUrl });
+      } catch {
+        toast({ title: "Onboarding link generated", description: data.inviteUrl });
+      }
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to generate onboarding link",
+        description: error instanceof Error ? error.message : "Please try again.",
         variant: "destructive",
       });
     },
@@ -552,6 +584,7 @@ export default function ExpertDetail() {
       yearsOfExperience,
       hourlyRate: hourlyRate.toFixed(2),
       status: formData.status,
+      source: formData.source,
       availableNow: formData.availableNow,
       nextAvailableDate: formData.nextAvailableDate ? new Date(`${formData.nextAvailableDate}T00:00:00`) : null,
       bio: formData.bio.trim(),
@@ -659,10 +692,21 @@ export default function ExpertDetail() {
             </Button>
           </div>
         ) : (
-          <Button onClick={handleEdit} data-testid="button-edit-expert-detail">
-            <Pencil className="mr-2 h-4 w-4" />
-            Edit Expert
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onboardingLinkMutation.mutate()}
+              disabled={onboardingLinkMutation.isPending}
+              data-testid="button-detail-generate-onboarding-link"
+            >
+              <Link2 className="mr-2 h-4 w-4" />
+              {onboardingLinkMutation.isPending ? "Generating..." : "Onboarding Link"}
+            </Button>
+            <Button onClick={handleEdit} data-testid="button-edit-expert-detail">
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit Expert
+            </Button>
+          </div>
         )}
       </div>
 
@@ -695,15 +739,32 @@ export default function ExpertDetail() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Availability Status</label>
+                    <label className="text-sm font-medium">Expert Status</label>
                     <Select value={formData.status} onValueChange={(value) => updateForm("status", value)}>
                       <SelectTrigger data-testid="select-detail-expert-status">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="available">Available</SelectItem>
-                        <SelectItem value="busy">Busy</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
+                        {expertStatusOptions.map((status) => (
+                          <SelectItem key={status} value={status}>
+                            {formatOptionLabel(status)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Source</label>
+                    <Select value={formData.source} onValueChange={(value) => updateForm("source", value)}>
+                      <SelectTrigger data-testid="select-detail-expert-source">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {expertSourceOptions.map((source) => (
+                          <SelectItem key={source} value={source}>
+                            {source}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1585,6 +1646,10 @@ export default function ExpertDetail() {
               <CardDescription>Recruiting and onboarding metadata.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Source</span>
+                <span className="font-medium">{(expert as Expert & { source?: string }).source || "Inbound"}</span>
+              </div>
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 text-muted-foreground">
                   <User className="h-4 w-4" />

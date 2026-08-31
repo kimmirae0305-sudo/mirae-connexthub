@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -142,6 +142,15 @@ export default function ExpertRegister({ token }: ExpertRegisterProps) {
     },
   });
 
+  useEffect(() => {
+    if (!invitationLink) return;
+    form.reset({
+      ...form.getValues(),
+      name: invitationLink.candidateName || form.getValues("name"),
+      email: invitationLink.candidateEmail || form.getValues("email"),
+    });
+  }, [form, invitationLink]);
+
   const registerMutation = useMutation({
     mutationFn: (data: InsertExpert) => apiRequest("POST", `/api/register-expert/${token}`, data),
     onSuccess: () => {
@@ -165,7 +174,8 @@ export default function ExpertRegister({ token }: ExpertRegisterProps) {
       timezone: data.timezone || null,
       whatsapp: data.whatsapp || null,
       areasOfExpertise: data.areasOfExpertise ? data.areasOfExpertise.split(",").map(s => s.trim()).filter(Boolean) : null,
-      status: "available",
+      status: "registered",
+      source: "Inbound",
     };
     registerMutation.mutate(expertData);
   };
@@ -278,7 +288,13 @@ export default function ExpertRegister({ token }: ExpertRegisterProps) {
                         <FormItem>
                           <FormLabel>Email *</FormLabel>
                           <FormControl>
-                            <Input type="email" placeholder="john@example.com" {...field} data-testid="input-expert-email" />
+                            <Input
+                              type="email"
+                              placeholder="john@example.com"
+                              readOnly={Boolean(invitationLink.expertId)}
+                              {...field}
+                              data-testid="input-expert-email"
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
