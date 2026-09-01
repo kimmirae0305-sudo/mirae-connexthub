@@ -214,6 +214,22 @@ const formatRate = (rate?: string | number | null, currency?: string | null) => 
 const formatStatusLabel = (status: string) =>
   status.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 
+const canGenerateOnboardingLink = (status?: string | null) =>
+  ["lead", "invited"].includes(String(status || "").toLowerCase().trim());
+
+const getApiErrorMessage = (error: unknown, fallback: string) => {
+  if (!(error instanceof Error)) return fallback;
+  const match = error.message.match(/^\d+:\s*(.*)$/);
+  if (!match) return error.message || fallback;
+
+  try {
+    const parsed = JSON.parse(match[1]) as { error?: string; message?: string };
+    return parsed.error || parsed.message || fallback;
+  } catch {
+    return match[1] || fallback;
+  }
+};
+
 export default function Experts() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -284,8 +300,12 @@ export default function Experts() {
       form.reset(getEmptyExpertFormValues());
       toast({ title: "Expert registered successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to register expert", variant: "destructive" });
+    onError: (error) => {
+      toast({
+        title: "Failed to register expert",
+        description: getApiErrorMessage(error, "Please review the expert details and try again."),
+        variant: "destructive",
+      });
     },
   });
 
@@ -303,8 +323,12 @@ export default function Experts() {
         toast({ title: "Onboarding link generated", description: data.inviteUrl });
       }
     },
-    onError: () => {
-      toast({ title: "Failed to generate onboarding link", variant: "destructive" });
+    onError: (error) => {
+      toast({
+        title: "Failed to generate onboarding link",
+        description: getApiErrorMessage(error, "This expert may not be eligible for onboarding."),
+        variant: "destructive",
+      });
     },
   });
 
@@ -321,8 +345,12 @@ export default function Experts() {
       form.reset(getEmptyExpertFormValues());
       toast({ title: "Expert updated successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to update expert", variant: "destructive" });
+    onError: (error) => {
+      toast({
+        title: "Failed to update expert",
+        description: getApiErrorMessage(error, "Please review the expert details and try again."),
+        variant: "destructive",
+      });
     },
   });
 
@@ -333,8 +361,12 @@ export default function Experts() {
       setDeletingExpert(null);
       toast({ title: "Expert removed successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to remove expert", variant: "destructive" });
+    onError: (error) => {
+      toast({
+        title: "Failed to remove expert",
+        description: getApiErrorMessage(error, "The expert could not be removed."),
+        variant: "destructive",
+      });
     },
   });
 
@@ -583,16 +615,18 @@ export default function Experts() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => onboardingLinkMutation.mutate(expert.id)}
-                            disabled={onboardingLinkMutation.isPending}
-                            title="Generate onboarding link"
-                            data-testid={`button-generate-onboarding-link-${expert.id}`}
-                          >
-                            <Link2 className="h-4 w-4" />
-                          </Button>
+                          {canGenerateOnboardingLink(expert.status) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => onboardingLinkMutation.mutate(expert.id)}
+                              disabled={onboardingLinkMutation.isPending}
+                              title="Generate onboarding link"
+                              data-testid={`button-generate-onboarding-link-${expert.id}`}
+                            >
+                              <Link2 className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"

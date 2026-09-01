@@ -1119,16 +1119,12 @@ const isPositiveRate = (value: unknown) => {
   return Number.isFinite(amount) && amount > 0;
 };
 
-export const insertExpertSchema = createInsertSchema(experts).omit({
-  id: true,
-  createdAt: true,
-}).extend({
-  sourcedAt: coerceDate.optional(),
-  termsAcceptedAt: coerceDate.optional(),
-  privacyAcknowledgedAt: coerceDate.optional(),
-  expectedRateCurrency: rateCurrencySchema,
-  agreedRateCurrency: rateCurrencySchema,
-}).superRefine((data, ctx) => {
+const validateExpertRatePairs = (data: {
+  expectedRate?: unknown;
+  expectedRateCurrency?: unknown;
+  agreedRate?: unknown;
+  agreedRateCurrency?: unknown;
+}, ctx: z.RefinementCtx) => {
   if (isPresentRate(data.expectedRate) && !data.expectedRateCurrency) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -1157,7 +1153,21 @@ export const insertExpertSchema = createInsertSchema(experts).omit({
       message: "Agreed rate must be greater than 0.",
     });
   }
+};
+
+const expertWriteSchema = createInsertSchema(experts).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  sourcedAt: coerceDate.optional(),
+  termsAcceptedAt: coerceDate.optional(),
+  privacyAcknowledgedAt: coerceDate.optional(),
+  expectedRateCurrency: rateCurrencySchema,
+  agreedRateCurrency: rateCurrencySchema,
 });
+
+export const insertExpertSchema = expertWriteSchema.superRefine(validateExpertRatePairs);
+export const updateExpertSchema = expertWriteSchema.partial().superRefine(validateExpertRatePairs);
 
 export const insertProjectAngleSchema = createInsertSchema(projectAngles).omit({
   id: true,
