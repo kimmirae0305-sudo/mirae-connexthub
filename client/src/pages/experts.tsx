@@ -124,6 +124,8 @@ const expertFormSchema = z.object({
   expertise: z.string().optional(),
   industry: z.string().optional(),
   yearsOfExperience: z.string().optional(),
+  expectedRate: z.string().optional(),
+  expectedRateCurrency: z.string().optional(),
   bio: z.string().optional(),
   status: z.string().default("lead"),
   source: z.string().default("Inbound"),
@@ -151,6 +153,12 @@ const expertFormSchema = z.object({
 ).refine(
   (data) => !data.yearsOfExperience || Number(data.yearsOfExperience) >= 0,
   { message: "Must be 0 or greater", path: ["yearsOfExperience"] }
+).refine(
+  (data) => !data.expectedRate || data.expectedRateCurrency,
+  { message: "Currency is required when expected rate is entered", path: ["expectedRateCurrency"] }
+).refine(
+  (data) => !data.expectedRate || Number(data.expectedRate) > 0,
+  { message: "Expected rate must be greater than zero", path: ["expectedRate"] }
 );
 
 type ExpertFormData = z.infer<typeof expertFormSchema>;
@@ -171,6 +179,12 @@ const industries = [
 
 const statuses = ["lead", "invited", "registered", "verified", "active", "available", "busy", "inactive"];
 const sourceOptions = ["Inbound", "Referral", "LinkedIn", "Internal Sourcing", "Project"];
+const rateCurrencies = [
+  { code: "BRL", label: "BRL - Brazilian Real" },
+  { code: "USD", label: "USD - US Dollar" },
+  { code: "EUR", label: "EUR - Euro" },
+  { code: "GBP", label: "GBP - British Pound" },
+];
 
 const formatRate = (rate?: string | number | null, currency?: string | null) => {
   const amount = Number(rate);
@@ -248,6 +262,8 @@ export default function Experts() {
       expertise: "",
       industry: "",
       yearsOfExperience: "",
+      expectedRate: "",
+      expectedRateCurrency: "",
       bio: "",
       status: "lead",
       source: "Inbound",
@@ -346,6 +362,8 @@ export default function Experts() {
         expertise: expert.expertise ?? "",
         industry: expert.industry ?? "",
         yearsOfExperience: expert.yearsOfExperience == null ? "" : String(expert.yearsOfExperience),
+        expectedRate: expert.expectedRate == null ? "" : String(expert.expectedRate),
+        expectedRateCurrency: expert.expectedRateCurrency ?? "",
         bio: expert.bio ?? "",
         status: expert.status ?? "lead",
         source: (expert as Expert & { source?: string }).source ?? "Inbound",
@@ -369,6 +387,11 @@ export default function Experts() {
       expertise: data.expertise?.trim() || null,
       industry: data.industry?.trim() || null,
       yearsOfExperience: data.yearsOfExperience ? Number(data.yearsOfExperience) : null,
+      expectedRate: data.expectedRate ? data.expectedRate : null,
+      expectedRateCurrency: data.expectedRate ? data.expectedRateCurrency || null : null,
+      agreedRate: undefined,
+      agreedRateCurrency: undefined,
+      hourlyRate: undefined,
       bio: data.bio || null,
       company: data.company || null,
       jobTitle: data.jobTitle || null,
@@ -816,6 +839,53 @@ export default function Experts() {
                           data-testid="input-years-experience"
                         />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="expectedRate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Expected Consulting Rate</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          placeholder=""
+                          {...field}
+                          data-testid="input-expected-rate"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="expectedRateCurrency"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Currency</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-expected-rate-currency">
+                            <SelectValue placeholder="Select currency" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {rateCurrencies.map((currency) => (
+                            <SelectItem key={currency.code} value={currency.code}>
+                              {currency.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}

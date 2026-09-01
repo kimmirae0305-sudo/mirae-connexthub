@@ -106,6 +106,29 @@ const buildPublicAdvisorProjectDeclineUrl = (token: string, req: AuthRequest) =>
 };
 const buildPublicExpertPaymentDetailsUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/expert-payment-details/${token}`;
+const normalizeExpertRatePayload = (body: Record<string, unknown>) => {
+  const payload = { ...body };
+  const normalizeRatePair = (rateKey: "expectedRate" | "agreedRate", currencyKey: "expectedRateCurrency" | "agreedRateCurrency") => {
+    if (!(rateKey in payload) && !(currencyKey in payload)) return;
+    const rate = payload[rateKey];
+    if (rate === null || rate === undefined || String(rate).trim() === "") {
+      payload[rateKey] = null;
+      payload[currencyKey] = null;
+      return;
+    }
+    if (typeof payload[currencyKey] === "string") {
+      payload[currencyKey] = payload[currencyKey].trim().toUpperCase();
+    }
+  };
+
+  normalizeRatePair("expectedRate", "expectedRateCurrency");
+  normalizeRatePair("agreedRate", "agreedRateCurrency");
+  if (payload.hourlyRate !== undefined && String(payload.hourlyRate ?? "").trim() === "") {
+    payload.hourlyRate = null;
+  }
+
+  return payload;
+};
 const getEmailAssetBaseUrl = (req: AuthRequest) =>
   trimTrailingSlashes(process.env.EMAIL_ASSET_BASE_URL?.trim() || getRequestBaseUrl(req));
 const buildAdvisorEmailLogoUrl = (req: AuthRequest) =>
@@ -4018,7 +4041,7 @@ export async function registerRoutes(
 
   app.post("/api/experts", authMiddleware, async (req, res) => {
     try {
-      const result = insertExpertSchema.safeParse(req.body);
+      const result = insertExpertSchema.safeParse(normalizeExpertRatePayload(req.body));
       if (!result.success) {
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
@@ -4032,7 +4055,7 @@ export async function registerRoutes(
   app.patch("/api/experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = insertExpertSchema.partial().safeParse(req.body);
+      const result = insertExpertSchema.partial().safeParse(normalizeExpertRatePayload(req.body));
       if (!result.success) {
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
