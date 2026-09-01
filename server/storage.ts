@@ -1083,6 +1083,39 @@ function normalizeExpertWorkHistory(workHistory: unknown) {
   });
 }
 
+async function resolveExpertWorkHistoryCompanyLinks<T extends { workHistory?: unknown }>(expert: T): Promise<T> {
+  const workHistory = normalizeExpertWorkHistory(expert.workHistory);
+  if (!Array.isArray(workHistory)) return expert;
+
+  const companyIds = Array.from(
+    new Set(
+      workHistory
+        .map((item: any) => Number(item?.companyId || 0))
+        .filter((companyId: number) => Number.isInteger(companyId) && companyId > 0)
+    )
+  );
+  if (companyIds.length === 0) {
+    return { ...expert, workHistory };
+  }
+
+  const existingCompanyRows = await db
+    .select({ id: companies.id })
+    .from(companies)
+    .where(inArray(companies.id, companyIds));
+  const existingCompanyIds = new Set(existingCompanyRows.map((company) => company.id));
+  const resolvedWorkHistory = workHistory.map((item: any) => {
+    const companyId = Number(item?.companyId || 0);
+    if (!companyId || existingCompanyIds.has(companyId)) return item;
+    return {
+      ...item,
+      companyId: null,
+      companyLinkStatus: "pending_review",
+    };
+  });
+
+  return { ...expert, workHistory: resolvedWorkHistory };
+}
+
 export class DatabaseStorage implements IStorage {
   // Users
   async getUsers(): Promise<User[]> {
@@ -1621,22 +1654,23 @@ export class DatabaseStorage implements IStorage {
 
   // Experts
   async getExperts(): Promise<Expert[]> {
-    return db.select().from(experts).orderBy(desc(experts.createdAt));
+    const expertRows = await db.select().from(experts).orderBy(desc(experts.createdAt));
+    return Promise.all(expertRows.map((expert) => resolveExpertWorkHistoryCompanyLinks(expert)));
   }
 
   async getExpert(id: number): Promise<Expert | undefined> {
     const [expert] = await db.select().from(experts).where(eq(experts.id, id));
-    return expert || undefined;
+    return expert ? resolveExpertWorkHistoryCompanyLinks(expert) : undefined;
   }
 
   async getExpertByEmail(email: string): Promise<Expert | undefined> {
     const [expert] = await db.select().from(experts).where(eq(experts.email, email));
-    return expert || undefined;
+    return expert ? resolveExpertWorkHistoryCompanyLinks(expert) : undefined;
   }
 
   async searchExperts(query: string): Promise<Expert[]> {
     const searchPattern = `%${query}%`;
-    return db
+    const expertRows = await db
       .select()
       .from(experts)
       .where(
@@ -1650,6 +1684,7 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .orderBy(experts.name);
+    return Promise.all(expertRows.map((expert) => resolveExpertWorkHistoryCompanyLinks(expert)));
   }
 
   async searchExpertsAdvanced(params: {
@@ -1955,7 +1990,7 @@ export class DatabaseStorage implements IStorage {
       filtered = filtered.filter((e) => (e.matchedWorkHistory?.length ?? 0) > 0);
     }
 
-    return filtered;
+    return Promise.all(filtered.map((expert) => resolveExpertWorkHistoryCompanyLinks(expert)));
   }
 
   async createExpert(expert: InsertExpert): Promise<Expert> {
@@ -1966,7 +2001,7 @@ export class DatabaseStorage implements IStorage {
         workHistory: normalizeExpertWorkHistory(expert.workHistory),
       })
       .returning();
-    return newExpert;
+    return resolveExpertWorkHistoryCompanyLinks(newExpert);
   }
 
   async updateExpert(id: number, expert: Partial<InsertExpert>): Promise<Expert | undefined> {
@@ -1978,7 +2013,7 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(experts.id, id))
       .returning();
-    return updated || undefined;
+    return updated ? resolveExpertWorkHistoryCompanyLinks(updated) : undefined;
   }
 
   async deleteExpert(id: number): Promise<boolean> {
