@@ -109,6 +109,13 @@ const buildPublicAdvisorProjectDeclineUrl = (token: string, req: AuthRequest) =>
 const buildPublicExpertPaymentDetailsUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/expert-payment-details/${token}`;
 const PRE_REGISTRATION_EXPERT_STATUSES = new Set(["lead", "invited"]);
+const PROJECT_ATTACHMENT_ELIGIBLE_EXPERT_STATUSES = new Set([
+  "registered",
+  "verified",
+  "active",
+  "available",
+  "busy",
+]);
 const normalizeExpertRatePayload = (body: Record<string, unknown>) => {
   const payload = { ...body };
   const normalizeRatePair = (rateKey: "expectedRate" | "agreedRate", currencyKey: "expectedRateCurrency" | "agreedRateCurrency") => {
@@ -3987,6 +3994,7 @@ export async function registerRoutes(
         minHoursWorked: req.query.minHoursWorked ? parseFloat(req.query.minHoursWorked as string) : undefined,
         availableOnly: req.query.availableOnly === 'true',
         excludeProjectId: req.query.excludeProjectId ? parseInt(req.query.excludeProjectId as string) : undefined,
+        eligibleForProjectAttachment: req.query.eligibleForProjectAttachment === "true",
       };
       const experts = await storage.searchExpertsAdvanced(params);
       res.json(experts);
@@ -4743,11 +4751,37 @@ export async function registerRoutes(
       if (!Array.isArray(expertIds) || expertIds.length === 0) {
         return res.status(400).json({ error: "expertIds must be a non-empty array" });
       }
+      const normalizedExpertIds = expertIds.map((id: unknown) => Number(id));
+      if (
+        normalizedExpertIds.some((id: number) => !Number.isInteger(id) || id <= 0)
+      ) {
+        return res.status(400).json({ error: "expertIds must contain valid expert ids" });
+      }
+      const uniqueExpertIds = Array.from(new Set(normalizedExpertIds));
       
       // Check if project exists
       const project = await storage.getProject(projectId);
       if (!project) {
         return res.status(404).json({ error: "Project not found" });
+      }
+
+      const existingExperts = await db
+        .select({ id: experts.id, status: experts.status })
+        .from(experts)
+        .where(inArray(experts.id, uniqueExpertIds));
+      if (existingExperts.length !== uniqueExpertIds.length) {
+        return res.status(400).json({ error: "One or more selected experts could not be found" });
+      }
+      const ineligibleExpert = existingExperts.find(
+        (expert) =>
+          !PROJECT_ATTACHMENT_ELIGIBLE_EXPERT_STATUSES.has(
+            String(expert.status || "").toLowerCase().trim()
+          )
+      );
+      if (ineligibleExpert) {
+        return res.status(400).json({
+          error: "Only Registered, Verified, Active, Available, or Busy experts can be attached to a project.",
+        });
       }
       
       // Get existing assignments to avoid duplicates
@@ -4755,7 +4789,7 @@ export async function registerRoutes(
       const existingExpertIds = new Set(existingAssignments.map(a => a.expertId));
       
       // Filter out already assigned experts
-      const newExpertIds = expertIds.filter((id: number) => !existingExpertIds.has(id));
+      const newExpertIds = uniqueExpertIds.filter((id: number) => !existingExpertIds.has(id));
       
       if (newExpertIds.length === 0) {
         return res.status(200).json({ 

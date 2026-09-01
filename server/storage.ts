@@ -87,6 +87,14 @@ import {
 import { db } from "./db";
 import { eq, desc, ilike, or, and, sql, gte, lte, inArray } from "drizzle-orm";
 
+const PROJECT_ATTACHMENT_ELIGIBLE_EXPERT_STATUSES = [
+  "registered",
+  "verified",
+  "active",
+  "available",
+  "busy",
+] as const;
+
 export class ExpertDeletionBlockedError extends Error {
   constructor(message: string) {
     super(message);
@@ -794,6 +802,7 @@ export interface IStorage {
     minHoursWorked?: number;
     availableOnly?: boolean;
     excludeProjectId?: number;
+    eligibleForProjectAttachment?: boolean;
   }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number; matchedWorkHistory?: any[] })[]>;
   createExpert(expert: InsertExpert): Promise<Expert>;
   updateExpert(id: number, expert: Partial<InsertExpert>): Promise<Expert | undefined>;
@@ -1659,8 +1668,13 @@ export class DatabaseStorage implements IStorage {
     minHoursWorked?: number;
     availableOnly?: boolean;
     excludeProjectId?: number;
+    eligibleForProjectAttachment?: boolean;
   }): Promise<(Expert & { priorProjectCount?: number; acceptanceRate?: number; matchedWorkHistory?: any[] })[]> {
     const conditions = [];
+
+    if (params.eligibleForProjectAttachment) {
+      conditions.push(inArray(sql`lower(coalesce(${experts.status}, ''))`, PROJECT_ATTACHMENT_ELIGIBLE_EXPERT_STATUSES));
+    }
     
     // 1) Domain Expertise / Skills (Keywords) - search across name, title, skills, bio
     if (params.query) {

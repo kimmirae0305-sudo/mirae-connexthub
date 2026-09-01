@@ -967,7 +967,8 @@ export default function ProjectDetail() {
         employmentEndYear,
         availableOnly: searchAvailableOnly,
         minHoursWorked: searchMinHoursWorked, minAcceptanceRate: searchMinAcceptanceRate,
-        excludeProjectId: projectId
+        excludeProjectId: projectId,
+        eligibleForProjectAttachment: true,
       },
     ],
     queryFn: async () => {
@@ -994,6 +995,7 @@ export default function ProjectDetail() {
       if (searchMinAcceptanceRate) params.append("minAcceptanceRate", searchMinAcceptanceRate);
       if (searchHasPriorProjects) params.append("hasPriorProjects", "true");
       if (projectId) params.append("excludeProjectId", String(projectId));
+      params.append("eligibleForProjectAttachment", "true");
       const res = await fetch(resolveApiUrl(`/api/experts/search?${params}`), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("authToken")}`,
@@ -1007,9 +1009,55 @@ export default function ProjectDetail() {
 
   const expertsToShow = allExperts;
 
-  const assignedExpertIds = new Set([
-    ...(projectDetail?.internalExperts?.map((pe) => pe.expertId) || []),
-    ...(projectDetail?.raSourcedExperts?.map((pe) => pe.expertId) || []),
+  const assignedExpertIds = useMemo(
+    () =>
+      new Set([
+        ...(projectDetail?.internalExperts?.map((pe) => pe.expertId) || []),
+        ...(projectDetail?.raSourcedExperts?.map((pe) => pe.expertId) || []),
+      ]),
+    [projectDetail?.internalExperts, projectDetail?.raSourcedExperts]
+  );
+
+  const visibleEligibleExpertIds = useMemo(
+    () =>
+      (expertSearchResults || [])
+        .filter((expert) => !assignedExpertIds.has(expert.id))
+        .map((expert) => expert.id),
+    [assignedExpertIds, expertSearchResults]
+  );
+
+  const selectedVisibleEligibleCount = visibleEligibleExpertIds.filter((expertId) =>
+    selectedExperts.has(expertId)
+  ).length;
+  const masterExpertCheckboxState =
+    visibleEligibleExpertIds.length > 0 &&
+    selectedVisibleEligibleCount === visibleEligibleExpertIds.length
+      ? true
+      : selectedVisibleEligibleCount > 0
+        ? "indeterminate"
+        : false;
+
+  useEffect(() => {
+    setSelectedExperts(new Set());
+  }, [
+    searchQuery,
+    searchCompanyName,
+    searchCompanyScope,
+    employmentPeriodEnabled,
+    employmentStartMonth,
+    employmentStartYear,
+    employmentEndMonth,
+    employmentEndYear,
+    searchCountry,
+    searchMinExp,
+    searchMaxExp,
+    searchJobTitle,
+    searchIndustry,
+    searchLanguage,
+    searchAvailableOnly,
+    searchMinHoursWorked,
+    searchMinAcceptanceRate,
+    searchHasPriorProjects,
   ]);
 
   const assignRasMutation = useMutation({
@@ -1032,13 +1080,23 @@ export default function ProjectDetail() {
       const res = await apiRequest("POST", `/api/projects/${projectId}/experts/bulk`, { expertIds });
       return res.json();
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+    onSuccess: async (data) => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/projects", projectId, "detail"] });
+      await refetchExpertSearch();
       setSelectedExperts(new Set());
-      toast({ title: data.message || "Experts attached successfully" });
+      const attachedCount = Array.isArray(data.assignments) ? data.assignments.length : 0;
+      toast({
+        title:
+          data.message ||
+          `${attachedCount} expert${attachedCount === 1 ? "" : "s"} attached to the project`,
+      });
     },
-    onError: () => {
-      toast({ title: "Failed to attach experts", variant: "destructive" });
+    onError: (error) => {
+      toast({
+        title: "Failed to attach experts",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -2262,6 +2320,7 @@ export default function ProjectDetail() {
   };
 
   const handleSelectExpert = (expertId: number, checked: boolean) => {
+    if (assignedExpertIds.has(expertId)) return;
     const newSelected = new Set(selectedExperts);
     if (checked) {
       newSelected.add(expertId);
@@ -2271,9 +2330,20 @@ export default function ProjectDetail() {
     setSelectedExperts(newSelected);
   };
 
+  const handleSelectAllVisibleExperts = (checked: boolean | "indeterminate") => {
+    if (checked !== true) {
+      setSelectedExperts(new Set());
+      return;
+    }
+    setSelectedExperts(new Set(visibleEligibleExpertIds));
+  };
+
   const handleAttachExperts = () => {
-    if (selectedExperts.size === 0) return;
-    attachExpertsMutation.mutate(Array.from(selectedExperts));
+    const eligibleSelectedIds = Array.from(selectedExperts).filter((expertId) =>
+      visibleEligibleExpertIds.includes(expertId)
+    );
+    if (eligibleSelectedIds.length === 0) return;
+    attachExpertsMutation.mutate(eligibleSelectedIds);
   };
 
   // =====================================================
@@ -6177,7 +6247,13 @@ export default function ProjectDetail() {
       </Dialog>
 
       {/* Expert Search Modal */}
-      <Dialog open={isExpertSearchModalOpen} onOpenChange={setIsExpertSearchModalOpen}>
+      <Dialog
+        open={isExpertSearchModalOpen}
+        onOpenChange={(open) => {
+          setIsExpertSearchModalOpen(open);
+          if (!open) setSelectedExperts(new Set());
+        }}
+      >
         <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Filter Experts</DialogTitle>
@@ -6411,6 +6487,7 @@ export default function ProjectDetail() {
                 type="button"
                 variant="ghost"
                 onClick={() => {
+                  setSelectedExperts(new Set());
                   setSearchQuery("");
                   setSearchCompanyName("");
                   setSearchCompanyScope("any");
@@ -6435,7 +6512,10 @@ export default function ProjectDetail() {
               </Button>
               <Button
                 type="button"
-                onClick={() => refetchExpertSearch()}
+                onClick={() => {
+                  setSelectedExperts(new Set());
+                  refetchExpertSearch();
+                }}
                 data-testid="button-apply-expert-filters"
               >
                 Apply filters
@@ -6645,10 +6725,27 @@ export default function ProjectDetail() {
 
             {/* Results */}
             <div className="space-y-3 border-t pt-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">
-                  {expertSearchLoading ? "Searching..." : `${expertSearchResults?.length || 0} experts found`}
-                </p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="select-all-expert-search-results"
+                    checked={masterExpertCheckboxState}
+                    disabled={expertSearchLoading || visibleEligibleExpertIds.length === 0}
+                    onCheckedChange={handleSelectAllVisibleExperts}
+                    data-testid="checkbox-select-all-experts"
+                  />
+                  <label
+                    htmlFor="select-all-expert-search-results"
+                    className="text-sm font-medium cursor-pointer"
+                  >
+                    {expertSearchLoading ? "Searching..." : `${expertSearchResults?.length || 0} experts found`}
+                  </label>
+                </div>
+                {selectedVisibleEligibleCount > 0 && (
+                  <Badge variant="secondary" data-testid="badge-selected-experts-count">
+                    {selectedVisibleEligibleCount} selected
+                  </Badge>
+                )}
               </div>
               {expertSearchLoading && (
                 <p className="text-sm text-muted-foreground text-center py-4">Loading results...</p>
@@ -6659,9 +6756,22 @@ export default function ProjectDetail() {
               <div className="max-h-[300px] overflow-y-auto space-y-2">
                 {expertSearchResults?.map((expert: ExpertWithMetrics) => {
                   const isAssigned = assignedExpertIds.has(expert.id);
+                  const isSelected = selectedExperts.has(expert.id);
                   return (
                     <Card key={expert.id} className="p-3">
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          checked={isSelected}
+                          disabled={isAssigned}
+                          onCheckedChange={(checked) => handleSelectExpert(expert.id, checked === true)}
+                          aria-label={
+                            isAssigned
+                              ? `${expert.name} is already in this project`
+                              : `Select ${expert.name}`
+                          }
+                          className="mt-1"
+                          data-testid={`checkbox-select-expert-${expert.id}`}
+                        />
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-sm truncate" data-testid={`text-expert-name-${expert.id}`}>{expert.name}</p>
                           <p className="text-xs text-muted-foreground truncate">{expert.jobTitle || expert.expertise} {expert.company ? `at ${expert.company}` : ""}</p>
@@ -6705,7 +6815,7 @@ export default function ProjectDetail() {
                               size="sm"
                               variant="default"
                               onClick={() => attachExpertMutation.mutate(expert.id)}
-                              disabled={attachExpertMutation.isPending}
+                              disabled={attachExpertMutation.isPending || attachExpertsMutation.isPending}
                               data-testid={`button-attach-expert-${expert.id}`}
                             >
                               {attachExpertMutation.isPending ? "..." : "Attach"}
@@ -6724,9 +6834,18 @@ export default function ProjectDetail() {
           </div>
           <DialogFooter>
             <Button
+              type="button"
+              onClick={handleAttachExperts}
+              disabled={selectedVisibleEligibleCount === 0 || attachExpertsMutation.isPending}
+              data-testid="button-attach-selected-experts"
+            >
+              {attachExpertsMutation.isPending ? "Attaching..." : "Attach Selected"}
+            </Button>
+            <Button
               variant="outline"
               onClick={() => {
                 setIsExpertSearchModalOpen(false);
+                setSelectedExperts(new Set());
                 setSearchQuery("");
                 setSearchCurrentEmployer("");
                 setSearchPastEmployers("");
