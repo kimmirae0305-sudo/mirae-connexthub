@@ -47,11 +47,18 @@ const expertFormSchema = z.object({
   company: z.string().min(1, "Company is required"),
   jobTitle: z.string().min(1, "Job title is required"),
   yearsOfExperience: z.number().min(0, "Years must be 0 or greater"),
-  hourlyRate: z.string().min(1, "Hourly rate is required"),
+  expectedRate: z.string().optional(),
+  expectedRateCurrency: z.string().optional(),
   bio: z.string().min(50, "Bio must be at least 50 characters"),
   termsAccepted: z.boolean().refine((v) => v === true, "You must accept the terms"),
   lgpdAccepted: z.boolean().refine((v) => v === true, "You must accept the LGPD consent"),
-});
+}).refine(
+  (data) => !data.expectedRate || data.expectedRateCurrency,
+  { message: "Expected rate currency is required when expected rate is provided", path: ["expectedRateCurrency"] }
+).refine(
+  (data) => !data.expectedRate || Number(data.expectedRate) > 0,
+  { message: "Expected rate must be greater than 0", path: ["expectedRate"] }
+);
 
 type ExpertFormData = z.infer<typeof expertFormSchema>;
 
@@ -103,6 +110,13 @@ const timezones = [
   "UTC+12:00",
 ];
 
+const rateCurrencies = [
+  { code: "BRL", label: "BRL - Brazilian Real" },
+  { code: "USD", label: "USD - US Dollar" },
+  { code: "EUR", label: "EUR - Euro" },
+  { code: "GBP", label: "GBP - British Pound" },
+];
+
 export default function ExpertRegister({ token }: ExpertRegisterProps) {
   const { toast } = useToast();
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -135,7 +149,8 @@ export default function ExpertRegister({ token }: ExpertRegisterProps) {
       company: "",
       jobTitle: "",
       yearsOfExperience: 0,
-      hourlyRate: "",
+      expectedRate: "",
+      expectedRateCurrency: "",
       bio: "",
       termsAccepted: false,
       lgpdAccepted: false,
@@ -174,6 +189,8 @@ export default function ExpertRegister({ token }: ExpertRegisterProps) {
       timezone: data.timezone || null,
       whatsapp: data.whatsapp || null,
       areasOfExpertise: data.areasOfExpertise ? data.areasOfExpertise.split(",").map(s => s.trim()).filter(Boolean) : null,
+      expectedRate: data.expectedRate || null,
+      expectedRateCurrency: data.expectedRate ? data.expectedRateCurrency || null : null,
       status: "registered",
       source: "Inbound",
     };
@@ -508,22 +525,58 @@ export default function ExpertRegister({ token }: ExpertRegisterProps) {
                     )}
                   />
 
-                  <FormField
-                    control={form.control}
-                    name="hourlyRate"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Hourly Rate (USD) *</FormLabel>
-                        <FormControl>
-                          <Input placeholder="250.00" {...field} data-testid="input-expert-rate" />
-                        </FormControl>
-                        <FormDescription>
-                          Your standard consulting rate per hour in USD.
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="expectedRate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Expected Consulting Rate</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder=""
+                              {...field}
+                              data-testid="input-expert-expected-rate"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Your quoted consulting rate per hour.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="expectedRateCurrency"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Expected Rate Currency</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-expert-expected-rate-currency">
+                                <SelectValue placeholder="Select currency" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {rateCurrencies.map((currency) => (
+                                <SelectItem key={currency.code} value={currency.code}>
+                                  {currency.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            Required only if you enter a rate.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
 
                   <FormField
                     control={form.control}

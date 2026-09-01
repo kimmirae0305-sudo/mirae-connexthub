@@ -8,7 +8,6 @@ import {
   Briefcase,
   Building2,
   Calendar,
-  DollarSign,
   FileText,
   Link2,
   Linkedin,
@@ -127,6 +126,10 @@ interface ExpertEditForm {
   timezone: string;
   yearsOfExperience: string;
   hourlyRate: string;
+  expectedRate: string;
+  expectedRateCurrency: string;
+  agreedRate: string;
+  agreedRateCurrency: string;
   status: string;
   source: string;
   availableNow: boolean;
@@ -181,6 +184,12 @@ const emptyNewCompanyForm = (): NewCompanyForm => ({
 
 const expertStatusOptions = ["lead", "invited", "registered", "verified", "active", "available", "busy", "inactive"];
 const expertSourceOptions = ["Inbound", "Referral", "LinkedIn", "Internal Sourcing", "Project"];
+const rateCurrencies = [
+  { code: "BRL", label: "BRL - Brazilian Real" },
+  { code: "USD", label: "USD - US Dollar" },
+  { code: "EUR", label: "EUR - Euro" },
+  { code: "GBP", label: "GBP - British Pound" },
+];
 const formatOptionLabel = (value: string) =>
   value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 
@@ -198,10 +207,10 @@ function formatDateTime(value?: string | Date | null) {
   return format(date, "MMM d, yyyy h:mm a");
 }
 
-function formatCurrency(value?: string | number | null) {
-  const amount = Number(value ?? 0);
-  if (!Number.isFinite(amount)) return "$0.00";
-  return `$${amount.toFixed(2)}`;
+function formatRate(value?: string | number | null, currency?: string | null) {
+  const amount = Number(value);
+  if (!value || !Number.isFinite(amount) || amount <= 0) return "-";
+  return `${currency ? `${currency} ` : ""}${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}/hr`;
 }
 
 function formatList(values?: string[] | null) {
@@ -243,8 +252,12 @@ function expertToForm(expert: Expert): ExpertEditForm {
     country: expert.country || "",
     city: expert.city || "",
     timezone: expert.timezone || "",
-    yearsOfExperience: String(expert.yearsOfExperience ?? 0),
+    yearsOfExperience: expert.yearsOfExperience == null ? "" : String(expert.yearsOfExperience),
     hourlyRate: String(expert.hourlyRate ?? ""),
+    expectedRate: String(expert.expectedRate ?? ""),
+    expectedRateCurrency: expert.expectedRateCurrency || "",
+    agreedRate: String(expert.agreedRate ?? expert.hourlyRate ?? ""),
+    agreedRateCurrency: expert.agreedRateCurrency || (expert.hourlyRate ? "USD" : ""),
     status: expert.status || "lead",
     source: (expert as Expert & { source?: string }).source || "Inbound",
     availableNow: Boolean(expert.availableNow),
@@ -545,52 +558,58 @@ export default function ExpertDetail() {
 
   const handleSave = () => {
     if (!formData) return;
-    if (!formData.name.trim() || !formData.email.trim() || !formData.expertise.trim() || !formData.industry.trim()) {
+    if (!formData.name.trim() || !formData.email.trim()) {
       toast({
         title: "Required fields missing",
-        description: "Name, email, expertise, and industry are required.",
+        description: "Name and email are required.",
         variant: "destructive",
       });
       return;
     }
 
-    const yearsOfExperience = Number(formData.yearsOfExperience);
-    const hourlyRate = Number(formData.hourlyRate);
-    if (!Number.isFinite(yearsOfExperience) || yearsOfExperience < 0) {
+    const yearsOfExperience = formData.yearsOfExperience.trim() ? Number(formData.yearsOfExperience) : null;
+    const agreedRate = formData.agreedRate.trim() ? Number(formData.agreedRate) : null;
+    if (yearsOfExperience !== null && (!Number.isFinite(yearsOfExperience) || yearsOfExperience < 0)) {
       toast({ title: "Invalid experience", description: "Years of experience must be 0 or greater.", variant: "destructive" });
       return;
     }
-    if (!Number.isFinite(hourlyRate) || hourlyRate < 0) {
-      toast({ title: "Invalid hourly rate", description: "Hourly rate must be 0 or greater.", variant: "destructive" });
+    if (agreedRate !== null && (!Number.isFinite(agreedRate) || agreedRate < 0)) {
+      toast({ title: "Invalid agreed rate", description: "Agreed rate must be 0 or greater.", variant: "destructive" });
+      return;
+    }
+    if (agreedRate !== null && !formData.agreedRateCurrency) {
+      toast({ title: "Currency required", description: "Select a currency when entering an agreed rate.", variant: "destructive" });
       return;
     }
 
     updateMutation.mutate({
       name: formData.name.trim(),
       email: formData.email.trim(),
-      phone: formData.phone.trim(),
-      whatsapp: formData.whatsapp.trim(),
-      linkedinUrl: formData.linkedinUrl.trim(),
-      company: formData.company.trim(),
-      jobTitle: formData.jobTitle.trim(),
-      expertise: formData.expertise.trim(),
-      sectorExpertise: formData.sectorExpertise.trim(),
-      regionalExpertise: formData.regionalExpertise.trim(),
+      phone: formData.phone.trim() || null,
+      whatsapp: formData.whatsapp.trim() || null,
+      linkedinUrl: formData.linkedinUrl.trim() || null,
+      company: formData.company.trim() || null,
+      jobTitle: formData.jobTitle.trim() || null,
+      expertise: formData.expertise.trim() || null,
+      sectorExpertise: formData.sectorExpertise.trim() || null,
+      regionalExpertise: formData.regionalExpertise.trim() || null,
       areasOfExpertise: splitCsv(formData.areasOfExpertise),
-      industry: formData.industry.trim(),
-      country: formData.country.trim(),
-      city: formData.city.trim(),
-      timezone: formData.timezone.trim(),
+      industry: formData.industry.trim() || null,
+      country: formData.country.trim() || null,
+      city: formData.city.trim() || null,
+      timezone: formData.timezone.trim() || null,
       yearsOfExperience,
-      hourlyRate: hourlyRate.toFixed(2),
+      hourlyRate: agreedRate === null ? null : agreedRate.toFixed(2),
+      agreedRate: agreedRate === null ? null : agreedRate.toFixed(2),
+      agreedRateCurrency: agreedRate === null ? null : formData.agreedRateCurrency,
       status: formData.status,
       source: formData.source,
       availableNow: formData.availableNow,
       nextAvailableDate: formData.nextAvailableDate ? new Date(`${formData.nextAvailableDate}T00:00:00`) : null,
-      bio: formData.bio.trim(),
-      biography: formData.biography.trim(),
+      bio: formData.bio.trim() || null,
+      biography: formData.biography.trim() || null,
       languages: splitCsv(formData.languages),
-      billingInfo: formData.billingInfo.trim(),
+      billingInfo: formData.billingInfo.trim() || null,
       workHistory: formData.workHistory,
     });
   };
@@ -925,15 +944,49 @@ export default function ExpertDetail() {
                 <h2 className="text-lg font-semibold">Commercial</h2>
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Hourly Rate</label>
+                    <label className="text-sm font-medium">Expert Quoted Rate</label>
+                    <Input
+                      value={formatRate(formData.expectedRate, formData.expectedRateCurrency)}
+                      readOnly
+                      data-testid="input-detail-expert-expected-rate"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Expected Rate Currency</label>
+                    <Input
+                      value={formData.expectedRateCurrency}
+                      readOnly
+                      data-testid="input-detail-expert-expected-rate-currency"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Agreed Consulting Rate (Internal)</label>
                     <Input
                       type="number"
                       min="0"
                       step="0.01"
-                      value={formData.hourlyRate}
-                      onChange={(event) => updateForm("hourlyRate", event.target.value)}
-                      data-testid="input-detail-expert-rate"
+                      value={formData.agreedRate}
+                      onChange={(event) => updateForm("agreedRate", event.target.value)}
+                      data-testid="input-detail-expert-agreed-rate"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Agreed Rate Currency (Internal)</label>
+                    <Select
+                      value={formData.agreedRateCurrency}
+                      onValueChange={(value) => updateForm("agreedRateCurrency", value)}
+                    >
+                      <SelectTrigger data-testid="select-detail-expert-agreed-rate-currency">
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {rateCurrencies.map((currency) => (
+                          <SelectItem key={currency.code} value={currency.code}>
+                            {currency.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Languages</label>
@@ -1116,25 +1169,25 @@ export default function ExpertDetail() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Expertise</CardDescription>
-            <CardTitle className="text-base">{expert.expertise}</CardTitle>
+            <CardTitle className="text-base">{expert.expertise || "-"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Industry</CardDescription>
-            <CardTitle className="text-base">{expert.industry}</CardTitle>
+            <CardTitle className="text-base">{expert.industry || "-"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Hourly Rate</CardDescription>
-            <CardTitle className="font-mono text-base">{formatCurrency(expert.hourlyRate)}</CardTitle>
+            <CardDescription>Expert Quoted Rate</CardDescription>
+            <CardTitle className="font-mono text-base">{formatRate(expert.expectedRate, expert.expectedRateCurrency)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Experience</CardDescription>
-            <CardTitle className="text-base">{expert.yearsOfExperience} years</CardTitle>
+            <CardTitle className="text-base">{expert.yearsOfExperience == null ? "-" : `${expert.yearsOfExperience} years`}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -1623,15 +1676,20 @@ export default function ExpertDetail() {
           <Card>
             <CardHeader>
               <CardTitle>Commercial</CardTitle>
-              <CardDescription>Expert-side commercial fields currently stored.</CardDescription>
+              <CardDescription>Quoted expert rate and internal negotiated rate.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex items-center justify-between">
-                <span className="flex items-center gap-2 text-muted-foreground">
-                  <DollarSign className="h-4 w-4" />
-                  Hourly Rate
+                <span className="text-muted-foreground">
+                  Expert Quoted Rate
                 </span>
-                <span className="font-mono font-medium">{formatCurrency(expert.hourlyRate)}</span>
+                <span className="font-mono font-medium">{formatRate(expert.expectedRate, expert.expectedRateCurrency)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">
+                  Agreed Rate (Internal)
+                </span>
+                <span className="font-mono font-medium">{formatRate(expert.agreedRate || expert.hourlyRate, expert.agreedRateCurrency || (expert.hourlyRate ? "USD" : null))}</span>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">Billing Info</p>
