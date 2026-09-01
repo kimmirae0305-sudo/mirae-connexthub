@@ -77,6 +77,8 @@ interface WorkExperience {
   isCurrent: boolean;
 }
 
+type WorkHistoryErrors = Record<number, Partial<Record<keyof WorkExperience, string>>>;
+
 const monthOptions = [
   { value: 1, label: "Jan" },
   { value: 2, label: "Feb" },
@@ -132,25 +134,8 @@ const expertFormSchema = z.object({
   company: z.string().optional(),
   jobTitle: z.string().optional(),
   linkedinUrl: z.string().optional(),
-  workHistory: z.array(z.object({
-    company: z.string().min(1, "Company name required"),
-    jobTitle: z.string().min(1, "Job title required"),
-    fromMonth: z.coerce.number().min(1).max(12).default(1),
-    fromYear: z.coerce.number().min(1900, "Year must be 1900 or later"),
-    toMonth: z.coerce.number().min(1).max(12).default(12),
-    toYear: z.coerce.number().min(1900, "Year must be 1900 or later"),
-    isCurrent: z.boolean().default(false),
-  }).refine(
-    (exp) => exp.isCurrent || exp.fromYear < exp.toYear || (exp.fromYear === exp.toYear && exp.fromMonth <= exp.toMonth),
-    { message: "Start date must be before end date", path: ["toYear"] }
-  )).default([]),
+  workHistory: z.array(z.unknown()).optional().default([]),
 }).refine(
-  (data) => {
-    // Ensure workHistory always exists (empty array if not provided)
-    return data.workHistory !== undefined;
-  },
-  { message: "Work history must be an array" }
-).refine(
   (data) => !data.yearsOfExperience || Number(data.yearsOfExperience) >= 0,
   { message: "Must be 0 or greater", path: ["yearsOfExperience"] }
 ).refine(
@@ -241,6 +226,8 @@ export default function Experts() {
   const [editingExpert, setEditingExpert] = useState<Expert | null>(null);
   const [deletingExpert, setDeletingExpert] = useState<Expert | null>(null);
   const [workHistory, setWorkHistory] = useState<WorkExperience[]>([]);
+  const [touchedWorkHistoryRows, setTouchedWorkHistoryRows] = useState<Set<number>>(new Set());
+  const [workHistoryErrors, setWorkHistoryErrors] = useState<WorkHistoryErrors>({});
 
   const expertsQueryUrl = (() => {
     const params = new URLSearchParams({
@@ -389,6 +376,8 @@ export default function Experts() {
         ? (expert.workHistory as Partial<WorkExperience>[]).map(normalizeWorkExperience)
         : [];
       setWorkHistory(expertWorkHistory);
+      setTouchedWorkHistoryRows(new Set());
+      setWorkHistoryErrors({});
       form.reset({
         name: expert.name ?? "",
         email: expert.email ?? "",
@@ -409,12 +398,56 @@ export default function Experts() {
     } else {
       setEditingExpert(null);
       setWorkHistory([]);
+      setTouchedWorkHistoryRows(new Set());
+      setWorkHistoryErrors({});
       form.reset(getEmptyExpertFormValues());
     }
     setIsDialogOpen(true);
   };
 
   const onSubmit = (data: ExpertFormData) => {
+    const nextWorkHistoryErrors: WorkHistoryErrors = {};
+    touchedWorkHistoryRows.forEach((index) => {
+      const item = workHistory[index];
+      if (!item) return;
+
+      const itemErrors: Partial<Record<keyof WorkExperience, string>> = {};
+      if (!String(item.company || "").trim()) itemErrors.company = "Company name required";
+      if (!String(item.jobTitle || "").trim()) itemErrors.jobTitle = "Job title required";
+      if (!Number.isFinite(Number(item.fromYear)) || Number(item.fromYear) < 1900) {
+        itemErrors.fromYear = "Year must be 1900 or later";
+      }
+      if (
+        !item.isCurrent &&
+        (!Number.isFinite(Number(item.toYear)) || Number(item.toYear) < 1900)
+      ) {
+        itemErrors.toYear = "Year must be 1900 or later";
+      }
+      if (
+        !item.isCurrent &&
+        !itemErrors.fromYear &&
+        !itemErrors.toYear &&
+        (item.fromYear > item.toYear ||
+          (item.fromYear === item.toYear && item.fromMonth > item.toMonth))
+      ) {
+        itemErrors.toYear = "Start date must be before end date";
+      }
+
+      if (Object.keys(itemErrors).length > 0) {
+        nextWorkHistoryErrors[index] = itemErrors;
+      }
+    });
+
+    setWorkHistoryErrors(nextWorkHistoryErrors);
+    if (Object.keys(nextWorkHistoryErrors).length > 0) {
+      toast({
+        title: "Work history needs attention",
+        description: "Please fix the highlighted edited work history fields before saving.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const expertData: InsertExpert = {
       ...data,
       phone: data.phone || null,
@@ -439,6 +472,14 @@ export default function Experts() {
     } else {
       createMutation.mutate(expertData);
     }
+  };
+
+  const onInvalidSubmit = () => {
+    toast({
+      title: "Could not update expert",
+      description: "Please fix the highlighted fields before saving.",
+      variant: "destructive",
+    });
   };
 
   return (
@@ -716,7 +757,7 @@ export default function Experts() {
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={form.handleSubmit(onSubmit, onInvalidSubmit)} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
@@ -985,6 +1026,7 @@ export default function Experts() {
                           isCurrent: false,
                         },
                       ]);
+                      setTouchedWorkHistoryRows((current) => new Set(current).add(workHistory.length));
                     }}
                     data-testid="button-add-work-history"
                   >
@@ -1019,11 +1061,15 @@ export default function Experts() {
                                 const updated = [...workHistory];
                                 updated[idx].company = e.target.value;
                                 setWorkHistory(updated);
+                                setTouchedWorkHistoryRows((current) => new Set(current).add(idx));
                               }}
                               placeholder="e.g. Acme Corp"
                               className="border-0 p-1 h-8"
                               data-testid={`input-work-company-${idx}`}
                             />
+                            {workHistoryErrors[idx]?.company && (
+                              <p className="mt-1 text-xs text-destructive">{workHistoryErrors[idx].company}</p>
+                            )}
                           </TableCell>
                           <TableCell>
                             <Input
@@ -1032,11 +1078,15 @@ export default function Experts() {
                                 const updated = [...workHistory];
                                 updated[idx].jobTitle = e.target.value;
                                 setWorkHistory(updated);
+                                setTouchedWorkHistoryRows((current) => new Set(current).add(idx));
                               }}
                               placeholder="e.g. Senior Manager"
                               className="border-0 p-1 h-8"
                               data-testid={`input-work-jobtitle-${idx}`}
                             />
+                            {workHistoryErrors[idx]?.jobTitle && (
+                              <p className="mt-1 text-xs text-destructive">{workHistoryErrors[idx].jobTitle}</p>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-2">
@@ -1046,6 +1096,7 @@ export default function Experts() {
                                   const updated = [...workHistory];
                                   updated[idx].fromMonth = Number(value);
                                   setWorkHistory(updated);
+                                  setTouchedWorkHistoryRows((current) => new Set(current).add(idx));
                                 }}
                               >
                                 <SelectTrigger className="h-8 w-24" data-testid={`select-work-frommonth-${idx}`}>
@@ -1059,20 +1110,24 @@ export default function Experts() {
                                   ))}
                                 </SelectContent>
                               </Select>
-                            <Input
-                              type="number"
-                              value={exp.fromYear}
-                              onChange={(e) => {
-                                const updated = [...workHistory];
-                                updated[idx].fromYear = parseInt(e.target.value) || new Date().getFullYear();
-                                setWorkHistory(updated);
-                              }}
-                              placeholder="2020"
-                              className="border-0 p-1 w-24 h-8"
-                              data-testid={`input-work-fromyear-${idx}`}
-                              min="1900"
-                            />
+                              <Input
+                                type="number"
+                                value={exp.fromYear}
+                                onChange={(e) => {
+                                  const updated = [...workHistory];
+                                  updated[idx].fromYear = parseInt(e.target.value) || new Date().getFullYear();
+                                  setWorkHistory(updated);
+                                  setTouchedWorkHistoryRows((current) => new Set(current).add(idx));
+                                }}
+                                placeholder="2020"
+                                className="border-0 p-1 w-24 h-8"
+                                data-testid={`input-work-fromyear-${idx}`}
+                                min="1900"
+                              />
                             </div>
+                            {workHistoryErrors[idx]?.fromYear && (
+                              <p className="mt-1 text-xs text-destructive">{workHistoryErrors[idx].fromYear}</p>
+                            )}
                           </TableCell>
                           <TableCell>
                             {exp.isCurrent ? (
@@ -1085,6 +1140,7 @@ export default function Experts() {
                                     const updated = [...workHistory];
                                     updated[idx].toMonth = Number(value);
                                     setWorkHistory(updated);
+                                    setTouchedWorkHistoryRows((current) => new Set(current).add(idx));
                                   }}
                                 >
                                   <SelectTrigger className="h-8 w-24" data-testid={`select-work-tomonth-${idx}`}>
@@ -1098,20 +1154,24 @@ export default function Experts() {
                                     ))}
                                   </SelectContent>
                                 </Select>
-                            <Input
-                              type="number"
-                              value={exp.toYear}
-                              onChange={(e) => {
-                                const updated = [...workHistory];
-                                updated[idx].toYear = parseInt(e.target.value) || new Date().getFullYear();
-                                setWorkHistory(updated);
-                              }}
-                              placeholder="2024"
-                              className="border-0 p-1 w-24 h-8"
-                              data-testid={`input-work-toyear-${idx}`}
-                              min="1900"
-                            />
+                                <Input
+                                  type="number"
+                                  value={exp.toYear}
+                                  onChange={(e) => {
+                                    const updated = [...workHistory];
+                                    updated[idx].toYear = parseInt(e.target.value) || new Date().getFullYear();
+                                    setWorkHistory(updated);
+                                    setTouchedWorkHistoryRows((current) => new Set(current).add(idx));
+                                  }}
+                                  placeholder="2024"
+                                  className="border-0 p-1 w-24 h-8"
+                                  data-testid={`input-work-toyear-${idx}`}
+                                  min="1900"
+                                />
                               </div>
+                            )}
+                            {workHistoryErrors[idx]?.toYear && (
+                              <p className="mt-1 text-xs text-destructive">{workHistoryErrors[idx].toYear}</p>
                             )}
                           </TableCell>
                           <TableCell>
@@ -1121,6 +1181,7 @@ export default function Experts() {
                                 const updated = [...workHistory];
                                 updated[idx].isCurrent = checked === true;
                                 setWorkHistory(updated);
+                                setTouchedWorkHistoryRows((current) => new Set(current).add(idx));
                               }}
                               data-testid={`checkbox-work-current-${idx}`}
                             />
@@ -1132,6 +1193,8 @@ export default function Experts() {
                               size="icon"
                               onClick={() => {
                                 setWorkHistory(workHistory.filter((_, i) => i !== idx));
+                                setTouchedWorkHistoryRows(new Set());
+                                setWorkHistoryErrors({});
                               }}
                               data-testid={`button-remove-work-history-${idx}`}
                               className="h-8 w-8"
