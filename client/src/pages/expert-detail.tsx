@@ -256,8 +256,8 @@ function expertToForm(expert: Expert): ExpertEditForm {
     hourlyRate: String(expert.hourlyRate ?? ""),
     expectedRate: String(expert.expectedRate ?? ""),
     expectedRateCurrency: expert.expectedRateCurrency || "",
-    agreedRate: String(expert.agreedRate ?? expert.hourlyRate ?? ""),
-    agreedRateCurrency: expert.agreedRateCurrency || (expert.hourlyRate ? "USD" : ""),
+    agreedRate: String(expert.agreedRate ?? ""),
+    agreedRateCurrency: expert.agreedRateCurrency || "",
     status: expert.status || "lead",
     source: (expert as Expert & { source?: string }).source || "Inbound",
     availableNow: Boolean(expert.availableNow),
@@ -573,8 +573,8 @@ export default function ExpertDetail() {
       toast({ title: "Invalid experience", description: "Years of experience must be 0 or greater.", variant: "destructive" });
       return;
     }
-    if (agreedRate !== null && (!Number.isFinite(agreedRate) || agreedRate < 0)) {
-      toast({ title: "Invalid agreed rate", description: "Agreed rate must be 0 or greater.", variant: "destructive" });
+    if (agreedRate !== null && (!Number.isFinite(agreedRate) || agreedRate <= 0)) {
+      toast({ title: "Invalid agreed rate", description: "Agreed rate must be greater than 0.", variant: "destructive" });
       return;
     }
     if (agreedRate !== null && !formData.agreedRateCurrency) {
@@ -599,7 +599,6 @@ export default function ExpertDetail() {
       city: formData.city.trim() || null,
       timezone: formData.timezone.trim() || null,
       yearsOfExperience,
-      hourlyRate: agreedRate === null ? null : agreedRate.toFixed(2),
       agreedRate: agreedRate === null ? null : agreedRate.toFixed(2),
       agreedRateCurrency: agreedRate === null ? null : formData.agreedRateCurrency,
       status: formData.status,
