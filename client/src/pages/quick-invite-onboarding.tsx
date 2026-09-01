@@ -259,6 +259,8 @@ const languageLabels: Record<QuickInviteLanguage, string> = {
   es: "Español",
 };
 
+const rateCurrencies = ["BRL", "USD", "EUR", "GBP"] as const;
+
 const workHistoryDateLabels: Record<
   QuickInviteLanguage,
   {
@@ -347,7 +349,8 @@ export default function QuickInviteOnboarding() {
     currentTitle: "",
     currentCompany: "",
     timezone: timezones.includes(defaultTimezone) ? defaultTimezone : "America/Sao_Paulo",
-    expectedHourlyRateUsd: "",
+    expectedRate: "",
+    expectedRateCurrency: "",
     workHistory: [emptyWorkHistoryItem()],
     availabilityTimezone: timezones.includes(defaultTimezone) ? defaultTimezone : "America/Sao_Paulo",
     availabilitySlots: [] as string[],
@@ -421,7 +424,8 @@ export default function QuickInviteOnboarding() {
           consentLanguage: language,
           termsVersion: EXPERT_TERMS_VERSION,
           privacyPolicyVersion: PRIVACY_POLICY_VERSION,
-          expectedHourlyRateUsd: Number(formData.expectedHourlyRateUsd),
+          expectedRate: formData.expectedRate.trim() ? formData.expectedRate.trim() : null,
+          expectedRateCurrency: formData.expectedRate.trim() ? formData.expectedRateCurrency : null,
           yearsOfExperience: 0,
           sectorExpertise: "",
           regionalExpertise: "",
@@ -515,6 +519,11 @@ export default function QuickInviteOnboarding() {
     return `Timezone: ${formData.availabilityTimezone}; ${groupedSlots}${notes ? `; Notes: ${notes}` : ""}`;
   };
 
+  const hasExpectedRate = formData.expectedRate.trim() !== "";
+  const expectedRateIsValid =
+    !hasExpectedRate ||
+    (Number(formData.expectedRate) > 0 && Boolean(formData.expectedRateCurrency));
+
   const canContinueStep1 =
     formData.termsAccepted &&
     formData.lgpdAccepted &&
@@ -523,7 +532,7 @@ export default function QuickInviteOnboarding() {
     formData.phoneWhatsapp.trim() &&
     formData.country.trim() &&
     formData.timezone.trim() &&
-    Number(formData.expectedHourlyRateUsd) > 0 &&
+    expectedRateIsValid &&
     formData.workHistory.length > 0 &&
     formData.workHistory.every((item) => item.company.trim() && item.jobTitle.trim());
 
@@ -729,16 +738,36 @@ export default function QuickInviteOnboarding() {
                     dataTestId="select-timezone"
                   />
                 </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="expectedHourlyRateUsd">{t.expectedHourlyRateUsd}</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="expectedRate">{t.expectedRate}</Label>
                   <Input
-                    id="expectedHourlyRateUsd"
+                    id="expectedRate"
                     type="number"
-                    min="1"
-                    value={formData.expectedHourlyRateUsd}
-                    onChange={(event) => setFormData({ ...formData, expectedHourlyRateUsd: event.target.value })}
-                    data-testid="input-expected-hourly-rate-usd"
+                    min="0.01"
+                    step="0.01"
+                    placeholder={t.expectedRatePlaceholder}
+                    value={formData.expectedRate}
+                    onChange={(event) => setFormData({ ...formData, expectedRate: event.target.value })}
+                    data-testid="input-expected-rate"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="expectedRateCurrency">{t.expectedRateCurrency}</Label>
+                  <Select
+                    value={formData.expectedRateCurrency}
+                    onValueChange={(value) => setFormData({ ...formData, expectedRateCurrency: value })}
+                  >
+                    <SelectTrigger id="expectedRateCurrency" data-testid="select-expected-rate-currency">
+                      <SelectValue placeholder={t.currencyPlaceholder} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {rateCurrencies.map((currency) => (
+                        <SelectItem key={currency} value={currency}>
+                          {currency}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 

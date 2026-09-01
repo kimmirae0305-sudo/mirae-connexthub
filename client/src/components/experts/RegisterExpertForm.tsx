@@ -96,13 +96,16 @@ const createFormSchema = (t: typeof translations.en) =>
     experiences: z.array(experienceSchema).min(1, t.required),
     biography: z.string().min(50, t.required),
     workHistory: z.string().min(50, t.required),
-    hourlyRate: z.string().optional(),
-    currency: z.string().optional(),
+    expectedRate: z.string().optional(),
+    expectedRateCurrency: z.string().optional(),
     termsAccepted: z.boolean().refine((v) => v === true, t.termsRequired),
     lgpdAccepted: z.boolean().refine((v) => v === true, t.lgpdRequired),
-  }).refine((data) => !data.hourlyRate || data.currency, {
+  }).refine((data) => !data.expectedRate || data.expectedRateCurrency, {
     message: t.required,
-    path: ["currency"],
+    path: ["expectedRateCurrency"],
+  }).refine((data) => !data.expectedRate || Number(data.expectedRate) > 0, {
+    message: t.required,
+    path: ["expectedRate"],
   });
 
 type FormData = z.infer<ReturnType<typeof createFormSchema>>;
@@ -242,8 +245,8 @@ export function RegisterExpertForm({
       ],
       biography: "",
       workHistory: "",
-      hourlyRate: "",
-      currency: "",
+      expectedRate: "",
+      expectedRateCurrency: "",
       termsAccepted: false,
       lgpdAccepted: false,
     },
@@ -893,16 +896,22 @@ export function RegisterExpertForm({
                   <div className="grid gap-4 sm:grid-cols-2">
                     <FormField
                       control={form.control}
-                      name="hourlyRate"
+                      name="expectedRate"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>{t.hourlyRate} *</FormLabel>
+                          <FormLabel>{t.hourlyRate}</FormLabel>
                           <FormControl>
                             <Input
                               type="number"
+                              min={0.01}
+                              step="0.01"
                               placeholder={t.hourlyRatePlaceholder}
-                              {...field}
-                              data-testid="input-hourly-rate"
+                              value={field.value ?? ""}
+                              onChange={field.onChange}
+                              onBlur={field.onBlur}
+                              name={field.name}
+                              ref={field.ref}
+                              data-testid="input-expected-rate"
                             />
                           </FormControl>
                           <FormMessage />
@@ -911,20 +920,20 @@ export function RegisterExpertForm({
                     />
                     <FormField
                       control={form.control}
-                      name="currency"
+                      name="expectedRateCurrency"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>{t.currency} *</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
+                          <FormLabel>{t.currency}</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value ?? ""}>
                             <FormControl>
-                              <SelectTrigger data-testid="select-currency">
+                              <SelectTrigger data-testid="select-expected-rate-currency">
                                 <SelectValue placeholder={t.currencyPlaceholder} />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              {currencies.map((c) => (
+                              {currencies.filter((c) => ["BRL", "USD", "EUR", "GBP"].includes(c.code)).map((c) => (
                                 <SelectItem key={c.code} value={c.code}>
-                                  {c.symbol} {c.code} - {c.name[language]}
+                                  {c.code} - {c.name[language]}
                                 </SelectItem>
                               ))}
                             </SelectContent>

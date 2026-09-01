@@ -170,9 +170,9 @@ export const translations: Record<Language, TranslationStrings> = {
     workHistoryPlaceholder: "Descreva seu histórico profissional, principais projetos, responsabilidades e conquistas...",
     workHistoryDescription: "Um resumo detalhado do seu histórico de trabalho e experiências relevantes.",
     
-    hourlyRateTitle: "Taxa por Hora",
-    hourlyRate: "Valor por Hora",
-    hourlyRatePlaceholder: "Ex: 250",
+    hourlyRateTitle: "Taxa de Consultoria Esperada",
+    hourlyRate: "Taxa de Consultoria Esperada",
+    hourlyRatePlaceholder: "Ex: 500",
     currency: "Moeda",
     currencyPlaceholder: "Selecione a moeda",
     
@@ -275,9 +275,9 @@ export const translations: Record<Language, TranslationStrings> = {
     workHistoryPlaceholder: "Describa su historial laboral, proyectos principales, responsabilidades y logros...",
     workHistoryDescription: "Un resumen detallado de su historial laboral y experiencias relevantes.",
     
-    hourlyRateTitle: "Tarifa por Hora",
-    hourlyRate: "Valor por Hora",
-    hourlyRatePlaceholder: "Ej: 250",
+    hourlyRateTitle: "Tarifa de Consultoría Esperada",
+    hourlyRate: "Tarifa de Consultoría Esperada",
+    hourlyRatePlaceholder: "Ej: 500",
     currency: "Moneda",
     currencyPlaceholder: "Seleccione la moneda",
     
@@ -380,9 +380,9 @@ export const translations: Record<Language, TranslationStrings> = {
     workHistoryPlaceholder: "Describe your work history, key projects, responsibilities, and achievements...",
     workHistoryDescription: "A detailed summary of your work history and relevant experiences.",
     
-    hourlyRateTitle: "Hourly Rate",
-    hourlyRate: "Hourly Rate",
-    hourlyRatePlaceholder: "e.g., 250",
+    hourlyRateTitle: "Expected Consulting Rate",
+    hourlyRate: "Expected Consulting Rate",
+    hourlyRatePlaceholder: "e.g., 500",
     currency: "Currency",
     currencyPlaceholder: "Select currency",
     
