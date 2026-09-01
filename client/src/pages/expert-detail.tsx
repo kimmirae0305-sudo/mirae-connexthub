@@ -550,6 +550,10 @@ export default function ExpertDetail() {
     });
   };
 
+  const linkedCompanyByWorkHistoryIndex = new Map(
+    (companyReview?.linkedCompanies || []).map(({ index, company }) => [index, company])
+  );
+
   const restrictedCompanyByWorkHistoryIndex = new Map(
     (companyReview?.linkedCompanies || [])
       .filter(({ company }) => company.status === "restricted" || company.status === "dnc")
@@ -1257,7 +1261,7 @@ export default function ExpertDetail() {
                         <TableCell className="font-medium">
                           <div className="flex flex-wrap items-center gap-2">
                             <span>{experience.company || experience.rawCompanyName || "-"}</span>
-                            {experience.companyId && <Badge variant="outline">Linked</Badge>}
+                            {linkedCompanyByWorkHistoryIndex.has(index) && <Badge variant="outline">Linked</Badge>}
                             {restrictedCompanyByWorkHistoryIndex.has(index) && (
                               <Badge variant="destructive" className="gap-1">
                                 <AlertTriangle className="h-3 w-3" />
