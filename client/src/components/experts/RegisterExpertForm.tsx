@@ -96,10 +96,13 @@ const createFormSchema = (t: typeof translations.en) =>
     experiences: z.array(experienceSchema).min(1, t.required),
     biography: z.string().min(50, t.required),
     workHistory: z.string().min(50, t.required),
-    hourlyRate: z.string().min(1, t.required),
-    currency: z.string().min(1, t.required),
+    hourlyRate: z.string().optional(),
+    currency: z.string().optional(),
     termsAccepted: z.boolean().refine((v) => v === true, t.termsRequired),
     lgpdAccepted: z.boolean().refine((v) => v === true, t.lgpdRequired),
+  }).refine((data) => !data.hourlyRate || data.currency, {
+    message: t.required,
+    path: ["currency"],
   });
 
 type FormData = z.infer<ReturnType<typeof createFormSchema>>;
@@ -240,7 +243,7 @@ export function RegisterExpertForm({
       biography: "",
       workHistory: "",
       hourlyRate: "",
-      currency: "USD",
+      currency: "",
       termsAccepted: false,
       lgpdAccepted: false,
     },

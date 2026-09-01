@@ -2528,7 +2528,8 @@ export async function registerRoutes(
           company: expert.company,
           location: [expert.city, expert.country].filter(Boolean).join(", ") || null,
           bio: expert.bio || expert.biography || expert.expertise || null,
-          rate: expert.hourlyRate,
+          rate: expert.agreedRate || expert.hourlyRate || expert.expectedRate,
+          rateCurrency: expert.agreedRateCurrency || (expert.hourlyRate ? "USD" : expert.expectedRateCurrency),
         },
         invitation: {
           status: invitation.status,
@@ -3183,9 +3184,9 @@ export async function registerRoutes(
         jobTitle: currentExperience?.title || null,
         expertise: currentExperience?.title || null,
         industry: project.industry || null,
-        yearsOfExperience: 0,
-        hourlyRate: hourlyRate || null,
-        currency: currency || "USD",
+        yearsOfExperience: null,
+        expectedRate: hourlyRate || null,
+        expectedRateCurrency: hourlyRate ? currency : null,
         bio: biography || null,
         biography: biography || null,
         workHistory: {
@@ -6084,8 +6085,14 @@ export async function registerRoutes(
         return res.status(400).json({ error: "An expert with this email already exists" });
       }
 
+      const expectedRate = req.body?.expectedRate ?? req.body?.hourlyRate ?? null;
+      const expectedRateCurrency = req.body?.expectedRateCurrency ?? req.body?.currency ?? null;
       const expertData = {
         ...req.body,
+        hourlyRate: undefined,
+        currency: undefined,
+        expectedRate: expectedRate || null,
+        expectedRateCurrency: expectedRate ? expectedRateCurrency : null,
         recruitedBy: link.recruitedBy,
         status: "registered",
       };
@@ -6287,7 +6294,8 @@ export async function registerRoutes(
         company: currentExperience?.company || "",
         jobTitle: currentExperience?.title || "",
         yearsOfExperience,
-        hourlyRate: hourlyRate,
+        expectedRate: hourlyRate || null,
+        expectedRateCurrency: hourlyRate ? currency : null,
         bio: `${biography}\n\nWork History:\n${workHistory}\n\nExperience:\n${experienceText}`,
         status: "registered" as const,
         source: "Project" as const,
@@ -8398,10 +8406,10 @@ Please do not reply to this email with sensitive payment information. For securi
         conditions.push(inArray(experts.status, availabilityStatus));
       }
       if (Number.isFinite(hourlyRateMin)) {
-        conditions.push(sql`${experts.hourlyRate} >= ${hourlyRateMin}`);
+        conditions.push(sql`coalesce(${experts.agreedRate}, ${experts.hourlyRate}, ${experts.expectedRate}) >= ${hourlyRateMin}`);
       }
       if (Number.isFinite(hourlyRateMax)) {
-        conditions.push(sql`${experts.hourlyRate} <= ${hourlyRateMax}`);
+        conditions.push(sql`coalesce(${experts.agreedRate}, ${experts.hourlyRate}, ${experts.expectedRate}) <= ${hourlyRateMax}`);
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -8428,6 +8436,10 @@ Please do not reply to this email with sensitive payment information. For securi
           jobTitle: experts.jobTitle,
           yearsOfExperience: experts.yearsOfExperience,
           hourlyRate: experts.hourlyRate,
+          expectedRate: experts.expectedRate,
+          expectedRateCurrency: experts.expectedRateCurrency,
+          agreedRate: experts.agreedRate,
+          agreedRateCurrency: experts.agreedRateCurrency,
           bio: experts.bio,
           workHistory: experts.workHistory,
           status: experts.status,

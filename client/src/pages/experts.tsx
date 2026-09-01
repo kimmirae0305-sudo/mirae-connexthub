@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Link } from "wouter";
-import { Link2, Plus, Pencil, Trash2, Search, Users, DollarSign, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Link2, Plus, Pencil, Trash2, Search, Users, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -121,10 +121,9 @@ const expertFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
   email: z.string().email("Valid email is required"),
   phone: z.string().optional(),
-  expertise: z.string().min(1, "Expertise is required"),
-  industry: z.string().min(1, "Industry is required"),
-  yearsOfExperience: z.coerce.number().min(0, "Must be 0 or greater"),
-  hourlyRate: z.string().min(1, "Hourly rate is required"),
+  expertise: z.string().optional(),
+  industry: z.string().optional(),
+  yearsOfExperience: z.string().optional(),
   bio: z.string().optional(),
   status: z.string().default("lead"),
   source: z.string().default("Inbound"),
@@ -149,6 +148,9 @@ const expertFormSchema = z.object({
     return data.workHistory !== undefined;
   },
   { message: "Work history must be an array" }
+).refine(
+  (data) => !data.yearsOfExperience || Number(data.yearsOfExperience) >= 0,
+  { message: "Must be 0 or greater", path: ["yearsOfExperience"] }
 );
 
 type ExpertFormData = z.infer<typeof expertFormSchema>;
@@ -170,6 +172,13 @@ const industries = [
 const statuses = ["lead", "invited", "registered", "verified", "active", "available", "busy", "inactive"];
 const sourceOptions = ["Inbound", "Referral", "LinkedIn", "Internal Sourcing", "Project"];
 
+const formatRate = (rate?: string | number | null, currency?: string | null) => {
+  const amount = Number(rate);
+  if (!rate || !Number.isFinite(amount) || amount <= 0) return "-";
+  const formatted = amount.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return currency ? `${currency} ${formatted}/hr` : `${formatted}/hr`;
+};
+
 const formatStatusLabel = (status: string) =>
   status.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 
@@ -189,9 +198,9 @@ export default function Experts() {
     const params = new URLSearchParams({
       page: String(page),
       pageSize: String(pageSize),
-      hourlyRateMin: String(rateRange[0]),
-      hourlyRateMax: String(rateRange[1]),
     });
+    if (rateRange[0] > 0) params.set("hourlyRateMin", String(rateRange[0]));
+    if (rateRange[1] < 2000) params.set("hourlyRateMax", String(rateRange[1]));
     if (searchQuery.trim()) params.set("search", searchQuery.trim());
     if (statusFilter.length > 0 && statusFilter.length < statuses.length) {
       params.set("availabilityStatus", statusFilter.join(","));
@@ -238,8 +247,7 @@ export default function Experts() {
       phone: "",
       expertise: "",
       industry: "",
-      yearsOfExperience: 0,
-      hourlyRate: "",
+      yearsOfExperience: "",
       bio: "",
       status: "lead",
       source: "Inbound",
@@ -337,8 +345,7 @@ export default function Experts() {
         phone: expert.phone ?? "",
         expertise: expert.expertise ?? "",
         industry: expert.industry ?? "",
-        yearsOfExperience: expert.yearsOfExperience ?? 0,
-        hourlyRate: String(expert.hourlyRate ?? ""),
+        yearsOfExperience: expert.yearsOfExperience == null ? "" : String(expert.yearsOfExperience),
         bio: expert.bio ?? "",
         status: expert.status ?? "lead",
         source: (expert as Expert & { source?: string }).source ?? "Inbound",
@@ -359,12 +366,15 @@ export default function Experts() {
     const expertData: InsertExpert = {
       ...data,
       phone: data.phone || null,
+      expertise: data.expertise?.trim() || null,
+      industry: data.industry?.trim() || null,
+      yearsOfExperience: data.yearsOfExperience ? Number(data.yearsOfExperience) : null,
       bio: data.bio || null,
       company: data.company || null,
       jobTitle: data.jobTitle || null,
       linkedinUrl: data.linkedinUrl || null,
       source: data.source,
-      workHistory: workHistory,
+      workHistory: workHistory.length > 0 ? workHistory : null,
     };
 
     if (editingExpert) {
@@ -427,9 +437,9 @@ export default function Experts() {
 
             <div>
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-medium text-foreground">Hourly Rate Range</h3>
+                <h3 className="text-sm font-medium text-foreground">Rate Range</h3>
                 <span className="text-sm text-muted-foreground font-mono">
-                  ${rateRange[0]} - ${rateRange[1]}
+                  {rateRange[0]} - {rateRange[1]}/hr
                 </span>
               </div>
               <Slider
@@ -530,9 +540,8 @@ export default function Experts() {
                         <div className="text-xs text-muted-foreground">{expert.industry}</div>
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        <span className="inline-flex items-center justify-end gap-1">
-                          <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
-                          {Number(expert.hourlyRate).toFixed(0)}/hr
+                        <span className="inline-flex items-center justify-end">
+                          {formatRate(expert.agreedRate || expert.hourlyRate || expert.expectedRate, expert.agreedRateCurrency || expert.expectedRateCurrency)}
                         </span>
                       </TableCell>
                       <TableCell className="text-center">
@@ -754,7 +763,7 @@ export default function Experts() {
                   name="expertise"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Expertise *</FormLabel>
+                      <FormLabel>Expertise</FormLabel>
                       <FormControl>
                         <Input
                           placeholder="e.g., Supply Chain Management"
@@ -771,7 +780,7 @@ export default function Experts() {
                   name="industry"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Industry *</FormLabel>
+                      <FormLabel>Industry</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-expert-industry">
@@ -798,32 +807,13 @@ export default function Experts() {
                   name="yearsOfExperience"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Years of Experience *</FormLabel>
+                      <FormLabel>Years of Experience</FormLabel>
                       <FormControl>
                         <Input
                           type="number"
                           min={0}
                           {...field}
                           data-testid="input-years-experience"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="hourlyRate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Hourly Rate ($) *</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min={0}
-                          placeholder="150"
-                          {...field}
-                          data-testid="input-hourly-rate"
                         />
                       </FormControl>
                       <FormMessage />

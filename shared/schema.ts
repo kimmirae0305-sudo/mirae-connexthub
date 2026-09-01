@@ -186,16 +186,20 @@ export const experts = pgTable("experts", {
   city: text("city"), // City for geographic filtering
   timezone: text("timezone"),
   whatsapp: text("whatsapp"),
-  expertise: text("expertise").notNull(),
+  expertise: text("expertise"),
   sectorExpertise: text("sector_expertise"),
   regionalExpertise: text("regional_expertise"),
   areasOfExpertise: text("areas_of_expertise").array(),
-  industry: text("industry").notNull(),
+  industry: text("industry"),
   company: text("company"), // Current employer
   pastEmployers: text("past_employers").array(), // List of past employer names
   jobTitle: text("job_title"),
-  yearsOfExperience: integer("years_of_experience").notNull(),
-  hourlyRate: decimal("hourly_rate", { precision: 10, scale: 2 }).notNull(),
+  yearsOfExperience: integer("years_of_experience"),
+  hourlyRate: decimal("hourly_rate", { precision: 10, scale: 2 }),
+  expectedRate: decimal("expected_rate", { precision: 10, scale: 2 }),
+  expectedRateCurrency: text("expected_rate_currency"),
+  agreedRate: decimal("agreed_rate", { precision: 10, scale: 2 }),
+  agreedRateCurrency: text("agreed_rate_currency"),
   bio: text("bio"),
   workHistory: jsonb("work_history").$type<Array<{
     company: string;
@@ -1103,6 +1107,18 @@ export const insertProjectSchema = createInsertSchema(projects).omit({
   dueDate: coerceDate.optional(),
 });
 
+export const expertRateCurrencyCodes = ["BRL", "USD", "EUR", "GBP"] as const;
+
+const rateCurrencySchema = z.enum(expertRateCurrencyCodes).nullable().optional();
+
+const isPresentRate = (value: unknown) =>
+  value !== null && value !== undefined && String(value).trim() !== "";
+
+const isPositiveRate = (value: unknown) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0;
+};
+
 export const insertExpertSchema = createInsertSchema(experts).omit({
   id: true,
   createdAt: true,
@@ -1110,6 +1126,37 @@ export const insertExpertSchema = createInsertSchema(experts).omit({
   sourcedAt: coerceDate.optional(),
   termsAcceptedAt: coerceDate.optional(),
   privacyAcknowledgedAt: coerceDate.optional(),
+  expectedRateCurrency: rateCurrencySchema,
+  agreedRateCurrency: rateCurrencySchema,
+}).superRefine((data, ctx) => {
+  if (isPresentRate(data.expectedRate) && !data.expectedRateCurrency) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["expectedRateCurrency"],
+      message: "Expected rate currency is required when expected rate is provided.",
+    });
+  }
+  if (isPresentRate(data.expectedRate) && !isPositiveRate(data.expectedRate)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["expectedRate"],
+      message: "Expected rate must be greater than 0.",
+    });
+  }
+  if (isPresentRate(data.agreedRate) && !data.agreedRateCurrency) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["agreedRateCurrency"],
+      message: "Agreed rate currency is required when agreed rate is provided.",
+    });
+  }
+  if (isPresentRate(data.agreedRate) && !isPositiveRate(data.agreedRate)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["agreedRate"],
+      message: "Agreed rate must be greater than 0.",
+    });
+  }
 });
 
 export const insertProjectAngleSchema = createInsertSchema(projectAngles).omit({

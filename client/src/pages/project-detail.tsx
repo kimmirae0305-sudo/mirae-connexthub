@@ -2435,14 +2435,17 @@ export default function ProjectDetail() {
   };
 
   const formatAdvisorPayoutRate = (pe: EnrichedExpert) => {
-    const rawRate = pe.expectedHourlyRateUsd || pe.expert?.hourlyRate;
+    const rawRate = pe.expectedHourlyRateUsd || pe.expert?.agreedRate || pe.expert?.hourlyRate || pe.expert?.expectedRate;
+    const currency = pe.expectedHourlyRateUsd
+      ? "USD"
+      : pe.expert?.agreedRateCurrency || (pe.expert?.hourlyRate ? "USD" : pe.expert?.expectedRateCurrency);
     const numericRate = Number(rawRate);
 
     if (!rawRate || !Number.isFinite(numericRate) || numericRate <= 0) {
       return "Not set";
     }
 
-    return `USD ${numericRate.toLocaleString("en-US", { maximumFractionDigits: 0 })}/hr`;
+    return `${currency || ""} ${numericRate.toLocaleString("en-US", { maximumFractionDigits: 0 })}/hr`.trim();
   };
 
   const formatSubmittedAdvisorRate = (rate?: string | number | null) => {
@@ -6117,7 +6120,7 @@ export default function ProjectDetail() {
                 <div>
                   <p className="text-xs font-medium uppercase text-muted-foreground">Hourly rate</p>
                   <p className="text-sm">
-                    {viewingAdvisor.expert.hourlyRate ? `$${viewingAdvisor.expert.hourlyRate}/hr` : "-"}
+                    {formatAdvisorPayoutRate(viewingAdvisor)}
                   </p>
                 </div>
                 <div>

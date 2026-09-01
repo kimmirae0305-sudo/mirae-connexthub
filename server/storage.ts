@@ -3098,7 +3098,7 @@ export class DatabaseStorage implements IStorage {
         actualDurationMinutes: callRecords.actualDurationMinutes,
         projectExpertId: callRecords.projectExpertId,
         projectExpertRate: projectExperts.expectedHourlyRateUsd,
-        expertHourlyRate: experts.hourlyRate,
+        expertHourlyRate: sql<string>`coalesce(${experts.agreedRate}, ${experts.hourlyRate})`,
         existingPayableId: expertPayables.id,
       })
       .from(callRecords)
@@ -3198,7 +3198,7 @@ export class DatabaseStorage implements IStorage {
           status: callRecords.status,
           projectExpertId: callRecords.projectExpertId,
           projectExpertRate: projectExperts.expectedHourlyRateUsd,
-          expertHourlyRate: experts.hourlyRate,
+          expertHourlyRate: sql<string>`coalesce(${experts.agreedRate}, ${experts.hourlyRate})`,
         })
         .from(callRecords)
         .innerJoin(projects, eq(callRecords.projectId, projects.id))
