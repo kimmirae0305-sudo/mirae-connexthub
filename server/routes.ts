@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import {
   type AdvisorInvitationDeclineReason,
+  ExpertDeletionBlockedError,
   getAdvisorInvitationDeclineBlockReason,
   getAdvisorInvitationViewBlockReason,
   storage,
@@ -13,6 +14,7 @@ import { db } from "./db";
 import {
   insertProjectSchema,
   insertExpertSchema,
+  updateExpertSchema,
   insertVettingQuestionSchema,
   insertProjectExpertSchema,
   insertUsageRecordSchema,
@@ -106,6 +108,7 @@ const buildPublicAdvisorProjectDeclineUrl = (token: string, req: AuthRequest) =>
 };
 const buildPublicExpertPaymentDetailsUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/expert-payment-details/${token}`;
+const PRE_REGISTRATION_EXPERT_STATUSES = new Set(["lead", "invited"]);
 const normalizeExpertRatePayload = (body: Record<string, unknown>) => {
   const payload = { ...body };
   const normalizeRatePair = (rateKey: "expectedRate" | "agreedRate", currencyKey: "expectedRateCurrency" | "agreedRateCurrency") => {
@@ -4001,6 +4004,13 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Expert not found" });
       }
 
+      const normalizedStatus = String(expert.status || "").toLowerCase().trim();
+      if (!PRE_REGISTRATION_EXPERT_STATUSES.has(normalizedStatus)) {
+        return res.status(400).json({
+          error: "Onboarding links can only be generated for Lead or Invited experts.",
+        });
+      }
+
       const user = req.user;
       const token = generateRecruitmentToken();
       const link = await storage.createExpertInvitationLink({
@@ -4055,7 +4065,10 @@ export async function registerRoutes(
   app.patch("/api/experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = insertExpertSchema.partial().safeParse(normalizeExpertRatePayload(req.body));
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid expert id" });
+      }
+      const result = updateExpertSchema.safeParse(normalizeExpertRatePayload(req.body));
       if (!result.success) {
         return res.status(400).json({ error: fromZodError(result.error).message });
       }
@@ -4065,6 +4078,7 @@ export async function registerRoutes(
       }
       res.json(expert);
     } catch (error) {
+      console.error("Error updating expert:", error);
       res.status(500).json({ error: "Failed to update expert" });
     }
   });
@@ -4072,12 +4086,19 @@ export async function registerRoutes(
   app.delete("/api/experts/:id", authMiddleware, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: "Invalid expert id" });
+      }
       const deleted = await storage.deleteExpert(id);
       if (!deleted) {
         return res.status(404).json({ error: "Expert not found" });
       }
       res.status(204).send();
     } catch (error) {
+      if (error instanceof ExpertDeletionBlockedError) {
+        return res.status(409).json({ error: error.message });
+      }
+      console.error("Error deleting expert:", error);
       res.status(500).json({ error: "Failed to delete expert" });
     }
   });

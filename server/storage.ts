@@ -87,6 +87,13 @@ import {
 import { db } from "./db";
 import { eq, desc, ilike, or, and, sql, gte, lte, inArray } from "drizzle-orm";
 
+export class ExpertDeletionBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExpertDeletionBlockedError";
+  }
+}
+
 export interface CuLedgerFilters {
   startDate?: Date;
   endDate?: Date;
@@ -1954,8 +1961,49 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteExpert(id: number): Promise<boolean> {
-    const result = await db.delete(experts).where(eq(experts.id, id)).returning();
-    return result.length > 0;
+    return db.transaction(async (tx) => {
+      const [expert] = await tx.select({ id: experts.id }).from(experts).where(eq(experts.id, id));
+      if (!expert) return false;
+
+      const projectAssignments = await tx.select({ id: projectExperts.id }).from(projectExperts).where(eq(projectExperts.expertId, id)).limit(1);
+      const projectInviteLinks = await tx.select({ id: expertInvitationLinks.id }).from(expertInvitationLinks)
+        .where(and(eq(expertInvitationLinks.expertId, id), sql`${expertInvitationLinks.projectId} is not null`))
+        .limit(1);
+      const consultations = await tx.select({ id: callRecords.id }).from(callRecords).where(eq(callRecords.expertId, id)).limit(1);
+      const usage = await tx.select({ id: usageRecords.id }).from(usageRecords).where(eq(usageRecords.expertId, id)).limit(1);
+      const billable = await tx.select({ id: billableUsage.id }).from(billableUsage).where(eq(billableUsage.expertId, id)).limit(1);
+      const payables = await tx.select({ id: expertPayables.id }).from(expertPayables).where(eq(expertPayables.expertId, id)).limit(1);
+      const paymentRequests = await tx.select({ id: expertPaymentDetailRequests.id }).from(expertPaymentDetailRequests).where(eq(expertPaymentDetailRequests.expertId, id)).limit(1);
+      const advisorInvitations = await tx.select({ id: advisorProjectInvitations.id }).from(advisorProjectInvitations).where(eq(advisorProjectInvitations.expertId, id)).limit(1);
+      const advisorResponses = await tx.select({ id: advisorProjectResponses.id }).from(advisorProjectResponses).where(eq(advisorProjectResponses.expertId, id)).limit(1);
+      const activities = await tx.select({ id: projectActivities.id }).from(projectActivities).where(eq(projectActivities.expertId, id)).limit(1);
+
+      const hasProjectOrOperationalDependencies = [
+        projectAssignments,
+        projectInviteLinks,
+        consultations,
+        usage,
+        billable,
+        payables,
+        paymentRequests,
+        advisorInvitations,
+        advisorResponses,
+        activities,
+      ].some((rows) => rows.length > 0);
+
+      if (hasProjectOrOperationalDependencies) {
+        throw new ExpertDeletionBlockedError(
+          "This expert is linked to project, consultation, or finance records and cannot be deleted."
+        );
+      }
+
+      await tx
+        .delete(expertInvitationLinks)
+        .where(and(eq(expertInvitationLinks.expertId, id), sql`${expertInvitationLinks.projectId} is null`));
+
+      const result = await tx.delete(experts).where(eq(experts.id, id)).returning();
+      return result.length > 0;
+    });
   }
 
   // Project Angles
