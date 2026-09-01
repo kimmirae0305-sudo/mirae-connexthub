@@ -3168,9 +3168,13 @@ export async function registerRoutes(
         experiences,
         biography,
         workHistory,
+        expectedRate,
+        expectedRateCurrency,
         hourlyRate,
         currency,
       } = req.body;
+      const submittedExpectedRate = expectedRate ?? hourlyRate ?? null;
+      const submittedExpectedRateCurrency = expectedRateCurrency ?? currency ?? null;
 
       // Check if expert with email already exists
       const existingExpert = await storage.getExpertByEmail(email);
@@ -3211,8 +3215,8 @@ export async function registerRoutes(
         expertise: currentExperience?.title || null,
         industry: project.industry || null,
         yearsOfExperience: null,
-        expectedRate: hourlyRate || null,
-        expectedRateCurrency: hourlyRate ? currency : null,
+        expectedRate: submittedExpectedRate || null,
+        expectedRateCurrency: submittedExpectedRate ? submittedExpectedRateCurrency : null,
         bio: biography || null,
         biography: biography || null,
         workHistory: {
@@ -3353,6 +3357,8 @@ export async function registerRoutes(
         city,
         currentTitle,
         currentCompany,
+        expectedRate,
+        expectedRateCurrency,
         expectedHourlyRateUsd,
         termsAccepted,
         lgpdAccepted,
@@ -3368,6 +3374,17 @@ export async function registerRoutes(
         availability,
         conflictCheck,
       } = req.body;
+      const rawExpectedRate = expectedRate ?? req.body.hourlyRate ?? expectedHourlyRateUsd ?? null;
+      const rawExpectedRateCurrency =
+        expectedRateCurrency ?? req.body.currency ?? (expectedHourlyRateUsd ? "USD" : null);
+      const hasExpectedRate =
+        rawExpectedRate !== null &&
+        rawExpectedRate !== undefined &&
+        String(rawExpectedRate).trim() !== "";
+      const numericExpectedRate = hasExpectedRate ? Number(rawExpectedRate) : null;
+      const normalizedExpectedRateCurrency = hasExpectedRate
+        ? String(rawExpectedRateCurrency || "").trim().toUpperCase()
+        : null;
 
       const link = await storage.getExpertInvitationLinkByToken(token);
       if (!link || link.status !== "pending_onboarding" || !link.isActive) {
@@ -3406,10 +3423,25 @@ export async function registerRoutes(
         !String(city || "").trim() ||
         !String(currentTitle || "").trim() ||
         !String(currentCompany || "").trim() ||
-        !expectedHourlyRateUsd ||
         !String(availability || "").trim()
       ) {
         return res.status(400).json({ error: "Missing required onboarding fields" });
+      }
+
+      if (hasExpectedRate && (!Number.isFinite(numericExpectedRate) || numericExpectedRate! <= 0)) {
+        return res.status(400).json({ error: "Expected consulting rate must be greater than 0" });
+      }
+
+      if (hasExpectedRate && !normalizedExpectedRateCurrency) {
+        return res.status(400).json({ error: "Expected rate currency is required when expected rate is provided" });
+      }
+
+      if (
+        hasExpectedRate &&
+        normalizedExpectedRateCurrency &&
+        !["BRL", "USD", "EUR", "GBP"].includes(normalizedExpectedRateCurrency)
+      ) {
+        return res.status(400).json({ error: "Unsupported expected rate currency" });
       }
 
       const project = await storage.getProject(link.projectId);
@@ -3454,7 +3486,6 @@ export async function registerRoutes(
       const normalizedEmail = String(email).trim().toLowerCase();
       const acceptedAt = new Date();
       const consentAcceptedAt = acceptedAt;
-      const numericRate = Number(expectedHourlyRateUsd);
       const sourceOwner = link.raId
         ? await storage.getUser(link.raId)
         : link.recruitedBy
@@ -3466,9 +3497,12 @@ export async function registerRoutes(
       const safeRegionalExpertise = typeof regionalExpertise === "string" ? regionalExpertise.trim() : "";
       const safeProfessionalBio = typeof professionalBio === "string" ? professionalBio.trim() : "";
       const safeExpertise = safeSectorExpertise || project.industry || "Professional";
-      if (!Number.isFinite(numericRate) || numericRate <= 0) {
-        return res.status(400).json({ error: "Expected hourly rate must be a positive USD amount" });
-      }
+      const expectedRateFields = hasExpectedRate
+        ? {
+            expectedRate: String(numericExpectedRate),
+            expectedRateCurrency: normalizedExpectedRateCurrency,
+          }
+        : {};
 
       const existingExpert = await storage.getExpertByEmail(normalizedEmail);
       const consentAuditData = {
@@ -3500,7 +3534,7 @@ export async function registerRoutes(
             regionalExpertise: safeRegionalExpertise,
             industry: safeExpertise,
             yearsOfExperience: safeYearsOfExperience,
-            hourlyRate: String(numericRate),
+            ...expectedRateFields,
             workHistory: normalizedWorkHistory,
             biography: safeProfessionalBio,
             bio: safeProfessionalBio,
@@ -3525,7 +3559,7 @@ export async function registerRoutes(
               industry: safeSectorExpertise || existingExpert.industry || project.industry || "Professional",
               expertise: safeSectorExpertise || existingExpert.expertise || project.industry || "Professional",
               yearsOfExperience: safeYearsOfExperience,
-              hourlyRate: String(numericRate),
+              ...expectedRateFields,
               workHistory: normalizedWorkHistory,
               biography: safeProfessionalBio || existingExpert.biography || "",
               bio: safeProfessionalBio || existingExpert.bio || "",
@@ -3562,7 +3596,10 @@ export async function registerRoutes(
           invitationToken: token,
           vqAnswers: formattedAnswers,
           availabilityNote: availability || null,
-          expectedHourlyRateUsd: String(numericRate),
+          expectedHourlyRateUsd:
+            hasExpectedRate && normalizedExpectedRateCurrency === "USD"
+              ? String(numericExpectedRate)
+              : null,
           termsAccepted: true,
           lgpdAccepted: true,
           termsAcceptedAt: consentAcceptedAt,
@@ -6282,10 +6319,14 @@ export async function registerRoutes(
         experiences,
         biography,
         workHistory,
+        expectedRate,
+        expectedRateCurrency,
         hourlyRate,
         currency,
         vqAnswers,
       } = req.body;
+      const submittedExpectedRate = expectedRate ?? hourlyRate ?? null;
+      const submittedExpectedRateCurrency = expectedRateCurrency ?? currency ?? null;
       
       // Check if expert with email already exists
       const existingExpert = await storage.getExpertByEmail(email);
@@ -6338,8 +6379,8 @@ export async function registerRoutes(
         company: currentExperience?.company || "",
         jobTitle: currentExperience?.title || "",
         yearsOfExperience,
-        expectedRate: hourlyRate || null,
-        expectedRateCurrency: hourlyRate ? currency : null,
+        expectedRate: submittedExpectedRate || null,
+        expectedRateCurrency: submittedExpectedRate ? submittedExpectedRateCurrency : null,
         bio: `${biography}\n\nWork History:\n${workHistory}\n\nExperience:\n${experienceText}`,
         status: "registered" as const,
         source: "Project" as const,
@@ -6348,7 +6389,7 @@ export async function registerRoutes(
         sourcedAt: new Date(),
         termsAccepted: true,
         lgpdAccepted: true,
-        billingInfo: `Currency: ${currency}, Region: ${region || ""}, City: ${city || ""}`,
+        billingInfo: `Currency: ${submittedExpectedRateCurrency || ""}, Region: ${region || ""}, City: ${city || ""}`,
       };
       
       const result = insertExpertSchema.safeParse(expertData);
