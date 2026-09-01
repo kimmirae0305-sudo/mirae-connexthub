@@ -1449,15 +1449,22 @@ export class DatabaseStorage implements IStorage {
       if (!rawCompanyName) continue;
       if (item.companyId) {
         const company = await this.getCompany(Number(item.companyId));
-        if (company) linkedCompanies.push({ index, rawCompanyName, company });
-        continue;
+        if (company) {
+          linkedCompanies.push({ index, rawCompanyName, company });
+          continue;
+        }
       }
-      const status = COMPANY_LINK_STATUSES.has(item.companyLinkStatus) ? item.companyLinkStatus : "pending_review";
+      const status =
+        item.companyId && item.companyLinkStatus === "linked"
+          ? "pending_review"
+          : COMPANY_LINK_STATUSES.has(item.companyLinkStatus)
+            ? item.companyLinkStatus
+            : "pending_review";
       if (status === "ignored") continue;
       items.push({
         index,
         rawCompanyName,
-        companyId: item.companyId || null,
+        companyId: item.companyId && item.companyLinkStatus !== "linked" ? item.companyId : null,
         companyLinkStatus: status,
         reviewedBy: item.reviewedBy || null,
         reviewedAt: item.reviewedAt || null,
