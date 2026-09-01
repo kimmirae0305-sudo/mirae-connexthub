@@ -845,6 +845,9 @@ export default function Experts() {
                     </FormItem>
                   )}
                 />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="expectedRate"
@@ -874,8 +877,8 @@ export default function Experts() {
                   name="expectedRateCurrency"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Expected Rate Currency</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value || undefined}>
+                      <FormLabel>Currency</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value ?? ""}>
                         <FormControl>
                           <SelectTrigger data-testid="select-expected-rate-currency">
                             <SelectValue placeholder="Select currency" />
