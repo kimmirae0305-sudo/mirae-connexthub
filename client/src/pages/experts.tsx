@@ -163,6 +163,24 @@ const expertFormSchema = z.object({
 
 type ExpertFormData = z.infer<typeof expertFormSchema>;
 
+const getEmptyExpertFormValues = (): ExpertFormData => ({
+  name: "",
+  email: "",
+  phone: "",
+  expertise: "",
+  industry: "",
+  yearsOfExperience: "",
+  expectedRate: "",
+  expectedRateCurrency: "",
+  bio: "",
+  status: "lead",
+  source: "Inbound",
+  company: "",
+  jobTitle: "",
+  linkedinUrl: "",
+  workHistory: [],
+});
+
 const industries = [
   "Technology",
   "Healthcare",
@@ -255,23 +273,7 @@ export default function Experts() {
 
   const form = useForm<ExpertFormData>({
     resolver: zodResolver(expertFormSchema),
-    defaultValues: {
-      name: "",
-      email: "",
-      phone: "",
-      expertise: "",
-      industry: "",
-      yearsOfExperience: "",
-      expectedRate: "",
-      expectedRateCurrency: "",
-      bio: "",
-      status: "lead",
-      source: "Inbound",
-      company: "",
-      jobTitle: "",
-      linkedinUrl: "",
-      workHistory: [],
-    },
+    defaultValues: getEmptyExpertFormValues(),
   });
 
   const createMutation = useMutation({
@@ -279,7 +281,7 @@ export default function Experts() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/experts-with-recruiter"] });
       setIsDialogOpen(false);
-      form.reset();
+      form.reset(getEmptyExpertFormValues());
       toast({ title: "Expert registered successfully" });
     },
     onError: () => {
@@ -316,7 +318,7 @@ export default function Experts() {
       queryClient.invalidateQueries({ queryKey: ["/api/experts", updatedExpert.id] });
       setIsDialogOpen(false);
       setEditingExpert(null);
-      form.reset();
+      form.reset(getEmptyExpertFormValues());
       toast({ title: "Expert updated successfully" });
     },
     onError: () => {
@@ -375,7 +377,7 @@ export default function Experts() {
     } else {
       setEditingExpert(null);
       setWorkHistory([]);
-      form.reset();
+      form.reset(getEmptyExpertFormValues());
     }
     setIsDialogOpen(true);
   };
@@ -852,10 +854,14 @@ export default function Experts() {
                       <FormControl>
                         <Input
                           type="number"
-                          min={0}
+                          min={0.01}
                           step="0.01"
-                          placeholder=""
-                          {...field}
+                          placeholder="e.g., 500"
+                          value={field.value ?? ""}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                          ref={field.ref}
                           data-testid="input-expected-rate"
                         />
                       </FormControl>
@@ -863,16 +869,13 @@ export default function Experts() {
                     </FormItem>
                   )}
                 />
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="expectedRateCurrency"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Currency</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <FormLabel>Expected Rate Currency</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || undefined}>
                         <FormControl>
                           <SelectTrigger data-testid="select-expected-rate-currency">
                             <SelectValue placeholder="Select currency" />
