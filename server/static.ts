@@ -20,6 +20,10 @@ function resolveBuiltClientPath() {
   return builtClientPath;
 }
 
+export function serveBuiltClientIndex(res: express.Response) {
+  res.sendFile(path.join(resolveBuiltClientPath(), "index.html"));
+}
+
 export function serveStatic(app: Express) {
   const clientPath = resolveBuiltClientPath();
   const indexPath = path.join(clientPath, "index.html");

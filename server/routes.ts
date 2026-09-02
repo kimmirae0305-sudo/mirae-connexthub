@@ -99,6 +99,8 @@ const getInviteBaseUrl = (req: AuthRequest) => {
 };
 const buildPublicRecruitmentUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/r/${token}`;
 const buildPublicExpertRegistrationUrl = (token: string, req: AuthRequest) => `${getInviteBaseUrl(req)}/register/${token}`;
+const buildPublicExpertProjectInvitationUrl = (token: string, req: AuthRequest) =>
+  `${getInviteBaseUrl(req)}/expert/project-invite/${token}`;
 const buildPublicAdvisorProjectReviewUrl = (token: string, req: AuthRequest) =>
   `${getInviteBaseUrl(req)}/public/advisor-project-review/${token}`;
 const buildPublicAdvisorProjectDeclineUrl = (token: string, req: AuthRequest) => {
@@ -3914,8 +3916,7 @@ export async function registerRoutes(
         description: `Invited expert ${expert.name} to project`,
       });
 
-      const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
-      const inviteUrl = `${baseUrl}/expert/project-invite/${link.token}`;
+      const inviteUrl = buildPublicExpertProjectInvitationUrl(link.token, req as AuthRequest);
       res.json({ link, inviteUrl });
     } catch (error) {
       console.error("Error generating expert invite link:", error);
@@ -4647,8 +4648,7 @@ export async function registerRoutes(
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
       });
       
-      const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
-      const invitationUrl = `${baseUrl}/expert/project-invite/${link.token}`;
+      const invitationUrl = buildPublicExpertProjectInvitationUrl(link.token, req as AuthRequest);
       
       // Send email
       await sendExpertInvitationEmail({
@@ -4871,8 +4871,7 @@ export async function registerRoutes(
           });
           
           // Generate invitation URL
-          const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
-          const invitationUrl = `${baseUrl}/expert/project-invite/${link.token}`;
+          const invitationUrl = buildPublicExpertProjectInvitationUrl(link.token, req as AuthRequest);
           
           // Send email invitation
           let emailSent = false;
@@ -5001,8 +5000,7 @@ export async function registerRoutes(
         });
         
         // Generate invitation URL
-        const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
-        const invitationUrl = `${baseUrl}/expert/project-invite/${link.token}`;
+        const invitationUrl = buildPublicExpertProjectInvitationUrl(link.token, req as AuthRequest);
         
         // Send email invitation
         let emailSent = false;

@@ -3,7 +3,7 @@ import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { ensureDatabaseCompatibility } from "./db";
-import { serveStatic } from "./static";
+import { serveBuiltClientIndex, serveStatic } from "./static";
 import { createServer } from "http";
 import { env } from 'process';
 
@@ -14,7 +14,7 @@ const allowedOrigins = [
   "https://www.miraeconnexthub.com",
   "https://miraeconnextconnexthub-frontend.onrender.com",
   "https://mirae-connexthub-server.onrender.com",
-  "https://api.miraeconnexthub.com",
+  "https://experts.miraeconnext.com",
   "https://invite.miraeconnext.com",
   "https://www.invite.miraeconnext.com"
 ];
@@ -56,17 +56,31 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-const publicInviteHosts = new Set(["invite.miraeconnext.com", "www.invite.miraeconnext.com"]);
+const publicInviteHosts = new Set([
+  "experts.miraeconnext.com",
+  "invite.miraeconnext.com",
+  "www.invite.miraeconnext.com",
+]);
 
 function isAllowedPublicInvitePath(pathname: string) {
   return (
     /^\/r\/[^/]+\/?$/.test(pathname) ||
     /^\/register\/[^/]+\/?$/.test(pathname) ||
+    /^\/expert-invite\/[^/]+\/?$/.test(pathname) ||
+    /^\/expert\/project-invite\/[^/]+\/?$/.test(pathname) ||
+    /^\/invite\/[^/]+\/[^/]+\/[^/]+\/?$/.test(pathname) ||
+    /^\/invite\/onboarding\/[^/]+\/?$/.test(pathname) ||
+    /^\/invite\/decide\/[^/]+\/?$/.test(pathname) ||
     /^\/public\/advisor-project-review\/[^/]+\/?$/.test(pathname) ||
+    /^\/public\/expert-payment-details\/[^/]+\/?$/.test(pathname) ||
+    pathname.startsWith("/api/expert-invite/") ||
+    pathname.startsWith("/api/expert/project-invite/") ||
+    pathname.startsWith("/api/invite/") ||
     pathname.startsWith("/api/quick-invite/") ||
     pathname.startsWith("/api/invitation-links/") ||
     pathname.startsWith("/api/register-expert/") ||
     pathname.startsWith("/api/public/advisor-project-review/") ||
+    pathname.startsWith("/api/public/expert-payment-details/") ||
     pathname.startsWith("/assets/") ||
     pathname.startsWith("/attached_assets/") ||
     pathname === "/favicon.png" ||
@@ -76,10 +90,34 @@ function isAllowedPublicInvitePath(pathname: string) {
   );
 }
 
+function isAllowedPublicInvitePagePath(pathname: string) {
+  return (
+    /^\/r\/[^/]+\/?$/.test(pathname) ||
+    /^\/register\/[^/]+\/?$/.test(pathname) ||
+    /^\/expert-invite\/[^/]+\/?$/.test(pathname) ||
+    /^\/expert\/project-invite\/[^/]+\/?$/.test(pathname) ||
+    /^\/invite\/[^/]+\/[^/]+\/[^/]+\/?$/.test(pathname) ||
+    /^\/invite\/onboarding\/[^/]+\/?$/.test(pathname) ||
+    /^\/invite\/decide\/[^/]+\/?$/.test(pathname) ||
+    /^\/public\/advisor-project-review\/[^/]+\/?$/.test(pathname) ||
+    /^\/public\/expert-payment-details\/[^/]+\/?$/.test(pathname) ||
+    pathname === "/terms" ||
+    pathname === "/privacy"
+  );
+}
+
 app.use((req, res, next) => {
   const hostname = req.hostname.toLowerCase();
 
-  if (publicInviteHosts.has(hostname) && !isAllowedPublicInvitePath(req.path)) {
+  if (!publicInviteHosts.has(hostname)) {
+    return next();
+  }
+
+  if (process.env.NODE_ENV === "production" && req.method === "GET" && isAllowedPublicInvitePagePath(req.path)) {
+    return serveBuiltClientIndex(res);
+  }
+
+  if (!isAllowedPublicInvitePath(req.path)) {
     return res.status(404).send("Not found");
   }
 
