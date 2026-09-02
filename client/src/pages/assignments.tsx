@@ -37,6 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { resolveInviteUrl } from "@/lib/inviteLinks";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import type { Project, Expert, ProjectExpert, InsertProjectExpert, ExpertInvitationLink } from "@shared/schema";
@@ -124,8 +125,7 @@ export default function Assignments() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/invitation-links"] });
-      const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-      setNewInviteLink(`${baseUrl}/register/${data.token}`);
+      setNewInviteLink(resolveInviteUrl(`/register/${data.token}`));
       toast({ title: "Invitation link created" });
     },
     onError: () => {

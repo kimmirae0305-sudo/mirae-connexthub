@@ -49,7 +49,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { normalizeRole } from "@/lib/permissions";
-import { buildPublicRecruitmentUrl } from "@/lib/inviteLinks";
+import { buildPublicRecruitmentUrl, resolveInviteUrl } from "@/lib/inviteLinks";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { ExpertInvitationLink, Project, Expert } from "@shared/schema";
 
@@ -217,11 +217,11 @@ export default function Invites() {
     if (invite.inviteType === "quick") {
       inviteUrl = buildPublicRecruitmentUrl(invite.token);
     } else if (invite.inviteType === "existing" && invite.expertId) {
-      inviteUrl = `${window.location.origin}/expert/project-invite/${invite.token}`;
+      inviteUrl = resolveInviteUrl(`/expert/project-invite/${invite.token}`);
     } else if (invite.projectId) {
-      inviteUrl = `${window.location.origin}/invite/${invite.projectId}/${invite.inviteType}/${invite.token}`;
+      inviteUrl = resolveInviteUrl(`/invite/${invite.projectId}/${invite.inviteType}/${invite.token}`);
     } else {
-      inviteUrl = `${window.location.origin}/expert-invite/${invite.token}`;
+      inviteUrl = resolveInviteUrl(`/expert-invite/${invite.token}`);
     }
     
     try {
@@ -521,14 +521,14 @@ export default function Invites() {
                             )}
                             <DropdownMenuItem asChild>
                               <a 
-                                href={invite.inviteType === "quick"
-                                  ? buildPublicRecruitmentUrl(invite.token)
-                                  : invite.inviteType === "existing" && invite.expertId 
+                                href={resolveInviteUrl(invite.inviteType === "quick"
+                                  ? `/r/${invite.token}`
+                                  : invite.inviteType === "existing" && invite.expertId
                                     ? `/expert/project-invite/${invite.token}`
-                                    : invite.projectId 
+                                    : invite.projectId
                                       ? `/invite/${invite.projectId}/${invite.inviteType}/${invite.token}`
                                       : `/expert-invite/${invite.token}`
-                                }
+                                )}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 data-testid={`action-view-link-${invite.id}`}
