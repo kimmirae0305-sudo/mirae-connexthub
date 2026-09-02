@@ -1294,6 +1294,7 @@ export class DatabaseStorage implements IStorage {
     const linkedByCompanyId = new Map<number, CompanyLinkedExpertRow[]>();
     for (const expert of expertRows) {
       const workHistory = normalizeExpertWorkHistory(expert.workHistory) as any[];
+      if (!Array.isArray(workHistory)) continue;
       for (const [index, item] of workHistory.entries()) {
         const linkedCompanyId = Number(item.companyId || 0);
         if (!linkedCompanyId || (companyId && linkedCompanyId !== companyId)) continue;
