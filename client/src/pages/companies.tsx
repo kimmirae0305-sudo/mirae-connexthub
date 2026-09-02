@@ -189,7 +189,7 @@ export default function Companies() {
     return params.toString();
   }, [search, country, companyType, status, dncStatus, verificationStatus]);
 
-  const { data: companies = [], isLoading } = useQuery<CompanyRow[]>({
+  const { data: companies = [], isLoading, isError, error } = useQuery<CompanyRow[]>({
     queryKey: ["/api/companies", queryString],
     queryFn: async () => {
       const response = await apiRequest("GET", `/api/companies${queryString ? `?${queryString}` : ""}`);
@@ -343,6 +343,12 @@ export default function Companies() {
 
           {isLoading ? (
             <DataTableSkeleton columns={10} rows={8} />
+          ) : isError ? (
+            <EmptyState
+              icon={ShieldAlert}
+              title="Companies could not be loaded"
+              description={error instanceof Error ? error.message : "Please refresh the page or try again."}
+            />
           ) : companies.length > 0 ? (
             <div className="overflow-x-auto">
               <Table>
