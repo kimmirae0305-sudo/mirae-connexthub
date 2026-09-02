@@ -1394,6 +1394,57 @@ export class DatabaseStorage implements IStorage {
     return createdCompany;
   }
 
+  private async findCanonicalCompanyForWorkHistoryInput(company: CreateAndLinkCompanyInput): Promise<Company | undefined> {
+    const normalizedName = normalizeCompanyName(company.name);
+    const normalizedAlias = normalizeCompanyName(company.alias || "");
+
+    if (normalizedName) {
+      const [existingCompany] = await db
+        .select()
+        .from(companies)
+        .where(eq(companies.normalizedName, normalizedName))
+        .limit(1);
+      if (existingCompany) return existingCompany;
+
+      const [existingAlias] = await db
+        .select()
+        .from(companyAliases)
+        .where(eq(companyAliases.normalizedAlias, normalizedName))
+        .limit(1);
+      if (existingAlias) return this.getCompany(existingAlias.companyId);
+    }
+
+    if (normalizedAlias && normalizedAlias !== normalizedName) {
+      const [existingAlias] = await db
+        .select()
+        .from(companyAliases)
+        .where(eq(companyAliases.normalizedAlias, normalizedAlias))
+        .limit(1);
+      if (existingAlias) return this.getCompany(existingAlias.companyId);
+    }
+
+    return undefined;
+  }
+
+  private async ensureCompanyAlias(companyId: number, alias?: string | null): Promise<void> {
+    const trimmedAlias = String(alias || "").trim();
+    const normalizedAlias = normalizeCompanyName(trimmedAlias);
+    if (!trimmedAlias || !normalizedAlias) return;
+
+    const [existingAlias] = await db
+      .select()
+      .from(companyAliases)
+      .where(and(eq(companyAliases.companyId, companyId), eq(companyAliases.normalizedAlias, normalizedAlias)))
+      .limit(1);
+    if (existingAlias) return;
+
+    await db.insert(companyAliases).values({
+      companyId,
+      alias: trimmedAlias,
+      normalizedAlias,
+    });
+  }
+
   async updateCompany(id: number, company: Partial<InsertCompany>): Promise<Company | undefined> {
     if (String(company.verificationStatus || "").toLowerCase() === "verified" && !String(company.officialWebsite || "").trim()) {
       const existing = await this.getCompany(id);
@@ -1549,16 +1600,10 @@ export class DatabaseStorage implements IStorage {
     company: CreateAndLinkCompanyInput,
     reviewedBy: number
   ): Promise<{ expert: Expert; company: Company } | undefined> {
-    const createdCompany = await this.createCompany(company);
-    if (company.alias?.trim()) {
-      await db.insert(companyAliases).values({
-        companyId: createdCompany.id,
-        alias: company.alias.trim(),
-        normalizedAlias: normalizeCompanyName(company.alias),
-      });
-    }
-    const expert = await this.linkExpertWorkHistoryCompany(expertId, workHistoryIndex, createdCompany.id, reviewedBy);
-    return expert ? { expert, company: createdCompany } : undefined;
+    const canonicalCompany = await this.findCanonicalCompanyForWorkHistoryInput(company) || await this.createCompany(company);
+    await this.ensureCompanyAlias(canonicalCompany.id, company.alias);
+    const expert = await this.linkExpertWorkHistoryCompany(expertId, workHistoryIndex, canonicalCompany.id, reviewedBy);
+    return expert ? { expert, company: canonicalCompany } : undefined;
   }
 
   async updateExpertWorkHistoryCompanyStatus(

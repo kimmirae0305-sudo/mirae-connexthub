@@ -394,6 +394,7 @@ export default function ExpertDetail() {
     queryClient.invalidateQueries({ queryKey: ["/api/experts", expertId] });
     queryClient.invalidateQueries({ queryKey: ["/api/experts", expertId, "company-review"] });
     queryClient.invalidateQueries({ queryKey: ["/api/experts"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
   };
 
   const linkCompanyMutation = useMutation({
